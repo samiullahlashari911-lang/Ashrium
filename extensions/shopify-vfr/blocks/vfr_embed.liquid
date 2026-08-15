@@ -1,0 +1,96 @@
+{% if product %}
+  <div
+    id="ashrium-vfr-{{ block.id }}"
+    data-shop-domain="{{ shop.permanent_domain | escape }}"
+    data-sku="{{ product.selected_or_first_available_variant.sku | escape }}"
+    {{ block.shopify_attributes }}
+  ></div>
+
+  <script>
+    (function () {
+      var mount = document.getElementById('ashrium-vfr-{{ block.id }}');
+      var appOrigin = {{ block.settings.platform_url | json }};
+      var variants = {{ product.variants | json }};
+
+      if (!mount || !appOrigin) return;
+      try {
+        appOrigin = new URL(appOrigin).origin;
+      } catch (error) {
+        return;
+      }
+
+      function normalizeSize(value) {
+        return String(value || '').trim().toLowerCase();
+      }
+
+      function selectNativeVariant(size) {
+        var normalizedSize = normalizeSize(size);
+        var match = variants.find(function (variant) {
+          return Array.isArray(variant.options) && variant.options.some(function (option) {
+            return normalizeSize(option) === normalizedSize;
+          });
+        });
+
+        if (!match) return;
+
+        document.querySelectorAll('form[action*="/cart/add"]').forEach(function (form) {
+          var variantSelect = form.querySelector('select[name="id"]');
+          var variantInput = form.querySelector('input[name="id"]');
+
+          if (variantSelect) {
+            variantSelect.value = String(match.id);
+            variantSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (variantInput) {
+            variantInput.value = String(match.id);
+            variantInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        });
+      }
+
+      window.addEventListener('message', function (event) {
+        if (event.origin !== appOrigin || !event.data || event.data.source !== 'ashrium-vfr') return;
+        if (event.data.type === 'VFR_SIZE_RECOMMENDED' && event.data.payload) {
+          selectNativeVariant(event.data.payload.size);
+        }
+      });
+
+      fetch(appOrigin + '/api/v1/widget/token', {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'text/plain' },
+        body: '{}'
+      })
+        .then(function (response) {
+          return response.ok ? response.json() : null;
+        })
+        .then(function (payload) {
+          if (!payload || typeof payload.token !== 'string') return;
+
+          var script = document.createElement('script');
+          script.src = appOrigin + '/vfr-widget.js';
+          script.async = true;
+          script.dataset.embedToken = payload.token;
+          script.dataset.sku = mount.dataset.sku || '';
+          mount.appendChild(script);
+        })
+        .catch(function () {
+          console.error('[Ashrium VFR] Widget authorization failed.');
+        });
+    })();
+  </script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "Virtual fitting room",
+  "target": "section",
+  "settings": [
+    {
+      "type": "url",
+      "id": "platform_url",
+      "label": "Ashrium platform URL"
+    }
+  ]
+}
+{% endschema %}

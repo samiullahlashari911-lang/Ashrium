@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --obsidian-canvas: #090d14;
+  --obsidian-card: #111827;
+  --obsidian-hairline: #1f2937;
+  --obsidian-accent: #38bdf8;
+  --obsidian-success: #10b981;
+  --obsidian-tension: #f43f5e;
+  --strain-constricted: #f43f5e;
+  --strain-ideal: #10b981;
+  --strain-loose: #38bdf8;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-obsidian-canvas font-sans text-obsidian-ink antialiased;
+}

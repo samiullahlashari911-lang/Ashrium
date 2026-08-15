@@ -1,0 +1,6 @@
+[tool.uvicorn]
+reload = true
+reload-dir = ["backend"]
+reload-exclude = ["venv/*", ".git/*", "node_modules/*"]
+port = 8000
+host = "127.0.0.1"

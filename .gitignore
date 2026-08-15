@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Production builds
+build/
+dist/
+
+# Environment variables and local secrets
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+!.env.*.example
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets/
+
+# Logs
+*.log
+logs/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Test and coverage output
+coverage/
+
+# Local editor and OS files
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python virtual environments and cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local Supabase, Vercel, and temp artifacts
+supabase/.temp/
+.supabase/
+.vercel/
+.turbo/
+tmp/
+temp/
+*.orig
