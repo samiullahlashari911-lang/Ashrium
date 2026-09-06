@@ -86,10 +86,10 @@ const MeasurementSlider: FC<MeasurementSliderProps> = ({
   };
 
   return (
-    <label className="flex flex-col gap-2 text-sm text-slate-300">
+    <label className="flex flex-col gap-2 text-sm text-obsidian-muted">
       <span className="flex items-center justify-between">
         <span>{label}</span>
-        <span className="font-mono text-sky-200">
+        <span className="font-mono text-obsidian-accent-muted">
           {value} {unit}
         </span>
       </span>
@@ -99,7 +99,7 @@ const MeasurementSlider: FC<MeasurementSliderProps> = ({
         max={max}
         value={value}
         onChange={handleChange}
-        className="accent-sky-400"
+        className="accent-obsidian-accent"
       />
     </label>
   );
@@ -116,17 +116,17 @@ export const SandboxPreview: FC = () => {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-sky-300">Merchant VFR Sandbox</p>
-        <h1 className="mt-1 text-3xl font-bold text-slate-100">Interactive fit preview</h1>
-        <p className="mt-2 text-sm text-slate-400">
+        <p className="text-sm font-medium text-obsidian-accent-muted">Merchant VFR Sandbox</p>
+        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Interactive fit preview</h1>
+        <p className="mt-2 text-sm text-obsidian-muted">
           Test demo garments against adjustable body measurements and inspect live strain.
         </p>
       </header>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-6">
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-lg backdrop-blur">
-            <h2 className="text-lg font-semibold text-slate-100">Demo garments</h2>
+          <section className="obsidian-glass p-5">
+            <h2 className="text-lg font-semibold text-obsidian-ink">Demo garments</h2>
             <div className="mt-4 flex flex-col gap-3">
               {DEMO_GARMENTS.map((garment) => {
                 const isSelected = garment.sku === selectedSku;
@@ -139,21 +139,21 @@ export const SandboxPreview: FC = () => {
                     className={[
                       'rounded-lg border p-4 text-left transition',
                       isSelected
-                        ? 'border-sky-400/70 bg-sky-500/15'
-                        : 'border-slate-700 bg-slate-950/60 hover:border-slate-500',
+                        ? 'border-obsidian-accent/70 bg-obsidian-accent/15'
+                        : 'border-white/10 bg-obsidian-canvas/60 hover:border-white/25',
                     ].join(' ')}
                   >
-                    <span className="block font-semibold text-slate-100">{garment.name}</span>
-                    <span className="mt-1 block text-xs text-slate-400">{garment.description}</span>
+                    <span className="block font-semibold text-obsidian-ink">{garment.name}</span>
+                    <span className="mt-1 block text-xs text-obsidian-muted">{garment.description}</span>
                   </button>
                 );
               })}
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 shadow-lg backdrop-blur">
-            <h2 className="text-lg font-semibold text-slate-100">Body avatar</h2>
-            <p className="mt-1 text-sm text-slate-400">
+          <section className="obsidian-glass p-5">
+            <h2 className="text-lg font-semibold text-obsidian-ink">Body avatar</h2>
+            <p className="mt-1 text-sm text-obsidian-muted">
               Measurements update the collision body used by the live drape preview.
             </p>
             <div className="mt-5 flex flex-col gap-5">
@@ -185,10 +185,10 @@ export const SandboxPreview: FC = () => {
           </section>
         </aside>
 
-        <section className="relative min-h-[650px] rounded-xl border border-slate-800 bg-slate-900/40 p-3 shadow-lg">
+        <section className="obsidian-glass relative min-h-[650px] p-3">
           <div className="mb-3 px-2">
-            <p className="font-mono text-xs text-sky-300">{selectedGarment.sku}</p>
-            <h2 className="text-lg font-semibold text-slate-100">{selectedGarment.name}</h2>
+            <p className="font-mono text-xs text-obsidian-accent-muted">{selectedGarment.sku}</p>
+            <h2 className="text-lg font-semibold text-obsidian-ink">{selectedGarment.name}</h2>
           </div>
           <VFRCanvas
             garment={selectedGarment.garment}

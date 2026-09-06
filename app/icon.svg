@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="ashrium-icon-metal" x1="6" y1="3" x2="26" y2="29" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="0.45" stop-color="#94A3B8"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(2.55 2) scale(0.1346)">
+    <path
+      fill="url(#ashrium-icon-metal)"
+      d="M100 2 L198 65 L198 96 L181 84 L181 73 L109 27 L109 173 L141 141 L141 74 L198 117 L180 137 L180 122 L158 108 L158 149 L100 206 L42 149 L42 108 L20 122 L20 137 L2 117 L59 74 L59 141 L91 173 L91 27 L19 73 L19 84 L2 96 L2 65 Z"
+    />
+  </g>
+</svg>

@@ -1,5 +1,6 @@
 import { GarmentsWorkspace } from '@/components/dashboard/garments-workspace';
 import { listGarmentProfiles } from '@/lib/server/garments';
+import { getShopifyConnectionStatus } from '@/lib/server/shopify-credentials';
 import { getCurrentTenantId } from '@/lib/supabase/tenant';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export default async function GarmentsDashboardPage() {
           <h1 className="text-xl font-semibold text-amber-100">Tenant Authentication Required</h1>
           <p className="mt-2 text-sm text-amber-200/90">
             Sign in with a Supabase user whose JWT contains{' '}
-            <code className="rounded bg-slate-900 px-1 py-0.5">app_metadata.tenant_id</code>{' '}
+            <code className="rounded bg-obsidian-canvas px-1 py-0.5">app_metadata.tenant_id</code>{' '}
             to manage CAD garment profiles under Row Level Security.
           </p>
         </div>
@@ -22,11 +23,18 @@ export default async function GarmentsDashboardPage() {
     );
   }
 
-  const profiles = await listGarmentProfiles();
+  const [items, shopify] = await Promise.all([
+    listGarmentProfiles(),
+    getShopifyConnectionStatus(tenantId),
+  ]);
 
   return (
     <main className="min-h-screen">
-      <GarmentsWorkspace initialProfiles={profiles} />
+      <GarmentsWorkspace
+        initialItems={items}
+        shopifyConnected={shopify.connected}
+        shopDomain={shopify.shopDomain}
+      />
     </main>
   );
 }

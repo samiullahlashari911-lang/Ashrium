@@ -2,16 +2,14 @@
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
     "dev:next": "node ./node_modules/next/dist/bin/next dev",
-    "dev:launch": "cmd /c start \"\" http://localhost:3000/merchant && node ./scripts/dev.mjs",
-    "check:merchant": "node ./scripts/check-merchant-route.mjs",
+    "dev:launch": "cmd /c start \"\" http://localhost:3000/merchant/dashboard && node ./scripts/dev.mjs",
     "build": "node ./node_modules/next/dist/bin/next build",
     "start": "node ./node_modules/next/dist/bin/next start",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
-    "lint": "node ./node_modules/eslint/bin/eslint.js app components lib types middleware.ts",
-    "check": "npm run typecheck && npm run lint",
-    "test": "npm run backend:smoke",
-    "backend:dev": "python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000",
-    "backend:smoke": "python -c \"from backend.main import app; assert app.openapi()['info']['title'] == 'VFR Local Server Engine'\"",
+    "lint": "node ./node_modules/eslint/bin/eslint.js app components lib types tests middleware.ts",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "test": "node ./scripts/run-tests.mjs",
+    "merchant:invite": "node ./scripts/invite-merchant.mjs",
     "supabase:start": "npx --yes supabase@2.110.0 start",
     "supabase:verify": "npx --yes supabase@2.110.0 db reset --local",
     "supabase:stop": "npx --yes supabase@2.110.0 stop --no-backup"
@@ -29,6 +27,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.9",
     "next": "^15.5.22",

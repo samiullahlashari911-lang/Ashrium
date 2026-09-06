@@ -3,42 +3,30 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition, type ChangeEvent, type FormEvent } from 'react';
 
+import { AshriumWordmark } from '@/components/brand/ashrium-logo';
+import { AtmosphereBackdrop } from '@/components/theme/atmosphere-backdrop';
+import {
+  MERCHANT_HOME_PATH,
+  merchantPostAuthPath,
+  tenantNeedsOnboarding,
+} from '@/lib/onboarding';
 import { createClient } from '@/lib/supabase/client';
+import {
+  merchantPortalErrorCopy,
+  readMerchantPortalAccess,
+} from '@/lib/supabase/merchant-access';
 
-type AuthMode = 'sign-in' | 'sign-up';
-
-interface AuthFormValues {
-  companyName: string;
-  email: string;
-  password: string;
+interface AuthFormProps {
+  initialError: string | null;
 }
 
-const INITIAL_FORM_VALUES: AuthFormValues = {
-  companyName: '',
-  email: '',
-  password: '',
-};
-
-export function AuthForm() {
+export function AuthForm({ initialError }: AuthFormProps) {
   const router = useRouter();
-  const [mode, setMode] = useState<AuthMode>('sign-in');
-  const [formValues, setFormValues] = useState<AuthFormValues>(INITIAL_FORM_VALUES);
-  const [message, setMessage] = useState<string>('');
-  const [isError, setIsError] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState(merchantPortalErrorCopy(initialError) ?? '');
+  const [isError, setIsError] = useState(Boolean(merchantPortalErrorCopy(initialError)));
   const [isPending, startTransition] = useTransition();
-
-  const updateField = <K extends keyof AuthFormValues>(
-    field: K,
-    event: ChangeEvent<HTMLInputElement>,
-  ): void => {
-    setFormValues((current) => ({ ...current, [field]: event.target.value }));
-  };
-
-  const handleModeChange = (nextMode: AuthMode): void => {
-    setMode(nextMode);
-    setMessage('');
-    setIsError(false);
-  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -47,44 +35,10 @@ export function AuthForm() {
 
     startTransition(async () => {
       const supabase = createClient();
-      const email = formValues.email.trim();
-      const password = formValues.password;
-
-      if (mode === 'sign-up') {
-        const companyName = formValues.companyName.trim();
-        if (!companyName) {
-          setMessage('Company name is required to create a merchant account.');
-          setIsError(true);
-          return;
-        }
-
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { company_name: companyName },
-            emailRedirectTo: `${window.location.origin}/auth/callback?next=/merchant/dashboard`,
-          },
-        });
-
-        if (error) {
-          setMessage(error.message);
-          setIsError(true);
-          return;
-        }
-
-        if (data.session) {
-          await supabase.auth.refreshSession();
-          router.replace('/merchant/dashboard');
-          router.refresh();
-          return;
-        }
-
-        setMessage('Check your email to confirm your account and finish sign-in.');
-        return;
-      }
-
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
       if (error) {
         setMessage(error.message);
@@ -92,93 +46,102 @@ export function AuthForm() {
         return;
       }
 
-      router.replace('/merchant/dashboard');
+      const access = await readMerchantPortalAccess(supabase);
+      if (!access.allowed) {
+        await supabase.auth.signOut();
+        setMessage(
+          merchantPortalErrorCopy(access.reason)
+            ?? 'This email is not an invited Ashrium merchant.',
+        );
+        setIsError(true);
+        return;
+      }
+
+      const { data: tenant } = await supabase
+        .from('tenants')
+        .select('allowed_domains')
+        .eq('id', access.tenantId)
+        .maybeSingle();
+
+      router.replace(
+        merchantPostAuthPath(
+          MERCHANT_HOME_PATH,
+          tenantNeedsOnboarding(tenant?.allowed_domains),
+        ),
+      );
       router.refresh();
     });
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6">
-      <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl backdrop-blur">
-        <p className="text-sm font-medium text-sky-300">Ashrium Merchant Portal</p>
-        <h1 className="mt-2 text-2xl font-bold text-slate-100">
-          {mode === 'sign-in' ? 'Sign in to your workspace' : 'Create a merchant workspace'}
-        </h1>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-16">
+      <AtmosphereBackdrop intensity="hero" />
 
-        <div className="mt-6 grid grid-cols-2 rounded-lg border border-slate-800 bg-slate-950/60 p-1">
-          {(['sign-in', 'sign-up'] as const).map((candidateMode) => (
-            <button
-              key={candidateMode}
-              type="button"
-              onClick={() => handleModeChange(candidateMode)}
-              className={[
-                'rounded-md px-3 py-2 text-sm font-semibold transition-colors',
-                mode === candidateMode
-                  ? 'bg-sky-500/20 text-sky-100'
-                  : 'text-slate-400 hover:text-slate-100',
-              ].join(' ')}
-            >
-              {candidateMode === 'sign-in' ? 'Sign in' : 'Create account'}
-            </button>
-          ))}
+      <AshriumWordmark
+        className="absolute left-8 top-7 z-20 text-white"
+        markClassName="h-8 w-8 shrink-0"
+        wordClassName="text-sm font-medium tracking-[0.04em] text-white"
+      />
+
+      <section className="obsidian-glass relative z-10 w-full max-w-[400px] px-8 py-8">
+        <div className="pointer-events-none mb-8 flex gap-1.5" aria-hidden="true">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#4A2880]" />
+          <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
+          <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
-          {mode === 'sign-up' ? (
-            <label className="flex flex-col gap-1.5 text-sm text-slate-300">
-              Company name
-              <input
-                required
-                value={formValues.companyName}
-                onChange={(event) => updateField('companyName', event)}
-                autoComplete="organization"
-                className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-400"
-              />
-            </label>
-          ) : null}
+        <h1 className="text-[2rem] font-bold tracking-tight text-white">Merchant Portal</h1>
+        <p className="mt-2 text-base font-normal text-white/80">Sign in to your account</p>
 
-          <label className="flex flex-col gap-1.5 text-sm text-slate-300">
-            Work email
-            <input
-              required
-              type="email"
-              value={formValues.email}
-              onChange={(event) => updateField('email', event)}
-              autoComplete="email"
-              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-400"
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5 text-sm text-slate-300">
-            Password
-            <input
-              required
-              type="password"
-              minLength={8}
-              value={formValues.password}
-              onChange={(event) => updateField('password', event)}
-              autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-400"
-            />
-          </label>
-
-          {message ? (
-            <p className={`text-sm ${isError ? 'text-red-300' : 'text-emerald-300'}`}>{message}</p>
-          ) : null}
-
-          <button
-            type="submit"
-            disabled={isPending}
-            className="rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+        {message ? (
+          <p
+            role="status"
+            className={`mt-4 text-sm ${isError ? 'text-rose-300' : 'text-emerald-300'}`}
           >
-            {isPending
-              ? 'Working…'
-              : mode === 'sign-in'
-                ? 'Sign in'
-                : 'Create merchant account'}
+            {message}
+          </p>
+        ) : null}
+
+        <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4">
+          <label className="sr-only" htmlFor="merchant-email">
+            Email
+          </label>
+          <input
+            id="merchant-email"
+            required
+            type="email"
+            value={email}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setEmail(event.target.value)}
+            autoComplete="email"
+            placeholder="Email Address"
+            aria-invalid={isError}
+            className="obsidian-input"
+          />
+
+          <label className="sr-only" htmlFor="merchant-password">
+            Password
+          </label>
+          <input
+            id="merchant-password"
+            required
+            type="password"
+            minLength={8}
+            value={password}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            placeholder="Password"
+            className="obsidian-input"
+          />
+
+          <button type="submit" disabled={isPending} className="obsidian-cta mt-2 w-full">
+            {isPending ? 'Signing in…' : 'Log In'}
           </button>
         </form>
       </section>
+
+      <p className="absolute bottom-6 z-20 text-[11px] tracking-wide text-white/35">
+        Authorized by Ashrium
+      </p>
     </main>
   );
 }

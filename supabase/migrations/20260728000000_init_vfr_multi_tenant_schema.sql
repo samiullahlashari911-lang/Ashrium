@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ============================================================================
 -- merchants (tenant root)
 -- ============================================================================
-CREATE TABLE public.merchants (
+CREATE TABLE IF NOT EXISTS public.merchants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   domain TEXT NOT NULL UNIQUE,
@@ -23,7 +23,7 @@ CREATE TABLE public.merchants (
 --   shear_stiffness    S_s  (N/m)
 --   area_density       rho_a (kg/m^2)
 -- ============================================================================
-CREATE TABLE public.garment_cad_profiles (
+CREATE TABLE IF NOT EXISTS public.garment_cad_profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES public.merchants (id) ON DELETE CASCADE,
   sku TEXT NOT NULL,
@@ -37,13 +37,13 @@ CREATE TABLE public.garment_cad_profiles (
   CONSTRAINT garment_cad_profiles_tenant_sku_unique UNIQUE (tenant_id, sku)
 );
 
-CREATE INDEX garment_cad_profiles_tenant_id_idx
+CREATE INDEX IF NOT EXISTS garment_cad_profiles_tenant_id_idx
   ON public.garment_cad_profiles (tenant_id);
 
 -- ============================================================================
 -- biometric_meshes (TTL-backed session meshes)
 -- ============================================================================
-CREATE TABLE public.biometric_meshes (
+CREATE TABLE IF NOT EXISTS public.biometric_meshes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES public.merchants (id) ON DELETE CASCADE,
   session_id UUID NOT NULL,
@@ -53,11 +53,11 @@ CREATE TABLE public.biometric_meshes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX biometric_meshes_tenant_id_idx
+CREATE INDEX IF NOT EXISTS biometric_meshes_tenant_id_idx
   ON public.biometric_meshes (tenant_id);
 
 -- Supports efficient expiry sweeps and TTL cleanup jobs.
-CREATE INDEX biometric_meshes_expires_at_idx
+CREATE INDEX IF NOT EXISTS biometric_meshes_expires_at_idx
   ON public.biometric_meshes (expires_at);
 
 -- ============================================================================
@@ -87,6 +87,8 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS merchants_set_updated_at ON public.merchants;
+
 CREATE TRIGGER merchants_set_updated_at
   BEFORE UPDATE ON public.merchants
   FOR EACH ROW
@@ -100,11 +102,13 @@ ALTER TABLE public.garment_cad_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.biometric_meshes ENABLE ROW LEVEL SECURITY;
 
 -- merchants: each JWT may only access its own tenant record
+DROP POLICY IF EXISTS merchants_select_own ON public.merchants;
 CREATE POLICY merchants_select_own
   ON public.merchants
   FOR SELECT
   USING (id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS merchants_update_own ON public.merchants;
 CREATE POLICY merchants_update_own
   ON public.merchants
   FOR UPDATE
@@ -112,44 +116,52 @@ CREATE POLICY merchants_update_own
   WITH CHECK (id = public.get_current_tenant_id());
 
 -- garment_cad_profiles: full tenant-scoped CRUD
+DROP POLICY IF EXISTS garment_cad_profiles_select_tenant ON public.garment_cad_profiles;
 CREATE POLICY garment_cad_profiles_select_tenant
   ON public.garment_cad_profiles
   FOR SELECT
   USING (tenant_id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS garment_cad_profiles_insert_tenant ON public.garment_cad_profiles;
 CREATE POLICY garment_cad_profiles_insert_tenant
   ON public.garment_cad_profiles
   FOR INSERT
   WITH CHECK (tenant_id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS garment_cad_profiles_update_tenant ON public.garment_cad_profiles;
 CREATE POLICY garment_cad_profiles_update_tenant
   ON public.garment_cad_profiles
   FOR UPDATE
   USING (tenant_id = public.get_current_tenant_id())
   WITH CHECK (tenant_id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS garment_cad_profiles_delete_tenant ON public.garment_cad_profiles;
 CREATE POLICY garment_cad_profiles_delete_tenant
   ON public.garment_cad_profiles
   FOR DELETE
   USING (tenant_id = public.get_current_tenant_id());
 
 -- biometric_meshes: full tenant-scoped CRUD
+DROP POLICY IF EXISTS biometric_meshes_select_tenant ON public.biometric_meshes;
 CREATE POLICY biometric_meshes_select_tenant
   ON public.biometric_meshes
   FOR SELECT
   USING (tenant_id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS biometric_meshes_insert_tenant ON public.biometric_meshes;
 CREATE POLICY biometric_meshes_insert_tenant
   ON public.biometric_meshes
   FOR INSERT
   WITH CHECK (tenant_id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS biometric_meshes_update_tenant ON public.biometric_meshes;
 CREATE POLICY biometric_meshes_update_tenant
   ON public.biometric_meshes
   FOR UPDATE
   USING (tenant_id = public.get_current_tenant_id())
   WITH CHECK (tenant_id = public.get_current_tenant_id());
 
+DROP POLICY IF EXISTS biometric_meshes_delete_tenant ON public.biometric_meshes;
 CREATE POLICY biometric_meshes_delete_tenant
   ON public.biometric_meshes
   FOR DELETE

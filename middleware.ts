@@ -1,11 +1,24 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import type { Database } from '@/types/database';
+
 const API_PREFIX = '/api/v1/';
 const WIDGET_IFRAME_PATHS = new Set(['/widget/embed', '/widget/vfr']);
 
-function isStandaloneMerchantPath(pathname: string): boolean {
-  return pathname === '/merchant' || pathname.startsWith('/merchant/');
+function isMerchantPortalPath(pathname: string): boolean {
+  return (
+    pathname === '/sandbox'
+    || pathname.startsWith('/sandbox/')
+    || pathname === '/settings'
+    || pathname.startsWith('/settings/')
+    || pathname === '/dashboard'
+    || pathname.startsWith('/dashboard/')
+    || pathname === '/merchant'
+    || pathname.startsWith('/merchant/')
+    || pathname === '/onboarding'
+    || pathname.startsWith('/onboarding/')
+  );
 }
 
 function getRequiredPublicEnv(): { anonKey: string; url: string } | null {
@@ -52,6 +65,26 @@ function applySecurityHeaders(response: NextResponse, pathname: string): void {
   }
 }
 
+function copyCookies(from: NextResponse, to: NextResponse): NextResponse {
+  from.cookies.getAll().forEach((cookie) => {
+    to.cookies.set(cookie);
+  });
+  return to;
+}
+
+function redirectToMerchantSignIn(
+  request: NextRequest,
+  reason: 'unauthenticated' | 'no_tenant' | 'inactive',
+  sessionResponse: NextResponse,
+): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = '/sign-in';
+  url.search = `?error=${reason}`;
+  const redirectResponse = NextResponse.redirect(url);
+  applySecurityHeaders(redirectResponse, url.pathname);
+  return copyCookies(sessionResponse, redirectResponse);
+}
+
 function applyCorsHeaders(response: NextResponse, origin: string): void {
   response.headers.set('Access-Control-Allow-Origin', origin);
   response.headers.set('Access-Control-Allow-Credentials', 'true');
@@ -68,12 +101,6 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   const pathname = request.nextUrl.pathname;
   const origin = request.headers.get('origin');
   const isApiRequest = pathname.startsWith(API_PREFIX);
-
-  if (isStandaloneMerchantPath(pathname) && process.env.NODE_ENV === 'development') {
-    const response = NextResponse.next({ request });
-    applySecurityHeaders(response, pathname);
-    return response;
-  }
 
   if (isApiRequest && request.method === 'OPTIONS') {
     const response = new NextResponse(null, {
@@ -102,7 +129,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   let response = NextResponse.next({ request });
-  const supabase = createServerClient(env.url, env.anonKey, {
+  const supabase = createServerClient<Database>(env.url, env.anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -120,8 +147,30 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     },
   });
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   applySecurityHeaders(response, pathname);
+
+  if (isMerchantPortalPath(pathname)) {
+    if (!user) {
+      return redirectToMerchantSignIn(request, 'unauthenticated', response);
+    }
+
+    const { data: tenant } = await supabase
+      .from('tenants')
+      .select('status')
+      .eq('owner_user_id', user.id)
+      .maybeSingle();
+
+    if (!tenant) {
+      return redirectToMerchantSignIn(request, 'no_tenant', response);
+    }
+
+    if (tenant.status !== 'active') {
+      return redirectToMerchantSignIn(request, 'inactive', response);
+    }
+  }
 
   if (isApiRequest && isAllowedCorsOrigin(request, origin)) {
     applyCorsHeaders(response, origin);
@@ -132,6 +181,6 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|merchant).*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 };

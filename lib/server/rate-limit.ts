@@ -9,38 +9,87 @@ export interface RateLimitResult {
   resetAt: number;
 }
 
+export interface RateLimitWindowInput {
+  timestamps: readonly number[];
+  now: number;
+  limit: number;
+  windowMs: number;
+}
+
+export const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
+export const RATE_LIMITS = {
+  widgetToken: 30,
+  widgetTokenIp: 60,
+  uploadUrl: 20,
+  hmrDispatch: 20,
+  hmrStatus: 60,
+  fitRecommend: 60,
+  fitResolve: 20,
+  catalogSync: 10,
+} as const;
+
 const rateLimitWindows = new Map<string, RateLimitWindow>();
 
+export function evaluateRateLimitWindow(input: RateLimitWindowInput): {
+  timestamps: number[];
+  result: RateLimitResult;
+} {
+  if (
+    !Number.isSafeInteger(input.limit)
+    || input.limit < 1
+    || !Number.isSafeInteger(input.windowMs)
+    || input.windowMs < 1
+  ) {
+    throw new Error('Rate limit identifier, limit, and window must be valid.');
+  }
+
+  const windowStart = input.now - input.windowMs;
+  const timestamps = input.timestamps.filter((timestamp) => timestamp > windowStart);
+  const allowed = timestamps.length < input.limit;
+
+  if (allowed) {
+    timestamps.push(input.now);
+  }
+
+  const oldestTimestamp = timestamps[0] ?? input.now;
+  return {
+    timestamps,
+    result: {
+      allowed,
+      limit: input.limit,
+      remaining: Math.max(input.limit - timestamps.length, 0),
+      resetAt: oldestTimestamp + input.windowMs,
+    },
+  };
+}
+
+/** In-memory fallback used when the durable RPC is unavailable, and in unit tests. */
 export function checkRateLimit(
   identifier: string,
   limit: number,
   windowMs: number,
 ): RateLimitResult {
-  if (!identifier || !Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(windowMs) || windowMs < 1) {
+  if (!identifier) {
     throw new Error('Rate limit identifier, limit, and window must be valid.');
   }
 
-  const now = Date.now();
-  const windowStart = now - windowMs;
-  const existingWindow = rateLimitWindows.get(identifier);
-  const timestamps = existingWindow?.timestamps.filter((timestamp) => timestamp > windowStart) ?? [];
-  const allowed = timestamps.length < limit;
+  const evaluated = evaluateRateLimitWindow({
+    timestamps: rateLimitWindows.get(identifier)?.timestamps ?? [],
+    now: Date.now(),
+    limit,
+    windowMs,
+  });
 
-  if (allowed) {
-    timestamps.push(now);
-  }
-
-  if (timestamps.length === 0) {
+  if (evaluated.timestamps.length === 0) {
     rateLimitWindows.delete(identifier);
   } else {
-    rateLimitWindows.set(identifier, { timestamps });
+    rateLimitWindows.set(identifier, { timestamps: evaluated.timestamps });
   }
 
-  const oldestTimestamp = timestamps[0] ?? now;
-  return {
-    allowed,
-    limit,
-    remaining: Math.max(limit - timestamps.length, 0),
-    resetAt: oldestTimestamp + windowMs,
-  };
+  return evaluated.result;
+}
+
+export function resetRateLimitWindowsForTests(): void {
+  rateLimitWindows.clear();
 }

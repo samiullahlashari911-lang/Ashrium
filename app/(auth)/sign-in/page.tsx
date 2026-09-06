@@ -1,5 +1,10 @@
 import { AuthForm } from '@/app/(auth)/sign-in/auth-form';
 
-export default function SignInPage() {
-  return <AuthForm />;
+interface SignInPageProps {
+  searchParams: Promise<{ error?: string }>;
+}
+
+export default async function SignInPage({ searchParams }: SignInPageProps) {
+  const params = await searchParams;
+  return <AuthForm initialError={params.error ?? null} />;
 }

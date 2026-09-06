@@ -37,16 +37,16 @@ export const ReplicateKeyForm: FC<ReplicateKeyFormProps> = ({ hasActiveKey }) =>
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg backdrop-blur"
+      className="obsidian-glass p-6"
     >
-      <div className="border-b border-slate-800 pb-4">
-        <h2 className="text-lg font-semibold text-slate-100">Replicate BYOK</h2>
-        <p className="mt-1 text-sm text-slate-400">
+      <div className="border-b border-white/10 pb-4">
+        <h2 className="text-lg font-semibold text-obsidian-ink">Replicate BYOK</h2>
+        <p className="mt-1 text-sm text-obsidian-muted">
           Your key is verified with Replicate, encrypted server-side, and never displayed again.
         </p>
       </div>
 
-      <label className="mt-5 flex flex-col gap-2 text-sm font-medium text-slate-200">
+      <label className="mt-5 flex flex-col gap-2 text-sm font-medium text-obsidian-ink">
         Replicate API key
         <input
           ref={keyInputRef}
@@ -56,7 +56,7 @@ export const ReplicateKeyForm: FC<ReplicateKeyFormProps> = ({ hasActiveKey }) =>
           autoComplete="off"
           spellCheck={false}
           placeholder="r8_..."
-          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-sky-400"
+          className="obsidian-input-box font-mono text-sm"
         />
       </label>
 
@@ -67,7 +67,7 @@ export const ReplicateKeyForm: FC<ReplicateKeyFormProps> = ({ hasActiveKey }) =>
       <button
         type="submit"
         disabled={isPending}
-        className="mt-5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+        className="obsidian-cta mt-5"
       >
         {isPending ? 'Validating…' : hasActiveKey ? 'Replace key' : 'Save key'}
       </button>

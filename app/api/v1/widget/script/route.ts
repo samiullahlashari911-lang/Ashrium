@@ -39,8 +39,8 @@ function buildWidgetScript(config: WidgetScriptConfig): string {
     '  padding: 14px 20px;',
     '  font: 600 14px/1.2 Inter, system-ui, sans-serif;',
     '  color: #fff;',
-    '  background: linear-gradient(135deg, #0284c7, #0369a1);',
-    '  box-shadow: 0 10px 30px rgba(2,132,199,.45);',
+    '  background: linear-gradient(135deg, #6A32C9, #B52286);',
+    '  box-shadow: 0 10px 30px rgba(106,50,201,.45);',
     '  cursor: pointer;',
     '}',
     '.vfr-modal {',
@@ -50,17 +50,17 @@ function buildWidgetScript(config: WidgetScriptConfig): string {
     '  display: none;',
     '  align-items: center;',
     '  justify-content: center;',
-    '  background: rgba(2, 6, 23, 0.72);',
+    '  background: rgba(11, 11, 30, 0.72);',
     '}',
     '.vfr-modal.open { display: flex; }',
     '.vfr-panel {',
     '  position: relative;',
     '  width: min(96vw, 960px);',
-    '  height: min(92vh, 720px);',
+    '  height: min(92vh, 780px);',
     '  border-radius: 16px;',
     '  overflow: hidden;',
-    '  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.55);',
-    '  background: #020617;',
+    '  box-shadow: 0 20px 50px rgba(8, 6, 28, 0.55);',
+    '  background: #0B0B1E;',
     '}',
     '.vfr-close {',
     '  position: absolute;',
@@ -74,14 +74,14 @@ function buildWidgetScript(config: WidgetScriptConfig): string {
     '  font-size: 20px;',
     '  line-height: 1;',
     '  color: #e2e8f0;',
-    '  background: rgba(15, 23, 42, 0.8);',
+    '  background: rgba(11, 11, 30, 0.8);',
     '  cursor: pointer;',
     '}',
     '.vfr-frame {',
     '  width: 100%;',
     '  height: 100%;',
     '  border: 0;',
-    '  background: #020617;',
+    '  background: #0B0B1E;',
     '}'
   ].join('');
 
@@ -106,7 +106,7 @@ function buildWidgetScript(config: WidgetScriptConfig): string {
   iframe.className = 'vfr-frame';
   iframe.title = 'Ashrium Virtual Fitting Room';
   iframe.src = IFRAME_URL;
-  iframe.allow = 'fullscreen';
+  iframe.allow = 'camera; fullscreen';
   iframe.loading = 'lazy';
   iframe.referrerPolicy = 'strict-origin-when-cross-origin';
 

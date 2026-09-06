@@ -28,8 +28,8 @@
   style.textContent = [
     ':host{all:initial}',
     '.vfr-shell{box-sizing:border-box;display:block;width:100%;min-height:420px;overflow:hidden;',
-    'border-radius:16px;background:#020617;box-shadow:0 12px 36px rgba(15,23,42,.18)}',
-    '.vfr-frame{display:block;width:100%;height:clamp(420px,72vw,620px);border:0;background:#020617}',
+    'border-radius:16px;background:#0B0B1E;box-shadow:0 12px 36px rgba(8,6,28,.45)}',
+    '.vfr-frame{display:block;width:100%;height:clamp(520px,78vw,720px);border:0;background:#0B0B1E}',
   ].join('');
 
   var frame = document.createElement('iframe');
@@ -42,7 +42,7 @@
   frame.title = 'Ashrium Virtual Fitting Room';
   frame.src = frameUrl.toString();
   frame.loading = 'lazy';
-  frame.allow = 'fullscreen';
+  frame.allow = 'camera; fullscreen';
   frame.sandbox = 'allow-scripts allow-same-origin';
   frame.referrerPolicy = 'strict-origin-when-cross-origin';
 

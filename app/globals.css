@@ -3,12 +3,17 @@
 @tailwind utilities;
 
 :root {
-  --obsidian-canvas: #090d14;
-  --obsidian-card: #111827;
-  --obsidian-hairline: #1f2937;
-  --obsidian-accent: #38bdf8;
+  --obsidian-canvas: #0b0b1e;
+  --obsidian-lift: #1a1a2e;
+  --obsidian-card: #16162b;
+  --obsidian-hairline: #2a2a48;
+  --obsidian-accent: #6a32c9;
+  --obsidian-accent-end: #b52286;
   --obsidian-success: #10b981;
   --obsidian-tension: #f43f5e;
+  --obsidian-ink: #f8fafc;
+  --obsidian-muted: #a1a1b8;
+  --obsidian-subtle: #7b7b96;
   --strain-constricted: #f43f5e;
   --strain-ideal: #10b981;
   --strain-loose: #38bdf8;
@@ -20,5 +25,90 @@ body {
 }
 
 body {
-  @apply bg-obsidian-canvas font-sans text-obsidian-ink antialiased;
+  @apply font-sans text-obsidian-ink antialiased;
+  background-color: var(--obsidian-canvas);
+  background-image:
+    radial-gradient(ellipse 80% 55% at 50% 42%, rgba(106, 50, 201, 0.28), transparent 58%),
+    linear-gradient(180deg, var(--obsidian-canvas) 0%, var(--obsidian-lift) 100%);
+}
+
+@layer components {
+  .obsidian-glass {
+    border-radius: 1.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(22, 22, 43, 0.72);
+    box-shadow: 0 24px 80px rgba(8, 6, 28, 0.48);
+  }
+
+  @supports ((-webkit-backdrop-filter: blur(20px)) or (backdrop-filter: blur(20px))) {
+    .obsidian-glass {
+      background: rgba(255, 255, 255, 0.07);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+    }
+  }
+
+  .obsidian-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background-image: linear-gradient(
+      90deg,
+      var(--obsidian-accent) 0%,
+      var(--obsidian-accent-end) 100%
+    );
+    padding: 0.75rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: #ffffff;
+    box-shadow: 0 12px 32px rgba(106, 50, 201, 0.35);
+    transition: filter 150ms ease;
+  }
+
+  .obsidian-cta:hover {
+    filter: brightness(1.08);
+  }
+
+  .obsidian-cta:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    filter: none;
+  }
+
+  .obsidian-input {
+    width: 100%;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(11, 11, 30, 0.78);
+    padding: 0.85rem 1.25rem;
+    font-size: 0.875rem;
+    color: var(--obsidian-ink);
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+
+  .obsidian-input::placeholder {
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .obsidian-input:focus {
+    border-color: rgba(255, 255, 255, 0.28);
+  }
+
+  .obsidian-input-box {
+    width: 100%;
+    border-radius: 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(11, 11, 30, 0.7);
+    padding: 0.5rem 0.75rem;
+    color: var(--obsidian-ink);
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+
+  .obsidian-input-box:focus {
+    border-color: rgba(255, 255, 255, 0.28);
+  }
 }

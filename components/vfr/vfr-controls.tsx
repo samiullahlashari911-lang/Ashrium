@@ -30,12 +30,12 @@ const ToggleButton: FC<ToggleButtonProps> = ({
     className={[
       'flex w-full flex-col rounded-lg border px-3 py-2 text-left transition-colors',
       isActive
-        ? 'border-sky-400/70 bg-sky-500/15 text-sky-100'
-        : 'border-slate-700 bg-slate-900/70 text-slate-200 hover:border-slate-500',
+        ? 'border-obsidian-accent/70 bg-obsidian-accent/15 text-obsidian-ink'
+        : 'border-white/10 bg-obsidian-canvas/70 text-obsidian-ink hover:border-white/25',
     ].join(' ')}
   >
     <span className="text-sm font-semibold">{label}</span>
-    <span className="text-xs text-slate-400">{description}</span>
+    <span className="text-xs text-obsidian-muted">{description}</span>
   </button>
 );
 
@@ -50,11 +50,11 @@ export const VFRControls: FC<VFRControlsProps> = ({
 
   return (
     <aside
-      className={`${className} rounded-xl border border-slate-800 bg-slate-950/85 p-4 shadow-xl backdrop-blur-md`}
+      className={`${className} obsidian-glass p-4`}
     >
-      <header className="mb-3 border-b border-slate-800 pb-2">
-        <h2 className="text-sm font-semibold text-slate-100">Viewport Controls</h2>
-        <p className="text-xs text-slate-400">Garment drape & strain visualization</p>
+      <header className="mb-3 border-b border-white/10 pb-2">
+        <h2 className="text-sm font-semibold text-obsidian-ink">Viewport Controls</h2>
+        <p className="text-xs text-obsidian-muted">Garment drape & strain visualization</p>
       </header>
 
       <div className="flex flex-col gap-2">
@@ -80,8 +80,8 @@ export const VFRControls: FC<VFRControlsProps> = ({
         />
       </div>
 
-      <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-xs text-slate-300">
-        <p className="mb-2 font-semibold text-slate-100">Strain Legend</p>
+      <div className="mt-4 rounded-lg border border-white/10 bg-obsidian-canvas/70 p-3 text-xs text-obsidian-muted">
+        <p className="mb-2 font-semibold text-obsidian-ink">Strain Legend</p>
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-full bg-red-500" />

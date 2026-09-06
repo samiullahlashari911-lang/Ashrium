@@ -4,11 +4,13 @@ import { useEffect, useRef, type FC } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+// PBD cloth is an optional debug path. Storefront rendering uses AnnyCanvas.
 import {
   createClothFaceIndices,
   createGarmentClothGrid,
   PbdClothSimulator,
 } from '@/lib/graphics/pbd-cloth';
+import { disposeRendererSession } from '@/lib/graphics/dispose-session';
 import {
   computeVertexStrainColors,
   computeVertexStrains,
@@ -37,7 +39,7 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
   garment,
   config,
   avatar = DEFAULT_AVATAR,
-  className = 'w-full h-[560px] relative overflow-hidden rounded-xl bg-slate-950',
+  className = 'w-full h-[560px] relative overflow-hidden rounded-xl bg-obsidian-canvas',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const configRef = useRef<ViewportConfig>(config);
@@ -237,31 +239,14 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
 
     return () => {
       window.removeEventListener('resize', handleResize);
-
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-      }
-
-      controls.dispose();
-
-      avatarGeometry.dispose();
-      avatarMaterial.dispose();
-      garmentGeometry.dispose();
-      fabricTexture.dispose();
-      fabricMaterial.dispose();
-      heatmapMaterial.dispose();
-      floorGeometry.dispose();
-      floorMaterial.dispose();
-      keyLight.shadow.map?.dispose();
-
-      renderer.forceContextLoss();
-      renderer.dispose();
-
-      if (renderer.domElement.parentNode === mountElement) {
-        mountElement.removeChild(renderer.domElement);
-      }
-
-      scene.clear();
+      disposeRendererSession({
+        animationFrameId,
+        controls,
+        scene,
+        renderer,
+        mountElement,
+        extras: [heatmapMaterial, fabricTexture],
+      });
     };
   }, [
     avatar.chestCm,

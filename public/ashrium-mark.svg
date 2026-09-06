@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 208" fill="none" role="img" aria-label="Ashrium">
+  <defs>
+    <linearGradient id="ashrium-mark-metal" x1="28" y1="8" x2="172" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="0.22" stop-color="#E2E8F0"/>
+      <stop offset="0.48" stop-color="#94A3B8"/>
+      <stop offset="0.68" stop-color="#CBD5E1"/>
+      <stop offset="1" stop-color="#64748B"/>
+    </linearGradient>
+    <linearGradient id="ashrium-mark-sheen" x1="100" y1="2" x2="100" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="0.42" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path
+    fill="url(#ashrium-mark-metal)"
+    d="M100 2 L198 65 L198 96 L181 84 L181 73 L109 27 L109 173 L141 141 L141 74 L198 117 L180 137 L180 122 L158 108 L158 149 L100 206 L42 149 L42 108 L20 122 L20 137 L2 117 L59 74 L59 141 L91 173 L91 27 L19 73 L19 84 L2 96 L2 65 Z"
+  />
+  <path
+    fill="url(#ashrium-mark-sheen)"
+    d="M100 2 L198 65 L198 96 L181 84 L181 73 L109 27 L109 173 L141 141 L141 74 L198 117 L180 137 L180 122 L158 108 L158 149 L100 206 L42 149 L42 108 L20 122 L20 137 L2 117 L59 74 L59 141 L91 173 L91 27 L19 73 L19 84 L2 96 L2 65 Z"
+  />
+</svg>

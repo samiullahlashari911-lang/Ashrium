@@ -1,7 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { requireCurrentTenantId } from '@/lib/supabase/tenant';
-
 const TOKEN_TTL_SECONDS = 15 * 60;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -110,6 +108,7 @@ export function verifyWidgetEmbedToken(token: string): WidgetEmbedClaims | null 
 }
 
 export async function createWidgetEmbedConfig(origin: string, sku?: string): Promise<WidgetEmbedConfig> {
+  const { requireCurrentTenantId } = await import('@/lib/supabase/tenant');
   const tenantId = await requireCurrentTenantId();
   const token = createWidgetEmbedToken(tenantId, sku?.trim() || undefined);
   const params = new URLSearchParams({ token });

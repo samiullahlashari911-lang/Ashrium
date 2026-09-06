@@ -1,21 +1,87 @@
-import type { SmplxMeshGeometry, SmplxParameters } from '@/types/hmr';
+import {
+  ANNY_PHENOTYPE_DIM,
+  ANNY_PHENOTYPE_LABELS,
+  ANNY_TOPOLOGY_VERSION,
+  MHR_BODY_IDENTITY_DIM,
+  MHR_IDENTITY_DIM,
+  MHR_MODEL_PARAM_DIM,
+  MHR_SKELETON_DIM,
+  MHR_TOPOLOGY_VERSION,
+  MHR_VERTEX_COUNT,
+  type AnnyDerivedMeasurements,
+  type AnnyParametricVector,
+  type AnnyPhenotype,
+  type CaptureSex,
+  type MhrParametricVector,
+} from '@/types/hmr';
 
-const MOCK_DELAY_MS = 500;
-
-const SMPLX_BETA_COUNT = 10;
-const SMPLX_POSE_COUNT = 165;
-
-export interface RunHmrEstimationInput {
-  imageUrl: string;
+export interface RunAnnyFitInput {
+  frontImageUrl: string;
+  sideImageUrl: string;
+  heightCm: number;
+  sex: CaptureSex;
+  weightKg?: number;
 }
 
-export interface DispatchHmrPredictionInput extends RunHmrEstimationInput {
+export interface DispatchAnnyFitPredictionInput extends RunAnnyFitInput {
   webhookUrl: string;
 }
 
 export interface ReplicatePredictionReceipt {
   id: string;
   status: string;
+}
+
+export interface AnnyFitModelVersionRef {
+  configured: string;
+  versionId: string;
+  owner: string | null;
+  name: string | null;
+}
+
+export interface AnnyFitCogVersionConfirmation extends AnnyFitModelVersionRef {
+  cogVersion: string | null;
+}
+
+export interface ReplicateDeploymentRef {
+  configured: string;
+  owner: string;
+  name: string;
+}
+
+export interface ReplicateHardwarePin {
+  sku: string;
+  pinMode: 'deployment' | 'model_dashboard';
+  deployment: string | null;
+}
+
+export interface ReplicateRuntimeConfig {
+  tokenConfigured: boolean;
+  modelVersionConfigured: boolean;
+  deploymentConfigured: boolean;
+  modelVersion: string | null;
+  hardware: ReplicateHardwarePin;
+  operatorMessage: string | null;
+}
+
+export interface ReplicateDeploymentStatus {
+  owner: string;
+  name: string;
+  hardware: string | null;
+  minInstances: number | null;
+  maxInstances: number | null;
+  model: string | null;
+  version: string | null;
+}
+
+export interface SessionGpuResult {
+  action: 'warm' | 'sleep' | 'status';
+  confirmation: AnnyFitCogVersionConfirmation;
+  hardware: ReplicateHardwarePin;
+  deployment: ReplicateDeploymentStatus;
+  hardwareUpdated: boolean;
+  minInstancesUpdated: boolean;
+  versionMatchesDeployment: boolean;
 }
 
 interface ReplicatePredictionResponse {
@@ -25,204 +91,627 @@ interface ReplicatePredictionResponse {
   error: string | null;
 }
 
-export function isReplicateMockMode(): boolean {
-  return process.env.REPLICATE_API_TOKEN === 'mock';
+const ANNY_FIT_VERSION_ID_PATTERN = /^[0-9a-f]{64}$/i;
+const ANNY_FIT_NAMED_VERSION_PATTERN =
+  /^([a-z0-9](?:[a-z0-9_-]{0,38}[a-z0-9])?)\/([a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?):([0-9a-f]{64})$/i;
+const REPLICATE_DEPLOYMENT_PATTERN =
+  /^([a-z0-9](?:[a-z0-9_-]{0,38}[a-z0-9])?)\/([a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?)$/i;
+const REPLICATE_HARDWARE_SKU_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Official Replicate SKU for Nvidia A100 80GB. Predictions cannot set this field. */
+export const REPLICATE_A100_80GB_SKU = 'gpu-a100-large';
+
+export function describeMissingReplicateToken(): string {
+  return [
+    'REPLICATE_API_TOKEN is required for live inference.',
+    'Add it to .env.local as REPLICATE_API_TOKEN.',
+    'There is no mock fallback.',
+  ].join(' ');
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+export function describeMissingReplicateModelVersion(): string {
+  return [
+    'Missing environment variable: REPLICATE_HMR_MODEL_VERSION.',
+    'Set it in .env.local to the pushed Cog version: a 64-character hash, or owner/name:<hash>.',
+    'Create a private Replicate model, cog push the tree in cog/, then pin that version on a Deployment.',
+  ].join(' ');
+}
+
+export function describeMissingReplicateDeployment(): string {
+  return [
+    'Missing environment variable: REPLICATE_DEPLOYMENT.',
+    'Create a Replicate Deployment on gpu-a100-large for the pushed Cog and set REPLICATE_DEPLOYMENT=owner/name.',
+    'Shopper inference and session Warm/Sleep use the Deployments API. There is no mock fallback.',
+  ].join(' ');
 }
 
 function getReplicateApiToken(): string {
-  const token = process.env.REPLICATE_API_TOKEN;
-  if (!token || token === 'mock') {
-    throw new Error('REPLICATE_API_TOKEN is required for live inference');
+  const token = process.env.REPLICATE_API_TOKEN?.trim();
+  if (!token) {
+    throw new Error(describeMissingReplicateToken());
   }
 
   return token;
 }
 
+export function parseReplicateHardwareSku(configured: string): string {
+  const sku = configured.trim();
+  if (!REPLICATE_HARDWARE_SKU_PATTERN.test(sku)) {
+    throw new Error(
+      'REPLICATE_HARDWARE must be a Replicate hardware SKU such as gpu-a100-large (Nvidia A100 80GB).',
+    );
+  }
+
+  return sku;
+}
+
+export function getReplicateHardwareSku(): string {
+  const configured = process.env.REPLICATE_HARDWARE?.trim();
+  if (!configured) {
+    return REPLICATE_A100_80GB_SKU;
+  }
+
+  return parseReplicateHardwareSku(configured);
+}
+
+export function parseReplicateDeploymentRef(configured: string): ReplicateDeploymentRef {
+  const namedMatch = configured.trim().match(REPLICATE_DEPLOYMENT_PATTERN);
+  if (!namedMatch || !namedMatch[1] || !namedMatch[2]) {
+    throw new Error('REPLICATE_DEPLOYMENT must be owner/name of a Replicate deployment.');
+  }
+
+  return {
+    configured: configured.trim(),
+    owner: namedMatch[1],
+    name: namedMatch[2],
+  };
+}
+
+export function getReplicateDeploymentRef(): ReplicateDeploymentRef | null {
+  const configured = process.env.REPLICATE_DEPLOYMENT?.trim();
+  if (!configured) {
+    return null;
+  }
+
+  return parseReplicateDeploymentRef(configured);
+}
+
+export function requireReplicateDeploymentRef(): ReplicateDeploymentRef {
+  const deployment = getReplicateDeploymentRef();
+  if (!deployment) {
+    throw new Error(describeMissingReplicateDeployment());
+  }
+
+  return deployment;
+}
+
+export function getReplicateHardwarePin(): ReplicateHardwarePin {
+  const deployment = getReplicateDeploymentRef();
+  return {
+    sku: getReplicateHardwareSku(),
+    pinMode: deployment ? 'deployment' : 'model_dashboard',
+    deployment: deployment?.configured ?? null,
+  };
+}
+
+export function inspectReplicateRuntimeConfig(): ReplicateRuntimeConfig {
+  const tokenConfigured = Boolean(process.env.REPLICATE_API_TOKEN?.trim());
+  const rawVersion = process.env.REPLICATE_HMR_MODEL_VERSION?.trim() ?? '';
+  let modelVersion: string | null = null;
+  let versionError: string | null = null;
+
+  if (rawVersion) {
+    try {
+      parseAnnyFitModelVersionRef(rawVersion);
+      modelVersion = rawVersion;
+    } catch (error) {
+      versionError = error instanceof Error ? error.message : describeMissingReplicateModelVersion();
+    }
+  }
+
+  let hardware: ReplicateHardwarePin = {
+    sku: REPLICATE_A100_80GB_SKU,
+    pinMode: 'model_dashboard',
+    deployment: null,
+  };
+  let hardwareError: string | null = null;
+  let deploymentError: string | null = null;
+
+  try {
+    hardware = getReplicateHardwarePin();
+  } catch (error) {
+    hardwareError = error instanceof Error ? error.message : 'REPLICATE_HARDWARE is invalid.';
+  }
+
+  const deploymentConfigured = hardware.deployment !== null;
+  if (tokenConfigured && modelVersion && !deploymentConfigured && !hardwareError) {
+    deploymentError = describeMissingReplicateDeployment();
+  }
+
+  const operatorMessage = !tokenConfigured
+    ? describeMissingReplicateToken()
+    : !modelVersion
+      ? (versionError ?? describeMissingReplicateModelVersion())
+      : (deploymentError ?? hardwareError);
+
+  return {
+    tokenConfigured,
+    modelVersionConfigured: modelVersion !== null,
+    deploymentConfigured,
+    modelVersion,
+    hardware,
+    operatorMessage,
+  };
+}
+
+export function parseAnnyFitModelVersionRef(configured: string): AnnyFitModelVersionRef {
+  if (ANNY_FIT_VERSION_ID_PATTERN.test(configured)) {
+    return {
+      configured,
+      versionId: configured.toLowerCase(),
+      owner: null,
+      name: null,
+    };
+  }
+
+  const namedMatch = configured.match(ANNY_FIT_NAMED_VERSION_PATTERN);
+  if (!namedMatch || !namedMatch[1] || !namedMatch[2] || !namedMatch[3]) {
+    throw new Error(
+      'REPLICATE_HMR_MODEL_VERSION must be a 64-character Cog version hash, or owner/name:<hash>',
+    );
+  }
+
+  return {
+    configured,
+    owner: namedMatch[1],
+    name: namedMatch[2],
+    versionId: namedMatch[3].toLowerCase(),
+  };
+}
+
+export function getAnnyFitModelVersion(): string {
+  const modelVersion = process.env.REPLICATE_HMR_MODEL_VERSION?.trim();
+  if (!modelVersion) {
+    throw new Error(describeMissingReplicateModelVersion());
+  }
+
+  parseAnnyFitModelVersionRef(modelVersion);
+  return modelVersion;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isNumberArray(value: unknown): value is number[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'number');
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
-function appendBox(
-  vertices: number[],
-  faces: number[],
-  centerX: number,
-  centerY: number,
-  centerZ: number,
-  sizeX: number,
-  sizeY: number,
-  sizeZ: number,
-): void {
-  const halfX = sizeX / 2;
-  const halfY = sizeY / 2;
-  const halfZ = sizeZ / 2;
-  const baseIndex = vertices.length / 3;
-
-  const boxVertices: readonly [number, number, number][] = [
-    [centerX - halfX, centerY - halfY, centerZ - halfZ],
-    [centerX + halfX, centerY - halfY, centerZ - halfZ],
-    [centerX + halfX, centerY + halfY, centerZ - halfZ],
-    [centerX - halfX, centerY + halfY, centerZ - halfZ],
-    [centerX - halfX, centerY - halfY, centerZ + halfZ],
-    [centerX + halfX, centerY - halfY, centerZ + halfZ],
-    [centerX + halfX, centerY + halfY, centerZ + halfZ],
-    [centerX - halfX, centerY + halfY, centerZ + halfZ],
-  ];
-
-  for (const [x, y, z] of boxVertices) {
-    vertices.push(x, y, z);
+function flattenNumberArray(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
   }
 
-  const boxFaces: readonly [number, number, number][] = [
-    [0, 1, 2],
-    [0, 2, 3],
-    [4, 6, 5],
-    [4, 7, 6],
-    [0, 4, 5],
-    [0, 5, 1],
-    [2, 6, 7],
-    [2, 7, 3],
-    [0, 3, 7],
-    [0, 7, 4],
-    [1, 5, 6],
-    [1, 6, 2],
-  ];
+  const flattened: number[] = [];
+  const stack: unknown[] = [...value];
 
-  for (const [a, b, c] of boxFaces) {
-    faces.push(baseIndex + a, baseIndex + b, baseIndex + c);
+  while (stack.length > 0) {
+    const entry = stack.shift();
+    if (Array.isArray(entry)) {
+      stack.unshift(...entry);
+      continue;
+    }
+
+    if (!isFiniteNumber(entry)) {
+      return null;
+    }
+
+    flattened.push(entry);
   }
+
+  return flattened.length > 0 ? flattened : null;
 }
 
-function buildMockMeshGeometry(): SmplxMeshGeometry {
-  const vertices: number[] = [];
-  const faces: number[] = [];
+function readFirstPresent(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in record) {
+      return record[key];
+    }
+  }
 
-  appendBox(vertices, faces, 0, 1.62, 0, 0.2, 0.24, 0.2);
-  appendBox(vertices, faces, 0, 1.25, 0, 0.42, 0.55, 0.22);
-  appendBox(vertices, faces, -0.28, 1.05, 0, 0.14, 0.42, 0.14);
-  appendBox(vertices, faces, 0.28, 1.05, 0, 0.14, 0.42, 0.14);
-  appendBox(vertices, faces, -0.12, 0.55, 0, 0.16, 0.48, 0.16);
-  appendBox(vertices, faces, 0.12, 0.55, 0, 0.16, 0.48, 0.16);
-  appendBox(vertices, faces, -0.12, 0.1, 0, 0.14, 0.5, 0.14);
-  appendBox(vertices, faces, 0.12, 0.1, 0, 0.14, 0.5, 0.14);
-
-  return { vertices, faces };
+  return undefined;
 }
 
-function buildMockSmplxParameters(): SmplxParameters {
-  const betas = [
-    0.12,
-    -0.08,
-    0.05,
-    0.03,
-    -0.02,
-    0.01,
-    -0.04,
-    0.06,
-    -0.01,
-    0.02,
-  ];
+function parsePhenotype(value: unknown): AnnyPhenotype {
+  const fromArray = flattenNumberArray(value);
+  if (fromArray && fromArray.length === ANNY_PHENOTYPE_DIM) {
+    return fromArray as AnnyPhenotype;
+  }
 
-  const pose = Array.from({ length: SMPLX_POSE_COUNT }, (_, index) => {
-    if (index < 3) {
-      return 0.08;
+  if (!isRecord(value)) {
+    throw new Error(`ANNY-Fit phenotype must contain ${ANNY_PHENOTYPE_DIM} values`);
+  }
+
+  const assembled = ANNY_PHENOTYPE_LABELS.map((label) => {
+    const entry = value[label];
+    if (!isFiniteNumber(entry)) {
+      throw new Error(`ANNY-Fit phenotype.${label} must be a finite number`);
     }
 
-    if (index >= 3 && index < 6) {
-      return -0.04;
-    }
-
-    return index % 11 === 0 ? 0.015 : 0;
+    return entry;
   });
 
-  const trans: [number, number, number] = [0.0, 0.0, 2.4];
-
-  return {
-    betas,
-    pose,
-    trans,
-    mesh: buildMockMeshGeometry(),
-  };
+  return assembled as AnnyPhenotype;
 }
 
-function parseMeshGeometry(value: unknown): SmplxMeshGeometry {
+function parseDerivedMeasurements(value: unknown): AnnyDerivedMeasurements {
   if (!isRecord(value)) {
-    throw new Error('Replicate output mesh must be an object');
+    throw new Error('derived_measurements must be an object');
   }
 
-  const { vertices, faces } = value;
+  const chest = readFirstPresent(value, ['chest_cm', 'chest', 'bust_cm', 'bust']);
+  const waist = readFirstPresent(value, ['waist_cm', 'waist']);
+  const hip = readFirstPresent(value, ['hip_cm', 'hip', 'hips_cm', 'hips']);
 
-  if (!isNumberArray(vertices)) {
-    throw new Error('Replicate output mesh.vertices must be a number array');
+  if (!isFiniteNumber(chest) || chest <= 0) {
+    throw new Error('derived_measurements.chest_cm must be a positive number');
   }
 
-  if (!isNumberArray(faces)) {
-    throw new Error('Replicate output mesh.faces must be a number array');
+  if (!isFiniteNumber(waist) || waist <= 0) {
+    throw new Error('derived_measurements.waist_cm must be a positive number');
   }
 
-  return { vertices, faces };
-}
-
-function mapReplicateOutputToSmplxParameters(output: unknown): SmplxParameters {
-  if (!isRecord(output)) {
-    throw new Error('Replicate output must be an object');
-  }
-
-  const betas = output.betas;
-  const pose = output.pose;
-  const trans = output.trans;
-  const mesh = output.mesh;
-
-  if (!isNumberArray(betas) || betas.length !== SMPLX_BETA_COUNT) {
-    throw new Error(`Replicate output betas must contain ${SMPLX_BETA_COUNT} values`);
-  }
-
-  if (!isNumberArray(pose) || pose.length !== SMPLX_POSE_COUNT) {
-    throw new Error(`Replicate output pose must contain ${SMPLX_POSE_COUNT} values`);
-  }
-
-  if (!isNumberArray(trans) || trans.length !== 3) {
-    throw new Error('Replicate output trans must contain 3 values');
+  if (!isFiniteNumber(hip) || hip <= 0) {
+    throw new Error('derived_measurements.hip_cm must be a positive number');
   }
 
   return {
-    betas,
-    pose,
-    trans,
-    mesh: parseMeshGeometry(mesh),
+    chest_cm: chest,
+    waist_cm: waist,
+    hip_cm: hip,
   };
 }
 
-async function executeReplicateHmr(input: RunHmrEstimationInput): Promise<SmplxParameters> {
-  const token = getReplicateApiToken();
-  const modelVersion = process.env.REPLICATE_HMR_MODEL_VERSION?.trim();
-
-  if (!modelVersion) {
-    throw new Error('Missing environment variable: REPLICATE_HMR_MODEL_VERSION');
+function parseTopologyVersion(value: unknown): string {
+  if (value === undefined || value === null || value === '') {
+    return ANNY_TOPOLOGY_VERSION;
   }
 
-  const response = await fetch('https://api.replicate.com/v1/predictions', {
+  if (typeof value !== 'string') {
+    throw new Error('ANNY-Fit topology_version must be a string');
+  }
+
+  if (value !== ANNY_TOPOLOGY_VERSION) {
+    throw new Error(
+      `ANNY-Fit topology_version ${value} does not match shipped hull ${ANNY_TOPOLOGY_VERSION}`,
+    );
+  }
+
+  return ANNY_TOPOLOGY_VERSION;
+}
+
+function unwrapPredictionOutput(output: unknown): unknown {
+  if (Array.isArray(output) && output.length === 1) {
+    return output[0];
+  }
+
+  return output;
+}
+
+export function parseAnnyParametricVector(
+  output: unknown,
+  statedWeightKg?: number,
+): AnnyParametricVector {
+  const unwrapped = unwrapPredictionOutput(output);
+  if (!isRecord(unwrapped)) {
+    throw new Error('ANNY-Fit output must be an object');
+  }
+
+  const phenotype = parsePhenotype(
+    readFirstPresent(unwrapped, ['phenotype', 'P', 'p', 'shape']),
+  );
+  const jointRotations = flattenNumberArray(
+    readFirstPresent(unwrapped, ['joint_rotations', 'pose', 'joints', 'joint_rots']),
+  );
+
+  if (!jointRotations) {
+    throw new Error('ANNY-Fit joint_rotations must be a non-empty number array');
+  }
+
+  const derivedMeasurements = parseDerivedMeasurements(
+    readFirstPresent(unwrapped, ['derived_measurements', 'measurements', 'girths']),
+  );
+  const statedWeight = isFiniteNumber(unwrapped.stated_weight_kg)
+    ? unwrapped.stated_weight_kg
+    : statedWeightKg;
+
+  const result: AnnyParametricVector = {
+    phenotype,
+    joint_rotations: jointRotations,
+    derived_measurements: derivedMeasurements,
+    topology_version: parseTopologyVersion(unwrapped.topology_version),
+  };
+
+  if (statedWeight !== undefined) {
+    result.stated_weight_kg = statedWeight;
+  }
+
+  return result;
+}
+
+function requireNumberVector(value: unknown, expectedLength: number, label: string): number[] {
+  const flattened = flattenNumberArray(value);
+  if (!flattened || flattened.length !== expectedLength) {
+    throw new Error(`${label} must contain ${expectedLength} finite numbers`);
+  }
+
+  return flattened;
+}
+
+function requireMinNumberVector(value: unknown, minimumLength: number, label: string): number[] {
+  const flattened = flattenNumberArray(value);
+  if (!flattened || flattened.length < minimumLength) {
+    throw new Error(`${label} must contain at least ${minimumLength} finite numbers`);
+  }
+
+  return flattened;
+}
+
+export function parseMhrParametricVector(
+  output: unknown,
+  statedWeightKg?: number,
+): MhrParametricVector {
+  const unwrapped = unwrapPredictionOutput(output);
+  if (!isRecord(unwrapped)) {
+    throw new Error('MHR Cog output must be an object');
+  }
+
+  if (unwrapped.topology_version !== MHR_TOPOLOGY_VERSION) {
+    throw new Error(
+      `MHR topology_version must be ${MHR_TOPOLOGY_VERSION}; got ${String(unwrapped.topology_version)}`,
+    );
+  }
+
+  const shape = requireMinNumberVector(
+    readFirstPresent(unwrapped, ['shape', 'identity', 'identity_coeffs']),
+    MHR_BODY_IDENTITY_DIM,
+    'MHR shape',
+  );
+  if (shape.length !== MHR_BODY_IDENTITY_DIM && shape.length !== MHR_IDENTITY_DIM) {
+    throw new Error(`MHR shape must have ${MHR_BODY_IDENTITY_DIM} or ${MHR_IDENTITY_DIM} values`);
+  }
+
+  const skeleton = requireNumberVector(
+    readFirstPresent(unwrapped, ['skeleton', 'scale', 'scale_params']),
+    MHR_SKELETON_DIM,
+    'MHR skeleton',
+  );
+  const pose = requireNumberVector(
+    readFirstPresent(unwrapped, ['pose', 'model_parameters', 'mhr_model_params']),
+    MHR_MODEL_PARAM_DIM,
+    'MHR pose',
+  );
+  const jointRotations = flattenNumberArray(
+    readFirstPresent(unwrapped, ['joint_rotations', 'joints', 'joint_rots']),
+  ) ?? pose;
+  const derivedMeasurements = parseDerivedMeasurements(
+    readFirstPresent(unwrapped, ['derived_measurements', 'measurements', 'girths']),
+  );
+  const statedWeight = isFiniteNumber(unwrapped.stated_weight_kg)
+    ? unwrapped.stated_weight_kg
+    : statedWeightKg;
+
+  const result: MhrParametricVector = {
+    shape,
+    skeleton,
+    pose,
+    joint_rotations: jointRotations,
+    derived_measurements: derivedMeasurements,
+    topology_version: MHR_TOPOLOGY_VERSION,
+  };
+
+  if (statedWeight !== undefined) {
+    result.stated_weight_kg = statedWeight;
+  }
+
+  const vertices = flattenNumberArray(
+    readFirstPresent(unwrapped, ['vertex_positions', 'vertices', 'vertex_buffer']),
+  );
+  if (vertices) {
+    if (vertices.length !== MHR_VERTEX_COUNT * 3) {
+      throw new Error(
+        `MHR vertex_positions must contain ${MHR_VERTEX_COUNT * 3} values (LOD 1 xyz)`,
+      );
+    }
+
+    result.vertex_positions = vertices;
+  }
+
+  if (typeof unwrapped.vertex_storage_url === 'string' && unwrapped.vertex_storage_url.length > 0) {
+    result.vertex_storage_url = unwrapped.vertex_storage_url;
+  }
+
+  if (isFiniteNumber(unwrapped.height_residual_cm)) {
+    result.height_residual_cm = unwrapped.height_residual_cm;
+  }
+
+  if (isFiniteNumber(unwrapped.clothing_residual)) {
+    result.clothing_residual = unwrapped.clothing_residual;
+  }
+
+  return result;
+}
+
+function buildBodyPredictionInput(input: RunAnnyFitInput): Record<string, unknown> {
+  const predictionInput: Record<string, unknown> = {
+    task: 'body',
+    front_image: input.frontImageUrl,
+    side_image: input.sideImageUrl,
+    height_cm: input.heightCm,
+    sex: input.sex,
+  };
+
+  if (input.weightKg !== undefined) {
+    predictionInput.weight_kg = input.weightKg;
+  }
+
+  return predictionInput;
+}
+
+function replicateAuthHeaders(): HeadersInit {
+  return {
+    Authorization: `Bearer ${getReplicateApiToken()}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+function predictionRequestUrl(deployment: ReplicateDeploymentRef): string {
+  return `https://api.replicate.com/v1/deployments/${encodeURIComponent(deployment.owner)}/${encodeURIComponent(deployment.name)}/predictions`;
+}
+
+function deploymentUrl(deployment: ReplicateDeploymentRef): string {
+  return `https://api.replicate.com/v1/deployments/${encodeURIComponent(deployment.owner)}/${encodeURIComponent(deployment.name)}`;
+}
+
+function readOptionalInt(value: unknown): number | null {
+  return isFiniteNumber(value) ? Math.trunc(value) : null;
+}
+
+function readDeploymentStatus(
+  payload: unknown,
+  fallback: ReplicateDeploymentRef,
+): ReplicateDeploymentStatus {
+  if (!isRecord(payload) || !isRecord(payload.current_release)) {
+    return {
+      owner: fallback.owner,
+      name: fallback.name,
+      hardware: null,
+      minInstances: null,
+      maxInstances: null,
+      model: null,
+      version: null,
+    };
+  }
+
+  const release = payload.current_release;
+  const configuration = isRecord(release.configuration) ? release.configuration : {};
+
+  return {
+    owner: typeof payload.owner === 'string' ? payload.owner : fallback.owner,
+    name: typeof payload.name === 'string' ? payload.name : fallback.name,
+    hardware: typeof configuration.hardware === 'string' ? configuration.hardware : null,
+    minInstances: readOptionalInt(configuration.min_instances),
+    maxInstances: readOptionalInt(configuration.max_instances),
+    model: typeof release.model === 'string' ? release.model : null,
+    version: typeof release.version === 'string' ? release.version : null,
+  };
+}
+
+async function fetchReplicateDeployment(
+  deployment: ReplicateDeploymentRef,
+): Promise<ReplicateDeploymentStatus> {
+  const response = await fetch(deploymentUrl(deployment), {
+    headers: { Authorization: `Bearer ${getReplicateApiToken()}` },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Replicate deployment lookup failed (${response.status}): ${errorBody || response.statusText}`,
+    );
+  }
+
+  return readDeploymentStatus(await response.json(), deployment);
+}
+
+/**
+ * Deployments can pin hardware and min_instances. Model versions cannot:
+ * POST /v1/predictions has no `hardware` field (Replicate HTTP API).
+ */
+export async function patchReplicateDeployment(options: {
+  minInstances?: 0 | 1;
+  pinHardware?: boolean;
+}): Promise<{
+  status: ReplicateDeploymentStatus;
+  hardwareUpdated: boolean;
+  minInstancesUpdated: boolean;
+}> {
+  const deployment = requireReplicateDeploymentRef();
+  const sku = getReplicateHardwareSku();
+  const current = await fetchReplicateDeployment(deployment);
+  const body: Record<string, unknown> = {};
+  let hardwareUpdated = false;
+  let minInstancesUpdated = false;
+
+  if (options.pinHardware !== false && current.hardware !== sku) {
+    body.hardware = sku;
+    hardwareUpdated = true;
+  }
+
+  if (options.minInstances !== undefined && current.minInstances !== options.minInstances) {
+    body.min_instances = options.minInstances;
+    minInstancesUpdated = true;
+    if (options.minInstances === 1) {
+      body.max_instances = Math.max(current.maxInstances ?? 0, 1);
+    }
+  }
+
+  if (Object.keys(body).length === 0) {
+    return { status: current, hardwareUpdated: false, minInstancesUpdated: false };
+  }
+
+  const updateResponse = await fetch(deploymentUrl(deployment), {
+    method: 'PATCH',
+    headers: replicateAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!updateResponse.ok) {
+    const errorBody = await updateResponse.text();
+    throw new Error(
+      `Replicate deployment PATCH failed (${updateResponse.status}): ${errorBody || updateResponse.statusText}`,
+    );
+  }
+
+  return {
+    status: readDeploymentStatus(await updateResponse.json(), deployment),
+    hardwareUpdated,
+    minInstancesUpdated,
+  };
+}
+
+export async function pinReplicateDeploymentHardware(): Promise<{
+  hardware: string | null;
+  updated: boolean;
+} | null> {
+  const patched = await patchReplicateDeployment({ pinHardware: true });
+  return {
+    hardware: patched.status.hardware,
+    updated: patched.hardwareUpdated,
+  };
+}
+
+/**
+ * Always async. The GPU is scaled to zero unless the sandbox session set
+ * min_instances=1, so a cold boot can outlast any synchronous Prefer: wait
+ * budget; completion arrives by webhook instead.
+ */
+async function requestReplicatePrediction(
+  body: Record<string, unknown>,
+): Promise<ReplicatePredictionResponse> {
+  const deployment = requireReplicateDeploymentRef();
+  const payload: Record<string, unknown> = {
+    input: body.input,
+    ...(typeof body.webhook === 'string' ? { webhook: body.webhook } : {}),
+    ...(Array.isArray(body.webhook_events_filter)
+      ? { webhook_events_filter: body.webhook_events_filter }
+      : {}),
+  };
+
+  const response = await fetch(predictionRequestUrl(deployment), {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Prefer: 'wait=60',
-    },
-    body: JSON.stringify({
-      version: modelVersion,
-      input: {
-        image: input.imageUrl,
-      },
-    }),
+    headers: replicateAuthHeaders(),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -232,49 +721,22 @@ async function executeReplicateHmr(input: RunHmrEstimationInput): Promise<SmplxP
     );
   }
 
-  const prediction = (await response.json()) as ReplicatePredictionResponse;
-
-  if (prediction.status !== 'succeeded') {
-    throw new Error(
-      prediction.error ?? `Replicate prediction failed with status: ${prediction.status}`,
-    );
-  }
-
-  return mapReplicateOutputToSmplxParameters(prediction.output);
+  return (await response.json()) as ReplicatePredictionResponse;
 }
 
-export async function dispatchHmrPrediction(
-  input: DispatchHmrPredictionInput,
+export async function dispatchAnnyFitPrediction(
+  input: DispatchAnnyFitPredictionInput,
 ): Promise<ReplicatePredictionReceipt> {
-  const token = getReplicateApiToken();
-  const modelVersion = process.env.REPLICATE_HMR_MODEL_VERSION?.trim();
+  requireReplicateDeploymentRef();
+  getAnnyFitModelVersion();
 
-  if (!modelVersion) {
-    throw new Error('Missing environment variable: REPLICATE_HMR_MODEL_VERSION');
-  }
-
-  const response = await fetch('https://api.replicate.com/v1/predictions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      version: modelVersion,
-      input: {
-        image: input.imageUrl,
-      },
-      webhook: input.webhookUrl,
-      webhook_events_filter: ['completed'],
-    }),
+  const prediction = await requestReplicatePrediction({
+    input: buildBodyPredictionInput(input),
+    webhook: input.webhookUrl,
+    webhook_events_filter: ['completed'],
   });
 
-  if (!response.ok) {
-    throw new Error(`Replicate prediction dispatch failed (${response.status}).`);
-  }
-
-  const prediction: unknown = await response.json();
-  if (!isRecord(prediction) || typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
+  if (typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
     throw new Error('Replicate prediction dispatch returned an invalid response.');
   }
 
@@ -284,11 +746,86 @@ export async function dispatchHmrPrediction(
   };
 }
 
-export async function runHmrEstimation(input: RunHmrEstimationInput): Promise<SmplxParameters> {
-  if (isReplicateMockMode()) {
-    await sleep(MOCK_DELAY_MS);
-    return buildMockSmplxParameters();
+export async function confirmAnnyFitCogVersion(): Promise<AnnyFitCogVersionConfirmation> {
+  const configured = getAnnyFitModelVersion();
+  const parsed = parseAnnyFitModelVersionRef(configured);
+
+  if (!parsed.owner || !parsed.name) {
+    return {
+      ...parsed,
+      cogVersion: null,
+    };
   }
 
-  return executeReplicateHmr(input);
+  const response = await fetch(
+    `https://api.replicate.com/v1/models/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.name)}/versions/${parsed.versionId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${getReplicateApiToken()}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Replicate Cog version lookup failed (${response.status}): ${errorBody || response.statusText}`,
+    );
+  }
+
+  const payload: unknown = await response.json();
+  if (!isRecord(payload) || payload.id !== parsed.versionId) {
+    throw new Error('Replicate Cog version response did not match REPLICATE_HMR_MODEL_VERSION');
+  }
+
+  return {
+    ...parsed,
+    cogVersion: typeof payload.cog_version === 'string' ? payload.cog_version : null,
+  };
+}
+
+function versionMatchesDeployment(
+  confirmation: AnnyFitCogVersionConfirmation,
+  status: ReplicateDeploymentStatus,
+): boolean {
+  if (!status.version) {
+    return false;
+  }
+
+  return status.version.toLowerCase() === confirmation.versionId;
+}
+
+export async function readReplicateSessionGpu(): Promise<SessionGpuResult> {
+  const confirmation = await confirmAnnyFitCogVersion();
+  const hardware = getReplicateHardwarePin();
+  const deployment = await fetchReplicateDeployment(requireReplicateDeploymentRef());
+
+  return {
+    action: 'status',
+    confirmation,
+    hardware,
+    deployment,
+    hardwareUpdated: false,
+    minInstancesUpdated: false,
+    versionMatchesDeployment: versionMatchesDeployment(confirmation, deployment),
+  };
+}
+
+export async function setReplicateSessionGpu(action: 'warm' | 'sleep'): Promise<SessionGpuResult> {
+  const confirmation = await confirmAnnyFitCogVersion();
+  const hardware = getReplicateHardwarePin();
+  const patched = await patchReplicateDeployment({
+    minInstances: action === 'warm' ? 1 : 0,
+    pinHardware: true,
+  });
+
+  return {
+    action,
+    confirmation,
+    hardware,
+    deployment: patched.status,
+    hardwareUpdated: patched.hardwareUpdated,
+    minInstancesUpdated: patched.minInstancesUpdated,
+    versionMatchesDeployment: versionMatchesDeployment(confirmation, patched.status),
+  };
 }

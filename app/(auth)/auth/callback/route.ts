@@ -1,8 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import {
+  MERCHANT_HOME_PATH,
+  merchantPostAuthPath,
+  tenantNeedsOnboarding,
+} from '@/lib/onboarding';
 import { createClient } from '@/lib/supabase/server';
+import {
+  merchantPortalSignInPath,
+  readMerchantPortalAccess,
+} from '@/lib/supabase/merchant-access';
 
-const DEFAULT_NEXT_PATH = '/merchant/dashboard';
+const DEFAULT_NEXT_PATH = MERCHANT_HOME_PATH;
 
 function getSafeNextPath(value: string | null): string {
   if (!value || !value.startsWith('/') || value.startsWith('//')) {
@@ -31,5 +40,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(signInUrl);
   }
 
-  return NextResponse.redirect(new URL(nextPath, request.url));
+  const access = await readMerchantPortalAccess(supabase);
+  if (!access.allowed) {
+    await supabase.auth.signOut();
+    return NextResponse.redirect(new URL(merchantPortalSignInPath(access.reason), request.url));
+  }
+
+  const { data: tenant } = await supabase
+    .from('tenants')
+    .select('allowed_domains')
+    .eq('id', access.tenantId)
+    .maybeSingle();
+  const destination = merchantPostAuthPath(
+    nextPath,
+    tenantNeedsOnboarding(tenant?.allowed_domains),
+  );
+
+  return NextResponse.redirect(new URL(destination, request.url));
 }

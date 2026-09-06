@@ -1,25 +1,13 @@
 import {
-  dispatchHmrPrediction,
-  isReplicateMockMode,
-  runHmrEstimation,
-} from '@/lib/ml/replicate';
-import { isBiometricAssetPath, purgeBiometricAsset } from '@/lib/server/biometrics-wipe';
+  parseBiometricJobImagePath,
+  purgeBiometricJobImages,
+} from '@/lib/server/biometrics-wipe';
+import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
+import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/server/hmr-request';
+import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
+import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
-import { requireCurrentTenantId } from '@/lib/supabase/tenant';
-import type { Json } from '@/types/database';
-import type { SmplxParameters } from '@/types/hmr';
-
-interface HmrDispatchRequest {
-  filePath: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isHmrDispatchRequest(value: unknown): value is HmrDispatchRequest {
-  return isRecord(value) && typeof value.filePath === 'string' && value.filePath.length > 0;
-}
+import { dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
 
 function getWebhookBaseUrl(): URL {
   const appBaseUrl = process.env.APP_BASE_URL?.trim();
@@ -36,18 +24,6 @@ function getWebhookBaseUrl(): URL {
   return parsedUrl;
 }
 
-function smplxParametersToJson(parameters: SmplxParameters): Json {
-  return {
-    betas: parameters.betas,
-    pose: parameters.pose,
-    trans: parameters.trans,
-    mesh: {
-      vertices: parameters.mesh.vertices,
-      faces: parameters.mesh.faces,
-    },
-  };
-}
-
 export const runtime = 'nodejs';
 
 export async function POST(request: Request): Promise<Response> {
@@ -59,36 +35,58 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'INVALID_REQUEST' }, { status: 400 });
   }
 
-  if (!isHmrDispatchRequest(payload) || !isBiometricAssetPath(payload.filePath)) {
+  const body = parseAnnyFitDispatchRequest(payload);
+  if (!body || !isValidAnnyFitDispatch(body)) {
+    return Response.json({ code: 'INVALID_REQUEST' }, { status: 400 });
+  }
+
+  const frontPath = parseBiometricJobImagePath(body.frontImagePath);
+  const sidePath = parseBiometricJobImagePath(body.sideImagePath);
+  if (!frontPath || !sidePath) {
     return Response.json({ code: 'INVALID_REQUEST' }, { status: 400 });
   }
 
   let tenantId: string;
   try {
-    tenantId = await requireCurrentTenantId();
+    tenantId = await resolveRequestTenantId(request);
   } catch {
     return Response.json({ code: 'UNAUTHORIZED' }, { status: 401 });
   }
 
-  if (!payload.filePath.startsWith(`${tenantId}/`)) {
+  if (frontPath.tenantId !== tenantId) {
     return Response.json({ code: 'FORBIDDEN' }, { status: 403 });
   }
 
-  const serviceClient = createServiceClient();
-  const { data: signedImage, error: signedImageError } = await serviceClient.storage
-    .from('biometrics')
-    .createSignedUrl(payload.filePath, 60);
+  const rateLimit = await consumeRateLimit(
+    `hmr:${tenantId}`,
+    RATE_LIMITS.hmrDispatch,
+    RATE_LIMIT_WINDOW_MS,
+  );
+  if (!rateLimit.allowed) {
+    return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
+  }
 
-  if (signedImageError || !signedImage) {
+  const serviceClient = createServiceClient();
+  const [signedFront, signedSide] = await Promise.all([
+    serviceClient.storage.from('biometrics').createSignedUrl(body.frontImagePath, 60),
+    serviceClient.storage.from('biometrics').createSignedUrl(body.sideImagePath, 60),
+  ]);
+
+  if (signedFront.error || !signedFront.data || signedSide.error || !signedSide.data) {
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
   }
 
   const { data: job, error: createError } = await serviceClient
     .from('fit_jobs')
     .insert({
+      id: frontPath.jobId,
       tenant_id: tenantId,
       status: 'pending',
-      input_image_url: payload.filePath,
+      height_cm: body.heightCm,
+      sex: body.sex,
+      weight_kg: body.weightKg ?? null,
+      front_image_path: body.frontImagePath,
+      side_image_path: body.sideImagePath,
     })
     .select('id')
     .single();
@@ -104,15 +102,19 @@ export async function POST(request: Request): Promise<Response> {
     .eq('tenant_id', tenantId);
 
   if (processingError) {
-    const wasPurged = await purgeBiometricAsset(payload.filePath);
+    const wasPurged = await purgeBiometricJobImages(
+      body.frontImagePath,
+      body.sideImagePath,
+    );
     await serviceClient
       .from('fit_jobs')
       .update({
         status: 'failed',
-        input_image_url: wasPurged ? null : payload.filePath,
+        front_image_path: wasPurged ? null : body.frontImagePath,
+        side_image_path: wasPurged ? null : body.sideImagePath,
         error_message: wasPurged
-          ? 'Unable to start HMR prediction.'
-          : 'Unable to start HMR prediction or purge biometric source image.',
+          ? 'Unable to start the live body prediction.'
+          : 'Unable to start the live body prediction or purge biometric source images.',
       })
       .eq('id', job.id)
       .eq('tenant_id', tenantId);
@@ -120,47 +122,15 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ job_id: job.id, status: 'pending' }, { status: 500 });
   }
 
-  if (isReplicateMockMode()) {
-    try {
-      const mockResult = await runHmrEstimation({ imageUrl: signedImage.signedUrl });
-      const wasPurged = await purgeBiometricAsset(payload.filePath);
-
-      await serviceClient
-        .from('fit_jobs')
-        .update({
-          status: wasPurged ? 'completed' : 'failed',
-          input_image_url: wasPurged ? null : payload.filePath,
-          smplx_params: wasPurged ? smplxParametersToJson(mockResult) : null,
-          error_message: wasPurged ? null : 'Unable to purge biometric source image.',
-        })
-        .eq('id', job.id)
-        .eq('tenant_id', tenantId);
-
-      return Response.json({ job_id: job.id, status: 'pending' });
-    } catch {
-      const wasPurged = await purgeBiometricAsset(payload.filePath);
-
-      await serviceClient
-        .from('fit_jobs')
-        .update({
-          status: 'failed',
-          input_image_url: wasPurged ? null : payload.filePath,
-          error_message: wasPurged
-            ? 'Unable to run mock HMR prediction.'
-            : 'Unable to run mock HMR prediction or purge biometric source image.',
-        })
-        .eq('id', job.id)
-        .eq('tenant_id', tenantId);
-
-      return Response.json({ job_id: job.id, status: 'failed' }, { status: 502 });
-    }
-  }
-
   try {
     const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
     webhookUrl.searchParams.set('job_id', job.id);
-    const prediction = await dispatchHmrPrediction({
-      imageUrl: signedImage.signedUrl,
+    const prediction = await dispatchAnnyFitPrediction({
+      frontImageUrl: signedFront.data.signedUrl,
+      sideImageUrl: signedSide.data.signedUrl,
+      heightCm: body.heightCm,
+      sex: body.sex,
+      weightKg: body.weightKg,
       webhookUrl: webhookUrl.toString(),
     });
 
@@ -174,16 +144,20 @@ export async function POST(request: Request): Promise<Response> {
       throw new Error('Unable to associate the Replicate prediction with the fit job.');
     }
   } catch {
-    const wasPurged = await purgeBiometricAsset(payload.filePath);
+    const wasPurged = await purgeBiometricJobImages(
+      body.frontImagePath,
+      body.sideImagePath,
+    );
 
     await serviceClient
       .from('fit_jobs')
       .update({
         status: 'failed',
-        input_image_url: wasPurged ? null : payload.filePath,
+        front_image_path: wasPurged ? null : body.frontImagePath,
+        side_image_path: wasPurged ? null : body.sideImagePath,
         error_message: wasPurged
-          ? 'Unable to dispatch HMR prediction.'
-          : 'Unable to dispatch HMR prediction or purge biometric source image.',
+          ? 'Unable to dispatch the live body prediction.'
+          : 'Unable to dispatch the live body prediction or purge biometric source images.',
       })
       .eq('id', job.id)
       .eq('tenant_id', tenantId);

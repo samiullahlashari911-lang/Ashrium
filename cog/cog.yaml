@@ -1,0 +1,27 @@
+# Ashrium VFR Cog — SAM 2 (Apache 2.0) + SAM 3D Body initializer (SAM License)
+# + two-view Meta MHR fit (Apache 2.0) on gpu-a100-large.
+# Set HF_TOKEN as a Replicate secret after gated access to
+# facebook/sam-3d-body-dinov3 is granted. Do not stub that step.
+build:
+  gpu: true
+  cuda: "12.4"
+  python_version: "3.11"
+  system_packages:
+    - git
+    - wget
+    - libgl1-mesa-glx
+    - libglib2.0-0
+    - libsm6
+    - libxext6
+    - libxrender1
+    - libegl1
+    - ffmpeg
+  python_requirements: requirements.txt
+  run:
+    - git clone --depth 1 https://github.com/facebookresearch/sam-3d-body.git /src/sam-3d-body
+    - python -c "from pathlib import Path; import site; Path(site.getsitepackages()[0], 'sam3dbody.pth').write_text('/src/sam-3d-body\n')"
+    - pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git@a1ce2f9"
+    - pip install "git+https://github.com/facebookresearch/sam2.git"
+    - pip install "git+https://github.com/microsoft/MoGe.git"
+
+predict: "predict.py:Predictor"

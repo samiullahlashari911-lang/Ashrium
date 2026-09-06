@@ -8,25 +8,28 @@ export const STRAIN_CONSTRICTED_THRESHOLD = strainHeatmap.constrictedThreshold;
 export const STRAIN_IDEAL_LOWER_BOUND = 0.0;
 
 const CONSTRUCTED_COLOR: StrainColor = strainHeatmapRgb.constricted;
+const SNUG_COLOR: StrainColor = strainHeatmapRgb.snug;
 const IDEAL_COLOR: StrainColor = strainHeatmapRgb.ideal;
 const LOOSE_COLOR: StrainColor = strainHeatmapRgb.loose;
 
 /**
  * Maps a single Cauchy strain value to an RGB heatmap color.
- * - Red:   strain > 0.15 (constricted)
- * - Green: 0.0 <= strain <= 0.15 (ideal contour fit)
- * - Blue:  strain < 0.0 (loose folds / zero pressure)
+ * Blue / green / amber / red (AGENTS.md §7).
  */
 export function mapStrainToColor(strain: number): StrainColor {
-  if (strain > STRAIN_CONSTRICTED_THRESHOLD) {
-    return CONSTRUCTED_COLOR;
+  if (strain < 0) {
+    return LOOSE_COLOR;
   }
 
-  if (strain >= STRAIN_IDEAL_LOWER_BOUND) {
+  if (strain < 0.05) {
     return IDEAL_COLOR;
   }
 
-  return LOOSE_COLOR;
+  if (strain < STRAIN_CONSTRICTED_THRESHOLD) {
+    return SNUG_COLOR;
+  }
+
+  return CONSTRUCTED_COLOR;
 }
 
 /**

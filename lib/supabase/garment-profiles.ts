@@ -5,7 +5,14 @@ import type {
   GarmentCadProfileInsert,
   GarmentCadProfileRow,
   GarmentCadProfileUpdate,
+  GarmentSizeVariantRow,
 } from '@/types/database';
+import {
+  readGarmentCategory,
+  readGarmentIngestTier,
+  type StorefrontGarment,
+  type StorefrontSizeVariant,
+} from '@/types/garment';
 
 export async function fetchTenantGarmentProfiles(
   supabase: SupabaseClient<Database, 'public'>,
@@ -92,4 +99,121 @@ export async function fetchWidgetGarmentProfile(
   }
 
   return data;
+}
+
+export async function fetchTenantSizeVariants(
+  supabase: SupabaseClient<Database, 'public'>,
+  tenantId: string,
+): Promise<GarmentSizeVariantRow[]> {
+  const { data, error } = await supabase
+    .from('garment_size_variants')
+    .select()
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+}
+
+export async function fetchGarmentBySkuWithVariants(
+  supabase: SupabaseClient<Database, 'public'>,
+  tenantId: string,
+  sku: string,
+): Promise<{ garment: GarmentCadProfileRow; variants: GarmentSizeVariantRow[] } | null> {
+  const { data: bySku, error } = await supabase
+    .from('garment_cad_profiles')
+    .select()
+    .eq('tenant_id', tenantId)
+    .eq('sku', sku)
+    .maybeSingle();
+
+  let garment = error ? null : bySku;
+
+  if (!garment) {
+    const { data: byExternal } = await supabase
+      .from('garment_size_variants')
+      .select('garment_id')
+      .eq('tenant_id', tenantId)
+      .eq('external_sku', sku)
+      .maybeSingle();
+
+    if (!byExternal) {
+      return null;
+    }
+
+    const { data: parent } = await supabase
+      .from('garment_cad_profiles')
+      .select()
+      .eq('tenant_id', tenantId)
+      .eq('id', byExternal.garment_id)
+      .maybeSingle();
+
+    garment = parent;
+  }
+
+  if (!garment) {
+    return null;
+  }
+
+  const { data: variants, error: variantError } = await supabase
+    .from('garment_size_variants')
+    .select()
+    .eq('tenant_id', tenantId)
+    .eq('garment_id', garment.id)
+    .order('created_at', { ascending: true });
+
+  if (variantError) {
+    return { garment, variants: [] };
+  }
+
+  return { garment, variants: variants ?? [] };
+}
+
+export async function fetchTenantGarmentsWithVariants(
+  supabase: SupabaseClient<Database, 'public'>,
+  tenantId: string,
+): Promise<Array<{ profile: GarmentCadProfileRow; variants: GarmentSizeVariantRow[] }>> {
+  const profiles = await fetchTenantGarmentProfiles(supabase, tenantId);
+  const variants = await fetchTenantSizeVariants(supabase, tenantId);
+  const byGarment = new Map<string, GarmentSizeVariantRow[]>();
+
+  for (const variant of variants) {
+    const list = byGarment.get(variant.garment_id) ?? [];
+    list.push(variant);
+    byGarment.set(variant.garment_id, list);
+  }
+
+  return profiles.map((profile) => ({
+    profile,
+    variants: byGarment.get(profile.id) ?? [],
+  }));
+}
+
+export function toStorefrontSizeVariant(row: GarmentSizeVariantRow): StorefrontSizeVariant {
+  return {
+    id: row.id,
+    sizeCode: row.size_code,
+    chestCm: row.chest_cm,
+    waistCm: row.waist_cm,
+    hipCm: row.hip_cm,
+    lengthCm: row.length_cm,
+  };
+}
+
+export function toStorefrontGarment(
+  row: GarmentCadProfileRow,
+  variants: readonly GarmentSizeVariantRow[],
+): StorefrontGarment {
+  return {
+    sku: row.sku,
+    name: row.name,
+    category: readGarmentCategory(row.category),
+    ingestConfidence: row.ingest_confidence,
+    ingestTier: readGarmentIngestTier(row.ingest_tier),
+    approximateFit: row.approximate_fit,
+    sizeVariants: variants.map(toStorefrontSizeVariant),
+  };
 }

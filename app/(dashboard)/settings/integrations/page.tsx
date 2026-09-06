@@ -1,6 +1,8 @@
 import Link from 'next/link';
 
 import { ReplicateKeyForm } from '@/app/(dashboard)/settings/integrations/replicate-key-form';
+import { ShopifyForm } from '@/app/(dashboard)/settings/integrations/shopify-form';
+import { getShopifyConnectionStatus } from '@/lib/server/shopify-credentials';
 import { createServiceClient } from '@/lib/supabase/service';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentTenantId } from '@/lib/supabase/tenant';
@@ -27,6 +29,7 @@ export default async function IntegrationsPage() {
 
   const isEnterprise = merchant?.plan_tier === 'enterprise';
   let hasActiveKey = false;
+  const shopify = await getShopifyConnectionStatus(tenantId);
 
   if (isEnterprise) {
     const serviceClient = createServiceClient();
@@ -44,21 +47,23 @@ export default async function IntegrationsPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 p-6">
       <header>
-        <Link href="/settings" className="text-sm font-medium text-sky-300 hover:text-sky-200">
+        <Link href="/settings" className="text-sm font-medium text-obsidian-accent-muted hover:text-obsidian-ink">
           ← Usage & subscription
         </Link>
-        <h1 className="mt-3 text-3xl font-bold text-slate-100">Integrations</h1>
-        <p className="mt-2 text-sm text-slate-400">
+        <h1 className="mt-3 text-3xl font-bold text-obsidian-ink">Integrations</h1>
+        <p className="mt-2 text-sm text-obsidian-muted">
           Configure server-side providers for your merchant account.
         </p>
       </header>
 
+      <ShopifyForm connected={shopify.connected} shopDomain={shopify.shopDomain} />
+
       {isEnterprise ? (
         <ReplicateKeyForm hasActiveKey={hasActiveKey} />
       ) : (
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg backdrop-blur">
-          <h2 className="text-lg font-semibold text-slate-100">Replicate BYOK</h2>
-          <p className="mt-2 text-sm text-slate-400">
+        <section className="obsidian-glass p-6">
+          <h2 className="text-lg font-semibold text-obsidian-ink">Replicate BYOK</h2>
+          <p className="mt-2 text-sm text-obsidian-muted">
             Bring-your-own Replicate keys are available on Enterprise plans. Upgrade your
             subscription to enable merchant-managed GPU billing and unlimited platform usage.
           </p>

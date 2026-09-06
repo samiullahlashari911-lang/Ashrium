@@ -1,27 +1,36 @@
-import { createClient } from '@/lib/supabase/server';
-import { requireCurrentTenantId } from '@/lib/supabase/tenant';
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
+import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
+import { isFitJobId } from '@/lib/server/fit-request';
+import { resolveRequestTenantId } from '@/lib/server/request-tenant';
+import { createServiceClient } from '@/lib/supabase/service';
 
 export async function GET(request: Request): Promise<Response> {
   const jobId = new URL(request.url).searchParams.get('job_id');
 
-  if (!jobId || !UUID_PATTERN.test(jobId)) {
+  if (!jobId || !isFitJobId(jobId)) {
     return Response.json({ code: 'INVALID_JOB_ID' }, { status: 400 });
   }
 
   let tenantId: string;
   try {
-    tenantId = await requireCurrentTenantId();
+    tenantId = await resolveRequestTenantId(request);
   } catch {
     return Response.json({ code: 'UNAUTHORIZED' }, { status: 401 });
   }
 
-  const supabase = await createClient();
+  const rateLimit = await consumeRateLimit(
+    `hmr-status:${tenantId}`,
+    RATE_LIMITS.hmrStatus,
+    RATE_LIMIT_WINDOW_MS,
+  );
+  if (!rateLimit.allowed) {
+    return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
+  }
+
+  const supabase = createServiceClient();
   const { data: job, error } = await supabase
     .from('fit_jobs')
-    .select('id, status, smplx_params, gltf_output_url, error_message, created_at, updated_at')
+    .select('id, status, parametric_result, error_message, created_at, updated_at')
     .eq('id', jobId)
     .eq('tenant_id', tenantId)
     .maybeSingle();

@@ -1,0 +1,10 @@
+Ashrium ships public/models/anny-hull.glb as the official default ANNY
+topology (unattached vertices removed, triangulated) from:
+
+  https://github.com/naver/anny
+  data/topology/legacy_default.obj
+
+Anny code is Copyright (c) 2025 NAVER Corp., licensed under Apache 2.0.
+MakeHuman / MPFB2 mesh assets used by Anny are CC0 1.0 Universal.
+
+Topology stamp: anny-13380-104 (13,380 vertices, 104-joint compact ANNY rig).

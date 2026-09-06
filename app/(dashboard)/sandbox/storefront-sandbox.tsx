@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { DebugGalleryUpload } from '@/components/widget/guided-capture/debug-gallery-upload';
+import {
+  ReplicateRuntimeBanner,
+  type ReplicateRuntimeBannerConfig,
+} from '@/components/dashboard/replicate-runtime-banner';
+
 interface DemoProduct {
   name: string;
   price: string;
@@ -46,7 +52,15 @@ function isWidgetMessage(value: unknown): value is {
     && isRecord(value.payload);
 }
 
-export function StorefrontSandbox({ token }: { token: string }): React.JSX.Element {
+export function StorefrontSandbox({
+  tenantId,
+  token,
+  replicate,
+}: {
+  tenantId: string;
+  token: string;
+  replicate: ReplicateRuntimeBannerConfig;
+}): React.JSX.Element {
   const scriptMountRef = useRef<HTMLDivElement | null>(null);
   const nextLogIdRef = useRef(1);
   const [selectedSku, setSelectedSku] = useState(DEMO_PRODUCTS[0].sku);
@@ -133,23 +147,25 @@ export function StorefrontSandbox({ token }: { token: string }): React.JSX.Eleme
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-sky-300">Storefront integration harness</p>
-        <h1 className="mt-1 text-3xl font-bold text-slate-100">Ashrium Outfitters</h1>
-        <p className="mt-2 text-sm text-slate-400">
+        <p className="text-sm font-medium text-obsidian-accent-muted">Storefront integration harness</p>
+        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Ashrium Outfitters</h1>
+        <p className="mt-2 text-sm text-obsidian-muted">
           Simulate product changes and inspect the isolated widget event bridge.
         </p>
       </header>
 
+      <ReplicateRuntimeBanner config={replicate} />
+
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg">
+        <section className="obsidian-glass p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="font-mono text-xs text-sky-300">{selectedSku}</p>
-              <h2 className="mt-1 text-2xl font-semibold text-slate-100">
+              <p className="font-mono text-xs text-obsidian-accent-muted">{selectedSku}</p>
+              <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
                 {DEMO_PRODUCTS.find((product) => product.sku === selectedSku)?.name}
               </h2>
             </div>
-            <p className="text-lg font-semibold text-slate-100">
+            <p className="text-lg font-semibold text-obsidian-ink">
               {DEMO_PRODUCTS.find((product) => product.sku === selectedSku)?.price}
             </p>
           </div>
@@ -163,8 +179,8 @@ export function StorefrontSandbox({ token }: { token: string }): React.JSX.Eleme
                 className={[
                   'rounded-full border px-4 py-2 text-sm transition',
                   product.sku === selectedSku
-                    ? 'border-sky-400 bg-sky-500/20 text-sky-100'
-                    : 'border-slate-700 bg-slate-950/50 text-slate-300 hover:border-slate-500',
+                    ? 'border-obsidian-accent bg-obsidian-accent/20 text-obsidian-ink'
+                    : 'border-white/10 bg-obsidian-canvas/50 text-obsidian-muted hover:border-white/25',
                 ].join(' ')}
               >
                 {product.name}
@@ -172,35 +188,39 @@ export function StorefrontSandbox({ token }: { token: string }): React.JSX.Eleme
             ))}
           </div>
 
-          <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+          <div className="mt-6 rounded-xl border border-white/10 bg-obsidian-canvas/50 p-3">
             <div ref={scriptMountRef} />
           </div>
 
           <div className="mt-5 flex items-center gap-3">
-            <span className="text-sm text-slate-400">Recommended size</span>
+            <span className="text-sm text-obsidian-muted">Recommended size</span>
             <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
-              {recommendedSize ?? 'Awaiting widget'}
+              {recommendedSize ?? 'Awaiting a confident size'}
             </span>
+          </div>
+
+          <div className="mt-6">
+            <DebugGalleryUpload tenantId={tenantId} />
           </div>
         </section>
 
-        <aside className="rounded-xl border border-slate-800 bg-slate-950/70 p-5 shadow-lg">
-          <h2 className="text-lg font-semibold text-slate-100">Event inspector</h2>
-          <p className="mt-1 text-sm text-slate-400">Newest event first. Payloads are captured at the host boundary.</p>
+        <aside className="obsidian-glass p-5">
+          <h2 className="text-lg font-semibold text-obsidian-ink">Event inspector</h2>
+          <p className="mt-1 text-sm text-obsidian-muted">Newest event first. Payloads are captured at the host boundary.</p>
           <ol className="mt-4 flex max-h-[720px] flex-col gap-3 overflow-y-auto pr-1">
             {events.length === 0 ? (
-              <li className="rounded-lg border border-dashed border-slate-700 p-4 text-sm text-slate-500">
+              <li className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-obsidian-subtle">
                 Waiting for widget traffic.
               </li>
             ) : (
               events.map((event) => (
-                <li key={event.id} className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+                <li key={event.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono text-xs text-sky-300">{event.direction}</span>
-                    <time className="text-xs text-slate-500">{event.timestamp}</time>
+                    <span className="font-mono text-xs text-obsidian-accent-muted">{event.direction}</span>
+                    <time className="text-xs text-obsidian-subtle">{event.timestamp}</time>
                   </div>
-                  <p className="mt-2 text-sm font-semibold text-slate-200">{event.type}</p>
-                  <pre className="mt-2 overflow-x-auto rounded bg-slate-950 p-2 text-xs text-slate-300">
+                  <p className="mt-2 text-sm font-semibold text-obsidian-ink">{event.type}</p>
+                  <pre className="mt-2 overflow-x-auto rounded bg-obsidian-canvas p-2 text-xs text-obsidian-muted">
                     {JSON.stringify(event.payload, null, 2)}
                   </pre>
                 </li>

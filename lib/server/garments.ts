@@ -2,21 +2,42 @@
 
 import { revalidatePath } from 'next/cache';
 
+import { persistCatalogGarment } from '@/lib/catalog/persist-garment';
+import { lookupKesProperties, mechanicalDeltaRatio } from '@/lib/catalog/kes-lookup';
+import { parseCompositionText } from '@/lib/catalog/parse-product';
 import {
   deleteGarmentProfileRow,
-  fetchTenantGarmentProfiles,
-  insertGarmentProfile,
-  updateGarmentProfileRow,
+  fetchTenantGarmentsWithVariants,
 } from '@/lib/supabase/garment-profiles';
 import { createClient } from '@/lib/supabase/server';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
-import type { GarmentCadProfileInsert, GarmentCadProfileRow, GarmentCadProfileUpdate } from '@/types/database';
-import type { GarmentMechanicalProperties } from '@/types/garment';
+import type { GarmentWorkspaceItem } from '@/types/database';
+import {
+  GARMENT_CATEGORIES,
+  readGarmentCategory,
+  type CatalogGarmentDraft,
+  type CatalogSizeVariantInput,
+  type GarmentCategory,
+  type GarmentMechanicalProperties,
+} from '@/types/garment';
+
+export interface GarmentSizeFormInput {
+  sizeCode: string;
+  chestCm: number;
+  waistCm: number;
+  hipCm: number;
+  lengthCm: number;
+  externalSku: string;
+}
 
 export interface GarmentFormInput extends GarmentMechanicalProperties {
   sku: string;
   name: string;
   cadPatternUrl: string;
+  category: GarmentCategory | '';
+  compositionText: string;
+  gsm: number | '';
+  sizeVariants: GarmentSizeFormInput[];
 }
 
 export interface GarmentActionResult {
@@ -49,8 +70,17 @@ function validateGarmentFormInput(input: GarmentFormInput): string | null {
     return 'Name must contain between 1 and 256 characters.';
   }
 
-  if (!isHttpsUrl(input.cadPatternUrl.trim())) {
+  const cadUrl = input.cadPatternUrl.trim();
+  if (cadUrl.length > 0 && !isHttpsUrl(cadUrl)) {
     return 'CAD pattern URL must be a valid HTTPS URL.';
+  }
+
+  if (input.category !== '' && !GARMENT_CATEGORIES.includes(input.category)) {
+    return 'Choose a valid garment category.';
+  }
+
+  if (input.gsm !== '' && (!Number.isFinite(input.gsm) || input.gsm <= 0 || input.gsm > 800)) {
+    return 'GSM must be a positive fabric weight.';
   }
 
   const mechanicalValues = [
@@ -60,15 +90,128 @@ function validateGarmentFormInput(input: GarmentFormInput): string | null {
     input.areaDensity,
   ];
 
-  return mechanicalValues.every(isPositiveFiniteNumber)
-    ? null
-    : 'Mechanical properties must be finite values greater than zero.';
+  if (!mechanicalValues.every(isPositiveFiniteNumber)) {
+    return 'Mechanical properties must be finite values greater than zero.';
+  }
+
+  for (const variant of input.sizeVariants) {
+    if (variant.sizeCode.trim().length === 0 || variant.sizeCode.trim().length > 16) {
+      return 'Each size code must contain between 1 and 16 characters.';
+    }
+
+    if (
+      ![variant.chestCm, variant.waistCm, variant.hipCm, variant.lengthCm].every(
+        isPositiveFiniteNumber,
+      )
+    ) {
+      return 'Size measurements must be finite values greater than zero.';
+    }
+  }
+
+  return null;
 }
 
-export async function listGarmentProfiles(): Promise<GarmentCadProfileRow[]> {
+function toDraft(input: GarmentFormInput): CatalogGarmentDraft {
+  const category: GarmentCategory = readGarmentCategory(input.category) ?? 'other';
+  const composition = parseCompositionText(input.compositionText);
+  const gsm = input.gsm === '' ? null : input.gsm;
+  const formMechanical: GarmentMechanicalProperties = {
+    tensileStiffness: input.tensileStiffness,
+    bendingRigidity: input.bendingRigidity,
+    shearStiffness: input.shearStiffness,
+    areaDensity: input.areaDensity,
+  };
+  const kesMechanical = lookupKesProperties(composition, gsm, category);
+  const sizeVariants: CatalogSizeVariantInput[] = input.sizeVariants.map((variant) => ({
+    sizeCode: variant.sizeCode.trim().toUpperCase(),
+    chestCm: variant.chestCm,
+    waistCm: variant.waistCm,
+    hipCm: variant.hipCm,
+    lengthCm: variant.lengthCm,
+    externalSku: variant.externalSku.trim().slice(0, 128) || null,
+    measurementsFromSource: true,
+  }));
+
+  const cadPatternUrl = input.cadPatternUrl.trim() || null;
+  const defaultMechanical: GarmentMechanicalProperties = {
+    tensileStiffness: 1,
+    bendingRigidity: 0.1,
+    shearStiffness: 0.5,
+    areaDensity: 0.2,
+  };
+  const usingFormDefaults = mechanicalDeltaRatio(formMechanical, defaultMechanical) <= 0.05;
+  const explicitKesOverride =
+    Boolean(composition)
+    && !usingFormDefaults
+    && mechanicalDeltaRatio(formMechanical, kesMechanical) > 0.05;
+
+  if (composition && sizeVariants.length > 0 && explicitKesOverride) {
+    return {
+      sku: input.sku.trim(),
+      name: input.name.trim(),
+      category,
+      composition,
+      gsm,
+      ingestConfidence: 0.95,
+      ingestTier: 1,
+      mode: 'A',
+      approximateFit: false,
+      mechanical: formMechanical,
+      cadPatternUrl,
+      sizeVariants,
+    };
+  }
+
+  if (composition && sizeVariants.length > 0) {
+    return {
+      sku: input.sku.trim(),
+      name: input.name.trim(),
+      category,
+      composition,
+      gsm,
+      ingestConfidence: sizeVariants.length >= 2 ? 0.82 : 0.74,
+      ingestTier: 2,
+      mode: 'B',
+      approximateFit: false,
+      mechanical: kesMechanical,
+      cadPatternUrl,
+      sizeVariants,
+    };
+  }
+
+  return {
+    sku: input.sku.trim(),
+    name: input.name.trim(),
+    category,
+    composition,
+    gsm,
+    ingestConfidence: 0.35,
+    ingestTier: 2,
+    mode: 'C',
+    approximateFit: true,
+    mechanical: formMechanical,
+    cadPatternUrl,
+    sizeVariants,
+  };
+}
+
+function saveMessage(draft: CatalogGarmentDraft, updated: boolean): string {
+  const verb = updated ? 'updated' : 'created';
+  if (draft.mode === 'A') {
+    return `CAD garment profile ${verb} as Tier 1 Mode A.`;
+  }
+
+  if (draft.mode === 'B') {
+    return `CAD garment profile ${verb} as Mode B (validated Tier 2). Size chart and material were mapped through the KES table.`;
+  }
+
+  return `CAD garment profile ${verb} as Mode C (approximate ingest).`;
+}
+
+export async function listGarmentProfiles(): Promise<GarmentWorkspaceItem[]> {
   const supabase = await createClient();
   const tenantId = await requireCurrentTenantId();
-  return fetchTenantGarmentProfiles(supabase, tenantId);
+  return fetchTenantGarmentsWithVariants(supabase, tenantId);
 }
 
 export async function createGarmentProfile(
@@ -82,26 +225,10 @@ export async function createGarmentProfile(
   try {
     const supabase = await createClient();
     const tenantId = await requireCurrentTenantId();
-
-    const insertPayload: GarmentCadProfileInsert = {
-      tenant_id: tenantId,
-      sku: input.sku.trim(),
-      name: input.name.trim(),
-      tensile_stiffness: input.tensileStiffness,
-      bending_rigidity: input.bendingRigidity,
-      shear_stiffness: input.shearStiffness,
-      area_density: input.areaDensity,
-      cad_pattern_url: input.cadPatternUrl.trim() || null,
-    };
-
-    const { error } = await insertGarmentProfile(supabase, insertPayload);
-
-    if (error) {
-      return { success: false, message: error.message };
-    }
-
+    const draft = toDraft(input);
+    await persistCatalogGarment(supabase, tenantId, draft);
     revalidatePath(GARMENTS_PATH);
-    return { success: true, message: 'CAD garment profile created.' };
+    return { success: true, message: saveMessage(draft, false) };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to create garment profile.';
     return { success: false, message };
@@ -124,30 +251,10 @@ export async function updateGarmentProfile(
   try {
     const supabase = await createClient();
     const tenantId = await requireCurrentTenantId();
-
-    const updatePayload: GarmentCadProfileUpdate = {
-      sku: input.sku.trim(),
-      name: input.name.trim(),
-      tensile_stiffness: input.tensileStiffness,
-      bending_rigidity: input.bendingRigidity,
-      shear_stiffness: input.shearStiffness,
-      area_density: input.areaDensity,
-      cad_pattern_url: input.cadPatternUrl.trim() || null,
-    };
-
-    const { error } = await updateGarmentProfileRow(
-      supabase,
-      profileId,
-      tenantId,
-      updatePayload,
-    );
-
-    if (error) {
-      return { success: false, message: error.message };
-    }
-
+    const draft = toDraft(input);
+    await persistCatalogGarment(supabase, tenantId, draft, profileId);
     revalidatePath(GARMENTS_PATH);
-    return { success: true, message: 'CAD garment profile updated.' };
+    return { success: true, message: saveMessage(draft, true) };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to update garment profile.';
     return { success: false, message };
@@ -162,7 +269,6 @@ export async function deleteGarmentProfile(profileId: string): Promise<GarmentAc
   try {
     const supabase = await createClient();
     const tenantId = await requireCurrentTenantId();
-
     const { error } = await deleteGarmentProfileRow(supabase, profileId, tenantId);
 
     if (error) {

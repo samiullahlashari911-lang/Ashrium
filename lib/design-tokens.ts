@@ -1,41 +1,74 @@
 /**
- * Obsidian Titanium design system — single source of truth for merchant UI,
- * WebGL strain heatmaps, and 8px spatial rhythm.
+ * Obsidian design system — single source of truth for merchant UI,
+ * widget chrome, WebGL strain heatmaps, and 8px spatial rhythm.
+ *
+ * Palette: glass indigo / magenta merchant portal (deep canvas, frosted
+ * panels, purple→magenta CTAs). Strain heatmap swatches stay independent
+ * of the UI accent so cloth visualization is unchanged.
  */
 
 export const SPATIAL_GRID_PX = 8 as const;
 
 export const obsidianTitanium = {
-  canvas: '#090D14',
-  card: '#111827',
-  hairline: '#1F2937',
-  accent: '#38BDF8',
+  canvas: '#0B0B1E',
+  canvasLift: '#1A1A2E',
+  card: '#16162B',
+  hairline: '#2A2A48',
+  accent: '#6A32C9',
+  accentEnd: '#B52286',
   success: '#10B981',
   tension: '#F43F5E',
-  ink: '#F1F5F9',
-  muted: '#94A3B8',
-  subtle: '#64748B',
-  accentMuted: '#7DD3FC',
+  ink: '#F8FAFC',
+  muted: '#A1A1B8',
+  subtle: '#7B7B96',
+  accentMuted: '#C4B5FD',
   successMuted: '#6EE7B7',
   tensionMuted: '#FDA4AF',
 } as const;
 
 export type ObsidianTitaniumColor = (typeof obsidianTitanium)[keyof typeof obsidianTitanium];
 
+/** Frosted-glass recipe used by `.obsidian-glass` in globals.css. */
+export const glassTokens = {
+  fill: 'rgba(255, 255, 255, 0.07)',
+  border: 'rgba(255, 255, 255, 0.12)',
+  blurPx: 20,
+  radiusPx: 28,
+} as const;
+
+export const gradientTokens = {
+  cta: `linear-gradient(90deg, ${obsidianTitanium.accent} 0%, ${obsidianTitanium.accentEnd} 100%)`,
+  canvas: `linear-gradient(180deg, ${obsidianTitanium.canvas} 0%, ${obsidianTitanium.canvasLift} 100%)`,
+} as const;
+
 /**
- * WebGL strain heatmap vertex colors (AGENTS.md §5):
- * - Constricted: tension > 15% stretch
- * - Ideal: contour fit
- * - Loose: zero pressure / folds
+ * CSS class names owned by this token module (`app/globals.css`).
+ * Prefer these over raw slate/sky utilities.
+ */
+export const themeClasses = {
+  glass: 'obsidian-glass',
+  cta: 'obsidian-cta',
+  input: 'obsidian-input',
+  inputBox: 'obsidian-input-box',
+} as const;
+
+/** Kept as sky blue so strain viz does not follow the purple UI accent. */
+const STRAIN_LOOSE_HEX = '#38BDF8';
+const STRAIN_SNUG_HEX = '#F59E0B';
+
+/**
+ * WebGL strain heatmap vertex colors (AGENTS.md §7):
+ * blue / green / amber / red.
  */
 export const strainHeatmap = {
   constricted: obsidianTitanium.tension,
+  snug: STRAIN_SNUG_HEX,
   ideal: obsidianTitanium.success,
-  loose: obsidianTitanium.accent,
+  loose: STRAIN_LOOSE_HEX,
   constrictedThreshold: 0.15,
 } as const;
 
-export type StrainHeatmapSwatch = 'constricted' | 'ideal' | 'loose';
+export type StrainHeatmapSwatch = 'constricted' | 'snug' | 'ideal' | 'loose';
 
 export const typography = {
   sansFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
@@ -83,6 +116,7 @@ export function hexToRgb01(hex: string): Rgb01 {
 
 export const strainHeatmapRgb: Record<StrainHeatmapSwatch, Rgb01> = {
   constricted: hexToRgb01(strainHeatmap.constricted),
+  snug: hexToRgb01(strainHeatmap.snug),
   ideal: hexToRgb01(strainHeatmap.ideal),
   loose: hexToRgb01(strainHeatmap.loose),
 };

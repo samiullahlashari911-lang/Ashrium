@@ -1,74 +1,12 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
+import { decryptTenantSecret, encryptTenantSecret } from '@/lib/server/secret-crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
 const MAX_WEBHOOK_AGE_MS = 5 * 60 * 1000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function getEncryptionKey(): Buffer {
-  const encodedKey = process.env.TENANT_KEY_ENCRYPTION_KEY?.trim();
-  if (!encodedKey) {
-    throw new Error('TENANT_KEY_ENCRYPTION_KEY is not configured.');
-  }
-
-  const key = Buffer.from(encodedKey, 'base64');
-  if (key.length !== 32) {
-    throw new Error('TENANT_KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key.');
-  }
-
-  return key;
-}
-
-function encryptSecret(secret: string): string {
-  const initializationVector = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), initializationVector);
-  const ciphertext = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-
-  return [
-    'v1',
-    initializationVector.toString('base64url'),
-    authTag.toString('base64url'),
-    ciphertext.toString('base64url'),
-  ].join('.');
-}
-
-function decryptSecret(ciphertext: string): string | null {
-  const [version, initializationVector, authTag, encryptedSecret, ...extraParts] = ciphertext.split('.');
-  if (
-    version !== 'v1'
-    || !initializationVector
-    || !authTag
-    || !encryptedSecret
-    || extraParts.length > 0
-  ) {
-    return null;
-  }
-
-  try {
-    const decipher = createDecipheriv(
-      'aes-256-gcm',
-      getEncryptionKey(),
-      Buffer.from(initializationVector, 'base64url'),
-    );
-    decipher.setAuthTag(Buffer.from(authTag, 'base64url'));
-
-    return Buffer.concat([
-      decipher.update(Buffer.from(encryptedSecret, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8');
-  } catch {
-    return null;
-  }
-}
 
 function hasValidSignature(expectedSignature: string, receivedSignature: string): boolean {
   const expected = Buffer.from(expectedSignature, 'hex');
@@ -90,7 +28,7 @@ export async function provisionTelemetryWebhookSecret(): Promise<TelemetryWebhoo
     {
       tenant_id: tenantId,
       provider: 'telemetry',
-      telemetry_webhook_secret_ciphertext: encryptSecret(secret),
+      telemetry_webhook_secret_ciphertext: encryptTenantSecret(secret),
       is_active: true,
     },
     { onConflict: 'tenant_id,provider' },
@@ -136,7 +74,7 @@ export async function verifyTelemetryWebhook(
     .maybeSingle();
 
   const secret = !error && integration?.telemetry_webhook_secret_ciphertext
-    ? decryptSecret(integration.telemetry_webhook_secret_ciphertext)
+    ? decryptTenantSecret(integration.telemetry_webhook_secret_ciphertext)
     : null;
 
   if (!secret) {

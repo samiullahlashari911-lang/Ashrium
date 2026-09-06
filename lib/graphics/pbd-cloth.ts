@@ -1,3 +1,12 @@
+/*
+ * OPTIONAL DEBUG PATH — not the storefront product path.
+ *
+ * The locked product drapes garments on the ANNY parametric hull via XPBD
+ * (cache miss) or an HNSW delta lookup (cache hit). This module is a
+ * client-side PBD cylinder demo used by VFRCanvas as a transitional debug
+ * renderer until the Phase 1 ANNY viewport ships. Do not treat this as the
+ * storefront drape pipeline.
+ */
 import type { PbdEnergyBreakdown, PbdMechanicalProperties } from '@/types/graphics';
 
 export interface PbdClothConfig extends PbdMechanicalProperties {
@@ -539,11 +548,4 @@ export class PbdClothSimulator {
 
     return energy;
   }
-}
-
-/**
- * E_total = E_stretch + E_bend + E_shear + E_gravity + E_collision
- */
-export function computeTotalEnergy(simulator: PbdClothSimulator): number {
-  return simulator.computeEnergyBreakdown().total;
 }

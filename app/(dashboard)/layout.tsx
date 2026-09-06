@@ -1,12 +1,30 @@
 import type { ReactNode } from 'react';
+import { redirect } from 'next/navigation';
 
 import { DashboardNavigation } from '@/app/(dashboard)/dashboard-navigation';
+import { ThemeShell } from '@/components/theme/atmosphere-backdrop';
+import { createClient } from '@/lib/supabase/server';
+import {
+  merchantPortalSignInPath,
+  readMerchantPortalAccess,
+} from '@/lib/supabase/merchant-access';
 
-export default function DashboardLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default async function DashboardLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const supabase = await createClient();
+  const access = await readMerchantPortalAccess(supabase);
+
+  if (!access.allowed) {
+    if (access.reason !== 'unauthenticated') {
+      await supabase.auth.signOut();
+    }
+
+    redirect(merchantPortalSignInPath(access.reason));
+  }
+
   return (
-    <div className="min-h-screen bg-slate-950">
+    <ThemeShell intensity="subtle">
       <DashboardNavigation />
       {children}
-    </div>
+    </ThemeShell>
   );
 }

@@ -49,6 +49,13 @@ venv/
 __pycache__/
 *.py[cod]
 
+# Cog local weights — never commit gated SAM 3D Body checkpoints
+.cog/
+cog/checkpoints/
+cog/**/*.ckpt
+cog/**/*.pt
+
+
 # Local Supabase, Vercel, and temp artifacts
 supabase/.temp/
 .supabase/

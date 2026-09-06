@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { StorefrontSandbox } from '@/app/(dashboard)/sandbox/storefront-sandbox';
+import { inspectReplicateRuntimeConfig } from '@/lib/ml/replicate';
 import { createWidgetEmbedToken } from '@/lib/server/widget-embed';
 import { getCurrentTenantId } from '@/lib/supabase/tenant';
 
@@ -12,5 +13,11 @@ export default async function SandboxPage() {
     redirect('/sign-in');
   }
 
-  return <StorefrontSandbox token={createWidgetEmbedToken(tenantId)} />;
+  return (
+    <StorefrontSandbox
+      tenantId={tenantId}
+      token={createWidgetEmbedToken(tenantId)}
+      replicate={inspectReplicateRuntimeConfig()}
+    />
+  );
 }

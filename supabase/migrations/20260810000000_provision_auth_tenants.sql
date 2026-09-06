@@ -1,6 +1,6 @@
 -- Provision an isolated merchant tenant for every newly registered Auth user.
 
-CREATE TABLE public.tenants (
+CREATE TABLE IF NOT EXISTS public.tenants (
   id UUID PRIMARY KEY,
   company_name TEXT NOT NULL,
   owner_user_id UUID NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE,
@@ -10,6 +10,50 @@ CREATE TABLE public.tenants (
     CHECK (char_length(company_name) BETWEEN 1 AND 160)
 );
 
+ALTER TABLE public.tenants
+  ADD COLUMN IF NOT EXISTS owner_user_id UUID,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+ALTER TABLE public.tenants
+  ALTER COLUMN owner_user_id SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.tenants'::regclass
+      AND conname = 'tenants_owner_user_id_key'
+  ) THEN
+    ALTER TABLE public.tenants
+      ADD CONSTRAINT tenants_owner_user_id_key UNIQUE (owner_user_id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.tenants'::regclass
+      AND conname = 'tenants_owner_user_id_fkey'
+  ) THEN
+    ALTER TABLE public.tenants
+      ADD CONSTRAINT tenants_owner_user_id_fkey
+      FOREIGN KEY (owner_user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.tenants'::regclass
+      AND conname = 'tenants_company_name_length_check'
+  ) THEN
+    ALTER TABLE public.tenants
+      ADD CONSTRAINT tenants_company_name_length_check
+      CHECK (char_length(company_name) BETWEEN 1 AND 160);
+  END IF;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tenants_set_updated_at ON public.tenants;
 CREATE TRIGGER tenants_set_updated_at
   BEFORE UPDATE ON public.tenants
   FOR EACH ROW
@@ -17,11 +61,14 @@ CREATE TRIGGER tenants_set_updated_at
 
 ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_self_access_policy ON public.tenants;
+DROP POLICY IF EXISTS tenants_select_own ON public.tenants;
 CREATE POLICY tenants_select_own
   ON public.tenants
   FOR SELECT
   USING (owner_user_id = auth.uid());
 
+DROP POLICY IF EXISTS tenants_update_own ON public.tenants;
 CREATE POLICY tenants_update_own
   ON public.tenants
   FOR UPDATE
@@ -73,6 +120,8 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION private.provision_tenant_for_new_auth_user() FROM PUBLIC;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_provision_tenant ON auth.users;
 
 CREATE TRIGGER on_auth_user_created_provision_tenant
   AFTER INSERT ON auth.users

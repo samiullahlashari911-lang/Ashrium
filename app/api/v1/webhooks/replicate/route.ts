@@ -1,69 +1,18 @@
-import { purgeBiometricAsset } from '@/lib/server/biometrics-wipe';
+import { parseMhrParametricVector } from '@/lib/ml/replicate';
+import { purgeBiometricJobImages } from '@/lib/server/biometrics-wipe';
 import { verifyReplicateWebhook } from '@/lib/server/replicate-webhook';
 import { createServiceClient } from '@/lib/supabase/service';
 import type { Json } from '@/types/database';
+import type { MhrParametricVector } from '@/types/hmr';
 
 export const runtime = 'nodejs';
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PARAMETRIC_RESULT_TTL_MS = 15 * 60 * 1000;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isJson(value: unknown): value is Json {
-  if (
-    value === null ||
-    typeof value === 'boolean' ||
-    typeof value === 'number' ||
-    typeof value === 'string'
-  ) {
-    return true;
-  }
-
-  if (Array.isArray(value)) {
-    return value.every(isJson);
-  }
-
-  return isRecord(value) && Object.values(value).every(isJson);
-}
-
-function isGltfUrl(value: string): boolean {
-  try {
-    return new URL(value).pathname.endsWith('.gltf');
-  } catch {
-    return false;
-  }
-}
-
-function extractGltfOutputUrl(output: unknown): string | null {
-  if (typeof output === 'string') {
-    return isGltfUrl(output) ? output : null;
-  }
-
-  if (Array.isArray(output)) {
-    return output.find((value): value is string => typeof value === 'string' && isGltfUrl(value))
-      ?? null;
-  }
-
-  if (!isRecord(output)) {
-    return null;
-  }
-
-  const candidates = [output.gltf_output_url, output.gltf_url, output.gltf, output.mesh_url];
-  return candidates.find(
-    (value): value is string => typeof value === 'string' && isGltfUrl(value),
-  ) ?? null;
-}
-
-function extractSmplxParams(output: unknown): Json | null {
-  if (!isRecord(output)) {
-    return null;
-  }
-
-  const candidate = output.smplx_params ?? output.smplx ?? output;
-  return isJson(candidate) ? candidate : null;
+function toJson(value: MhrParametricVector): Json {
+  return JSON.parse(JSON.stringify(value)) as Json;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -84,7 +33,9 @@ export async function POST(request: Request): Promise<Response> {
     const serviceClient = createServiceClient();
     const { data: job, error: jobError } = await serviceClient
       .from('fit_jobs')
-      .select('replicate_prediction_id, input_image_url')
+      .select(
+        'replicate_prediction_id, front_image_path, side_image_path, created_at, weight_kg',
+      )
       .eq('id', jobId)
       .maybeSingle();
 
@@ -92,39 +43,72 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ error: 'Prediction does not match fit job.' }, { status: 409 });
     }
 
-    const isTerminalStatus = event.status === 'succeeded'
-      || event.status === 'failed'
-      || event.status === 'canceled';
+    const isTerminalStatus =
+      event.status === 'succeeded' || event.status === 'failed' || event.status === 'canceled';
 
-    if (isTerminalStatus && job.input_image_url) {
-      const wasPurged = await purgeBiometricAsset(job.input_image_url);
+    if (isTerminalStatus) {
+      const wasPurged = await purgeBiometricJobImages(
+        job.front_image_path,
+        job.side_image_path,
+      );
 
       if (!wasPurged) {
-        return Response.json({ error: 'Unable to purge biometric source image.' }, { status: 500 });
+        return Response.json({ error: 'Unable to purge biometric source images.' }, { status: 500 });
       }
     }
 
     if (event.status === 'succeeded') {
-      const { error: updateError } = await serviceClient
-        .from('fit_jobs')
-        .update({
-          status: 'completed',
-          input_image_url: null,
-          smplx_params: extractSmplxParams(event.output),
-          gltf_output_url: extractGltfOutputUrl(event.output),
-          error_message: null,
-        })
-        .eq('id', jobId);
+      try {
+        const parametricResult = parseMhrParametricVector(
+          event.output,
+          job.weight_kg ?? undefined,
+        );
+        const inferenceDurationMs = Math.max(
+          0,
+          Date.now() - new Date(job.created_at).getTime(),
+        );
 
-      if (updateError) {
-        return Response.json({ error: 'Unable to save fit job output.' }, { status: 500 });
+        const { error: updateError } = await serviceClient
+          .from('fit_jobs')
+          .update({
+            status: 'completed',
+            front_image_path: null,
+            side_image_path: null,
+            parametric_result: toJson(parametricResult),
+            parametric_result_expires_at: new Date(
+              Date.now() + PARAMETRIC_RESULT_TTL_MS,
+            ).toISOString(),
+            inference_duration_ms: inferenceDurationMs,
+            error_message: null,
+          })
+          .eq('id', jobId);
+
+        if (updateError) {
+          return Response.json({ error: 'Unable to save fit job output.' }, { status: 500 });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'MHR Cog output was invalid.';
+        const { error: updateError } = await serviceClient
+          .from('fit_jobs')
+          .update({
+            status: 'failed',
+            front_image_path: null,
+            side_image_path: null,
+            error_message: message,
+          })
+          .eq('id', jobId);
+
+        if (updateError) {
+          return Response.json({ error: 'Unable to save fit job failure.' }, { status: 500 });
+        }
       }
     } else if (event.status === 'failed' || event.status === 'canceled') {
       const { error: updateError } = await serviceClient
         .from('fit_jobs')
         .update({
           status: 'failed',
-          input_image_url: null,
+          front_image_path: null,
+          side_image_path: null,
           error_message: event.error ?? `Replicate prediction ${event.status}.`,
         })
         .eq('id', jobId);

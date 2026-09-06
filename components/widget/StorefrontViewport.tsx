@@ -1,108 +1,101 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { VFRCanvas } from '@/components/vfr/vfr-canvas';
-import { VFRControls } from '@/components/vfr/vfr-controls';
+import { AshriumWordmark } from '@/components/brand/ashrium-logo';
+import { AnnyCanvas } from '@/components/vfr/anny-canvas';
+import { ConfidenceBadge } from '@/components/vfr/confidence-badge';
+import {
+  GuidedCapture,
+  type GuidedCaptureResult,
+} from '@/components/widget/guided-capture/guided-capture';
+import { evaluateConfidenceGate } from '@/lib/fit/confidence-gate';
+import { recommendFit } from '@/lib/fit/recommend';
+import { garmentKindFromCategory } from '@/lib/fit/size-recommend';
+import {
+  fetchFitDrapeResolve,
+  fetchFitRecommendation,
+  type FitRecommendResponse,
+  type FitResolveResponse,
+} from '@/lib/widget/fit-client';
 import { postWidgetEvent, subscribeToHostEvents } from '@/lib/widget/bridge';
-import type { AvatarMeasurements, GarmentMeshProps, ViewportConfig } from '@/types/graphics';
-
-export interface StorefrontGarmentProfile extends GarmentMeshProps {
-  sku: string;
-}
+import type { FitRecommendation, StorefrontGarment } from '@/types/garment';
+import { isAnnyParametricVector } from '@/types/hmr';
 
 interface StorefrontViewportProps {
-  garments: StorefrontGarmentProfile[];
+  garments: StorefrontGarment[];
   initialSku: string;
   targetOrigin: string;
+  tenantId: string;
+  embedToken: string;
 }
 
-const DEFAULT_AVATAR: AvatarMeasurements = {
-  heightCm: 175,
-  chestCm: 100,
-  waistCm: 82,
-};
-
-const DEFAULT_VIEWPORT_CONFIG: ViewportConfig = {
-  autoRotate: true,
-  showHeatmap: true,
-  showWireframe: false,
-};
-
-function clampMeasurement(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(value, minimum), maximum);
-}
-
-function recommendSize(chestCm: number): string {
-  if (chestCm < 90) {
-    return 'S';
-  }
-
-  if (chestCm <= 108) {
-    return 'M';
-  }
-
-  if (chestCm <= 120) {
-    return 'L';
-  }
-
-  return 'XL';
+function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation {
+  return {
+    size: {
+      sizeCode: payload.size.code,
+      source: payload.size.source,
+      variantId: payload.size.variantId,
+      chestCm: payload.size.chestCm,
+      waistCm: payload.size.waistCm,
+      hipCm: payload.size.hipCm,
+      lengthCm: payload.size.lengthCm,
+    },
+    gate: {
+      highConfidence: payload.gate.highConfidence,
+      capturePassed: payload.gate.capturePassed,
+      ingestPassed: payload.gate.ingestPassed,
+      drapePassed: payload.gate.drapePassed,
+      hnswSimilarity: payload.gate.hnswSimilarity,
+      xpbdCompleted: payload.gate.xpbdCompleted,
+    },
+    category: payload.category,
+    ease: payload.ease,
+  };
 }
 
 export function StorefrontViewport({
   garments,
   initialSku,
   targetOrigin,
+  tenantId,
+  embedToken,
 }: StorefrontViewportProps): React.JSX.Element {
   const rootRef = useRef<HTMLElement | null>(null);
-  const garmentBySku = useMemo(
-    () => new Map(garments.map((garment) => [garment.sku, garment])),
-    [garments],
+  const emittedSizeRef = useRef<string | null>(null);
+  const [activeSku, setActiveSku] = useState(
+    garments.some((garment) => garment.sku === initialSku) ? initialSku : garments[0]?.sku ?? '',
   );
-  const initialGarment = garmentBySku.get(initialSku) ?? garments[0];
+  const [result, setResult] = useState<GuidedCaptureResult | null>(null);
+  const [remoteRecommendation, setRemoteRecommendation] = useState<FitRecommendation | null>(null);
+  const [drapeResolve, setDrapeResolve] = useState<FitResolveResponse | null>(null);
 
-  if (!initialGarment) {
-    throw new Error('StorefrontViewport requires at least one garment profile.');
-  }
+  const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
-  const [activeGarment, setActiveGarment] = useState(initialGarment);
-  const [avatar, setAvatar] = useState<AvatarMeasurements>(DEFAULT_AVATAR);
-  const [viewportConfig, setViewportConfig] = useState<ViewportConfig>(DEFAULT_VIEWPORT_CONFIG);
+  const handleComplete = useCallback((next: GuidedCaptureResult) => {
+    emittedSizeRef.current = null;
+    setRemoteRecommendation(null);
+    setDrapeResolve(null);
+    setResult(next);
+  }, []);
 
   useEffect(() => {
     return subscribeToHostEvents(targetOrigin, (event) => {
       if (event.type === 'VFR_SET_GARMENT') {
-        const nextGarment = garmentBySku.get(event.payload.sku);
-        if (nextGarment) {
-          setActiveGarment(nextGarment);
+        const exists = garments.some((garment) => garment.sku === event.payload.sku);
+        if (exists) {
+          setActiveSku(event.payload.sku);
         }
-        return;
       }
-
-      setAvatar((currentAvatar) => ({
-        heightCm: event.payload.heightCm === undefined
-          ? currentAvatar.heightCm
-          : clampMeasurement(event.payload.heightCm, 120, 230),
-        chestCm: event.payload.chestCm === undefined
-          ? currentAvatar.chestCm
-          : clampMeasurement(event.payload.chestCm, 60, 180),
-        waistCm: event.payload.waistCm === undefined
-          ? currentAvatar.waistCm
-          : clampMeasurement(event.payload.waistCm, 45, 160),
-      }));
     });
-  }, [garmentBySku, targetOrigin]);
+  }, [garments, targetOrigin]);
 
   useEffect(() => {
     postWidgetEvent(
-      { type: 'VFR_WIDGET_READY', payload: { sku: activeGarment.sku } },
+      { type: 'VFR_WIDGET_READY', payload: { sku: activeSku } },
       targetOrigin,
     );
-    postWidgetEvent(
-      { type: 'VFR_SIZE_RECOMMENDED', payload: { size: recommendSize(avatar.chestCm) } },
-      targetOrigin,
-    );
-  }, [activeGarment.sku, avatar.chestCm, targetOrigin]);
+  }, [activeSku, targetOrigin]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -129,22 +122,192 @@ export function StorefrontViewport({
     return () => observer.disconnect();
   }, [targetOrigin]);
 
+  const localRecommendation = useMemo((): FitRecommendation | null => {
+    if (!result || !activeGarment) {
+      return null;
+    }
+
+    return recommendFit({
+      measurements: result.parametric.derived_measurements,
+      category: activeGarment.category,
+      variants: activeGarment.sizeVariants,
+      captureGatesPassed: result.session.captureGatesPassed,
+      ingestTier: activeGarment.ingestTier,
+      approximateFit: activeGarment.approximateFit,
+    });
+  }, [activeGarment, result]);
+
+  useEffect(() => {
+    if (!result?.session.fitJobId || !activeSku) {
+      return;
+    }
+
+    let cancelled = false;
+    setRemoteRecommendation(null);
+    setDrapeResolve(null);
+
+    void fetchFitRecommendation(embedToken, {
+      jobId: result.session.fitJobId,
+      sku: activeSku,
+      captureGatesPassed: result.session.captureGatesPassed,
+    })
+      .then((payload) => {
+        if (!cancelled) {
+          setRemoteRecommendation(recommendationFromApi(payload));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRemoteRecommendation(null);
+        }
+      });
+
+    void fetchFitDrapeResolve(embedToken, {
+      jobId: result.session.fitJobId,
+      sku: activeSku,
+      allowXpbd: true,
+    })
+      .then((drape) => {
+        if (!cancelled) {
+          setDrapeResolve(drape);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDrapeResolve(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSku, embedToken, result]);
+
+  const recommendation = useMemo((): FitRecommendation | null => {
+    const base = remoteRecommendation ?? localRecommendation;
+    if (!base || !activeGarment) {
+      return base;
+    }
+
+    if (!drapeResolve) {
+      return base;
+    }
+
+    const gate = evaluateConfidenceGate({
+      captureGatesPassed: base.gate.capturePassed,
+      ingestTier: activeGarment.ingestTier,
+      approximateFit: activeGarment.approximateFit,
+      hnswSimilarity: drapeResolve.similarity ?? base.gate.hnswSimilarity,
+      xpbdCompleted: drapeResolve.xpbdCompleted || base.gate.xpbdCompleted,
+    });
+
+    return { ...base, gate };
+  }, [activeGarment, drapeResolve, localRecommendation, remoteRecommendation]);
+
+  const drapePayloadBase64 = drapeResolve?.payloadBase64 ?? null;
+
+  useEffect(() => {
+    if (!recommendation?.gate.highConfidence) {
+      return;
+    }
+
+    const emittedKey = `${activeSku}:${recommendation.size.sizeCode}`;
+    if (emittedSizeRef.current === emittedKey) {
+      return;
+    }
+
+    emittedSizeRef.current = emittedKey;
+    postWidgetEvent(
+      { type: 'VFR_SIZE_RECOMMENDED', payload: { size: recommendation.size.sizeCode } },
+      targetOrigin,
+    );
+  }, [activeSku, recommendation, targetOrigin]);
+
+  const canvasGarment = recommendation
+    ? {
+        kind: garmentKindFromCategory(activeGarment?.category ?? recommendation.category),
+        chestCm: recommendation.size.chestCm,
+        waistCm: recommendation.size.waistCm,
+        hipCm: recommendation.size.hipCm,
+        easeCm: recommendation.ease.chestCm,
+      }
+    : null;
+
   return (
     <main
       ref={rootRef}
-      className="relative min-h-[420px] overflow-hidden bg-slate-950 text-slate-100"
+      className="relative min-h-[520px] overflow-hidden bg-obsidian-canvas text-obsidian-ink"
     >
-      {/*
-       * VFRCanvas owns the Three.js renderer and disposes its renderer, scene,
-       * geometry, materials, textures, render targets, and controls on unmount.
-       */}
-      <VFRCanvas
-        avatar={avatar}
-        garment={activeGarment}
-        config={viewportConfig}
-        className="h-[min(72vw,620px)] min-h-[420px] w-full"
-      />
-      <VFRControls config={viewportConfig} onConfigChange={setViewportConfig} />
+      {result ? (
+        <div className="flex flex-col">
+          {isAnnyParametricVector(result.parametric) ? (
+            <AnnyCanvas
+              parametric={result.parametric}
+              heightCm={result.session.heightCm}
+              garment={canvasGarment}
+              drapePayloadBase64={drapePayloadBase64}
+              className="h-[min(78vw,640px)] min-h-[420px] w-full"
+            />
+          ) : (
+            <div className="flex h-[min(78vw,640px)] min-h-[420px] w-full flex-col items-center justify-center gap-2 px-6 text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
+                MHR {result.parametric.topology_version}
+              </p>
+              <p className="text-lg font-semibold text-obsidian-ink">Live body params landed</p>
+              <p className="max-w-md text-sm text-obsidian-muted">
+                Chest {result.parametric.derived_measurements.chest_cm.toFixed(1)} cm · waist{' '}
+                {result.parametric.derived_measurements.waist_cm.toFixed(1)} cm · hip{' '}
+                {result.parametric.derived_measurements.hip_cm.toFixed(1)} cm. The MHR viewport
+                consumes these vertices in the next slice.
+              </p>
+            </div>
+          )}
+          <div className="flex items-start justify-between gap-3 px-5 py-4">
+            <div>
+              <AshriumWordmark
+                className="mb-2"
+                markClassName="h-5 w-5 shrink-0"
+                wordClassName="text-xs font-medium tracking-[0.04em] text-obsidian-ink"
+              />
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
+                Your avatar
+              </p>
+              <p className="mt-1 text-sm text-obsidian-muted">
+                Rotate and zoom.
+                {drapePayloadBase64
+                  ? ' Cached or XPBD drape with strain heatmap.'
+                  : activeGarment
+                    ? ` ${activeGarment.name} is draped with a radial ease heatmap.`
+                    : ' Size recommendation comes after a confident drape.'}
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-3">
+              <ConfidenceBadge
+                sizeCode={recommendation?.size.sizeCode ?? null}
+                gate={recommendation?.gate ?? null}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setResult(null);
+                  setRemoteRecommendation(null);
+                  setDrapeResolve(null);
+                  emittedSizeRef.current = null;
+                }}
+                className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
+              >
+                Recapture
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <GuidedCapture
+          tenantId={tenantId}
+          embedToken={embedToken}
+          onComplete={handleComplete}
+        />
+      )}
     </main>
   );
 }

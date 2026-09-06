@@ -1,44 +1,14 @@
 'use server';
 
-import { createCipheriv, randomBytes } from 'node:crypto';
-
-import { requireCurrentTenantId } from '@/lib/supabase/tenant';
+import { encryptTenantSecret } from '@/lib/server/secret-crypto';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
+import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
 export interface SaveMerchantReplicateKeyResult {
   maskedKey: string;
   message: string;
   success: boolean;
-}
-
-function getEncryptionKey(): Buffer {
-  const encodedKey = process.env.TENANT_KEY_ENCRYPTION_KEY?.trim();
-
-  if (!encodedKey) {
-    throw new Error('TENANT_KEY_ENCRYPTION_KEY is not configured.');
-  }
-
-  const key = Buffer.from(encodedKey, 'base64');
-  if (key.length !== 32) {
-    throw new Error('TENANT_KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key.');
-  }
-
-  return key;
-}
-
-function encryptApiKey(apiKey: string): string {
-  const initializationVector = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), initializationVector);
-  const ciphertext = Buffer.concat([cipher.update(apiKey, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-
-  return [
-    'v1',
-    initializationVector.toString('base64url'),
-    authTag.toString('base64url'),
-    ciphertext.toString('base64url'),
-  ].join('.');
 }
 
 function maskReplicateApiKey(): string {
@@ -117,7 +87,7 @@ export async function saveMerchantReplicateKey(
       {
         tenant_id: tenantId,
         provider: 'replicate',
-        replicate_api_key_ciphertext: encryptApiKey(normalizedApiKey),
+        replicate_api_key_ciphertext: encryptTenantSecret(normalizedApiKey),
         is_active: true,
       },
       { onConflict: 'tenant_id,provider' },
