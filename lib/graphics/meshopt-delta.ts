@@ -17,7 +17,7 @@
  * fabricated channel; callers re-simulate instead.
  */
 
-import { ANNY_TOPOLOGY_VERSION } from '@/types/hmr';
+import { ANNY_TOPOLOGY_VERSION, MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 import type { SimDrapeMesh } from '@/types/graphics';
 
 export const SIM_DELTA_MAGIC = 0x4d495341; // 'ASIM' LE
@@ -37,6 +37,19 @@ function topologyHash(topologyVersion: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+const KNOWN_TOPOLOGY_HASHES: ReadonlyArray<readonly [number, string]> = [
+  [topologyHash(MHR_TOPOLOGY_VERSION), MHR_TOPOLOGY_VERSION],
+  [topologyHash(ANNY_TOPOLOGY_VERSION), ANNY_TOPOLOGY_VERSION],
+];
+
+function topologyVersionFromHash(hash: number): string {
+  const match = KNOWN_TOPOLOGY_HASHES.find(([value]) => value === hash);
+  if (!match) {
+    throw new Error('Sim delta topology hash does not match a shipped hull.');
+  }
+  return match[1];
 }
 
 export function encodeSimDelta(mesh: SimDrapeMesh): Uint8Array {
@@ -118,9 +131,7 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
   offset += 2; // flags
   const expectedHash = view.getUint32(offset, true);
   offset += 4;
-  if (expectedHash !== topologyHash(ANNY_TOPOLOGY_VERSION)) {
-    throw new Error('Sim delta topology hash does not match shipped ANNY hull.');
-  }
+  const topologyVersion = topologyVersionFromHash(expectedHash);
 
   const vertexCount = view.getUint32(offset, true);
   offset += 4;
@@ -163,7 +174,7 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
     clearanceCm,
     indices,
     vertexCount,
-    topologyVersion: ANNY_TOPOLOGY_VERSION,
+    topologyVersion,
     meanStrain,
   };
 }
@@ -173,17 +184,25 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
  * without allocating the full vertex arrays, so stale rows can fall through to a
  * fresh simulation instead of shipping an undecodable payload to the client.
  */
-export function isCurrentSimDelta(bytes: Uint8Array): boolean {
+export function isCurrentSimDelta(bytes: Uint8Array, topologyVersion?: string): boolean {
   if (bytes.byteLength < HEADER_BYTES) {
     return false;
   }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return (
-    view.getUint32(0, true) === SIM_DELTA_MAGIC
-    && view.getUint16(VERSION_OFFSET, true) === SIM_DELTA_VERSION
-    && view.getUint32(TOPOLOGY_HASH_OFFSET, true) === topologyHash(ANNY_TOPOLOGY_VERSION)
-  );
+  if (
+    view.getUint32(0, true) !== SIM_DELTA_MAGIC
+    || view.getUint16(VERSION_OFFSET, true) !== SIM_DELTA_VERSION
+  ) {
+    return false;
+  }
+
+  const hash = view.getUint32(TOPOLOGY_HASH_OFFSET, true);
+  if (topologyVersion) {
+    return hash === topologyHash(topologyVersion);
+  }
+
+  return KNOWN_TOPOLOGY_HASHES.some(([value]) => value === hash);
 }
 
 export function simDeltaToBase64(bytes: Uint8Array): string {

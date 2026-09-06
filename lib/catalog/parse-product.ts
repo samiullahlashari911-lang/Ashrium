@@ -1,5 +1,6 @@
 import { lookupKesProperties } from '@/lib/catalog/kes-lookup';
-import { DEFAULT_LETTER_SIZE_CHART, normalizeSizeCode } from '@/lib/fit/size-recommend';
+import { detectUnsupportedGeometry } from '@/lib/catalog/unsupported-geometry';
+import { normalizeSizeCode } from '@/lib/fit/size-recommend';
 import type { ShopifyMetafield, ShopifyProduct, ShopifyVariant } from '@/lib/catalog/shopify-admin';
 import {
   parseCompositionText,
@@ -199,62 +200,6 @@ function parseProductSizeChart(
   return chart;
 }
 
-function defaultChartForSize(sizeCode: string): CatalogSizeVariantInput | null {
-  const normalized = normalizeSizeCode(sizeCode);
-  const exact = DEFAULT_LETTER_SIZE_CHART.find((row) => row.sizeCode === normalized);
-  if (exact) {
-    return {
-      sizeCode: exact.sizeCode,
-      chestCm: exact.chestCm,
-      waistCm: exact.waistCm,
-      hipCm: exact.hipCm,
-      lengthCm: exact.lengthCm,
-      externalSku: null,
-      measurementsFromSource: false,
-    };
-  }
-
-  const medium = DEFAULT_LETTER_SIZE_CHART[1];
-  const step = { chest: 8, waist: 8, hip: 8, length: 2 };
-  const offsets: Record<string, number> = { XXS: -3, XS: -2, XXL: 2, XXXL: 3, '4XL': 4 };
-  const offset = offsets[normalized];
-  if (offset === undefined) {
-    const waistInches = Number(normalized);
-    if (Number.isFinite(waistInches) && waistInches >= 24 && waistInches <= 50) {
-      const waistCm = waistInches * 2.54;
-      return {
-        sizeCode: normalized.slice(0, 16),
-        chestCm: waistCm + 16,
-        waistCm,
-        hipCm: waistCm + 8,
-        lengthCm: 78,
-        externalSku: null,
-        measurementsFromSource: false,
-      };
-    }
-
-    return {
-      sizeCode: normalized.slice(0, 16) || 'OS',
-      chestCm: medium.chestCm,
-      waistCm: medium.waistCm,
-      hipCm: medium.hipCm,
-      lengthCm: medium.lengthCm,
-      externalSku: null,
-      measurementsFromSource: false,
-    };
-  }
-
-  return {
-    sizeCode: normalized,
-    chestCm: medium.chestCm + offset * step.chest,
-    waistCm: medium.waistCm + offset * step.waist,
-    hipCm: medium.hipCm + offset * step.hip,
-    lengthCm: medium.lengthCm + offset * step.length,
-    externalSku: null,
-    measurementsFromSource: false,
-  };
-}
-
 function variantSizeCode(variant: ShopifyVariant): string {
   const sizeOption = variant.selectedOptions.find((option) => SIZE_OPTION_NAME.test(option.name.trim()));
   if (sizeOption?.value) {
@@ -299,11 +244,24 @@ function slugPart(value: string): string {
   return slug.slice(0, 48);
 }
 
+function hasCompleteMeasurements(
+  measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
+): measurements is Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'> {
+  return [measurements.chestCm, measurements.waistCm, measurements.hipCm, measurements.lengthCm].every(
+    (value) => typeof value === 'number' && Number.isFinite(value) && value > 0,
+  );
+}
+
+interface VariantMeasurements {
+  input: CatalogSizeVariantInput | null;
+  hasMissingMeasurements: boolean;
+}
+
 function measurementsForVariant(
   variant: ShopifyVariant,
   productChart: Map<string, Partial<CatalogSizeVariantInput>>,
   sizeCode: string,
-): CatalogSizeVariantInput {
+): VariantMeasurements {
   const fromVariant = {
     chestCm: parseNumber(metafieldValue(variant.metafields, ['chest_cm', 'chest', 'bust_cm', 'bust'])),
     waistCm: parseNumber(metafieldValue(variant.metafields, ['waist_cm', 'waist'])),
@@ -314,31 +272,25 @@ function measurementsForVariant(
     parseJson(metafieldValue(variant.metafields, ['measurements', 'size_measurements', 'garment_measurements'])),
   );
   const chart = productChart.get(sizeCode);
-  const fallback = defaultChartForSize(sizeCode) ?? defaultChartForSize('M');
-  if (!fallback) {
-    throw new Error('Default size chart is missing.');
+  const measurements = {
+    chestCm: fromVariant.chestCm ?? jsonMeasurements?.chestCm ?? chart?.chestCm,
+    waistCm: fromVariant.waistCm ?? jsonMeasurements?.waistCm ?? chart?.waistCm,
+    hipCm: fromVariant.hipCm ?? jsonMeasurements?.hipCm ?? chart?.hipCm,
+    lengthCm: fromVariant.lengthCm ?? jsonMeasurements?.lengthCm ?? chart?.lengthCm,
+  };
+
+  if (!hasCompleteMeasurements(measurements)) {
+    return { input: null, hasMissingMeasurements: true };
   }
 
-  const chest = fromVariant.chestCm ?? jsonMeasurements?.chestCm ?? chart?.chestCm ?? fallback.chestCm;
-  const waist = fromVariant.waistCm ?? jsonMeasurements?.waistCm ?? chart?.waistCm ?? fallback.waistCm;
-  const hip = fromVariant.hipCm ?? jsonMeasurements?.hipCm ?? chart?.hipCm ?? fallback.hipCm;
-  const length = fromVariant.lengthCm ?? jsonMeasurements?.lengthCm ?? chart?.lengthCm ?? fallback.lengthCm;
-  const fromSource =
-    fromVariant.chestCm !== null
-    || fromVariant.waistCm !== null
-    || fromVariant.hipCm !== null
-    || fromVariant.lengthCm !== null
-    || Boolean(jsonMeasurements)
-    || Boolean(chart);
-
   return {
-    sizeCode,
-    chestCm: chest,
-    waistCm: waist,
-    hipCm: hip,
-    lengthCm: length,
-    externalSku: variant.sku.length > 0 ? variant.sku.slice(0, 128) : null,
-    measurementsFromSource: fromSource,
+    input: {
+      sizeCode,
+      ...measurements,
+      externalSku: variant.sku.length > 0 ? variant.sku.slice(0, 128) : null,
+      measurementsFromSource: true,
+    },
+    hasMissingMeasurements: false,
   };
 }
 
@@ -348,6 +300,7 @@ function classifyDraft(
   explicitKes: GarmentMechanicalProperties | null,
   sizes: readonly CatalogSizeVariantInput[],
   category: GarmentCategory,
+  hasMissingMeasurements: boolean,
 ): Pick<
   CatalogGarmentDraft,
   'mechanical' | 'ingestConfidence' | 'ingestTier' | 'mode' | 'approximateFit'
@@ -363,7 +316,7 @@ function classifyDraft(
       ingestConfidence: measuredCount > 0 ? 0.95 : 0.88,
       ingestTier: 1,
       mode: 'A',
-      approximateFit: false,
+      approximateFit: hasMissingMeasurements,
     };
   }
 
@@ -373,7 +326,7 @@ function classifyDraft(
       ingestConfidence: measuredCount >= 2 ? 0.82 : 0.74,
       ingestTier: 2,
       mode: 'B',
-      approximateFit: false,
+      approximateFit: hasMissingMeasurements,
     };
   }
 
@@ -435,8 +388,14 @@ function draftForVariants(
     }
   }
 
+  const variantMeasurements = variants.map((variant) =>
+    measurementsForVariant(variant, sizeChart, variantSizeCode(variant)),
+  );
   const sizesFromVariants = uniqueSizes(
-    variants.map((variant) => measurementsForVariant(variant, sizeChart, variantSizeCode(variant))),
+    variantMeasurements.flatMap((measurement) => (measurement.input ? [measurement.input] : [])),
+  );
+  let hasMissingMeasurements = variantMeasurements.some(
+    (measurement) => measurement.hasMissingMeasurements,
   );
   const chartOnly: CatalogSizeVariantInput[] = [];
   for (const [sizeCode, partial] of sizeChart.entries()) {
@@ -444,28 +403,39 @@ function draftForVariants(
       continue;
     }
 
-    const fallback = defaultChartForSize(sizeCode) ?? defaultChartForSize('M');
-    if (!fallback) {
+    if (!hasCompleteMeasurements(partial)) {
+      hasMissingMeasurements = true;
       continue;
     }
 
     chartOnly.push({
       sizeCode,
-      chestCm: partial.chestCm ?? fallback.chestCm,
-      waistCm: partial.waistCm ?? fallback.waistCm,
-      hipCm: partial.hipCm ?? fallback.hipCm,
-      lengthCm: partial.lengthCm ?? fallback.lengthCm,
+      ...partial,
       externalSku: null,
       measurementsFromSource: true,
     });
   }
   const sizes = uniqueSizes([...sizesFromVariants, ...chartOnly]);
-  const classified = classifyDraft(composition, gsm, explicitKes, sizes, category);
+  const classified = classifyDraft(
+    composition,
+    gsm,
+    explicitKes,
+    sizes,
+    category,
+    hasMissingMeasurements,
+  );
   const colorSlug = slugPart(colorLabel);
   const handleSku = colorSlug ? `${product.handle}-${colorSlug}` : product.handle;
   const firstSku = variants.find((variant) => variant.sku.length > 0)?.sku;
   const sku = (firstSku && variants.length === 1 ? firstSku : handleSku).slice(0, 128);
   const name = colorLabel ? `${product.title} / ${colorLabel}` : product.title;
+  const unsupportedReason = detectUnsupportedGeometry({
+    category,
+    title: name,
+    tags: product.tags,
+    description: corpus,
+    composition,
+  });
 
   return {
     sku,
@@ -475,7 +445,9 @@ function draftForVariants(
     gsm,
     cadPatternUrl: product.imageUrl,
     sizeVariants: sizes,
+    ingestCorpus: corpus.slice(0, 16_000),
     ...classified,
+    approximateFit: classified.approximateFit || unsupportedReason !== null,
   };
 }
 

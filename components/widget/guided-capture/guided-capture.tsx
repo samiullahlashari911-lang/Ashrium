@@ -24,12 +24,15 @@ interface GuidedCaptureProps {
   tenantId: string;
   embedToken: string | null;
   onComplete: (result: GuidedCaptureResult) => void;
+  /** Merchant sandbox / preview only. Live storefront stays camera-only. */
+  allowGallery?: boolean;
 }
 
 export function GuidedCapture({
   tenantId,
   embedToken,
   onComplete,
+  allowGallery = false,
 }: GuidedCaptureProps): React.JSX.Element {
   const [step, setStep] = useState<CaptureStep>('intake');
   const [intake, setIntake] = useState<CaptureIntakeValues | null>(null);
@@ -124,6 +127,7 @@ export function GuidedCapture({
   if (step === 'intake') {
     return (
       <CaptureIntake
+        submitLabel="Next"
         onSubmit={(values) => {
           setIntake(values);
           setStep('front');
@@ -137,6 +141,9 @@ export function GuidedCapture({
     return (
       <CaptureViewport
         view={view}
+        allowGallery={allowGallery}
+        requireConfirm={step === 'front'}
+        stepLabel={step === 'front' ? 'Step 5 of 6' : 'Step 6 of 6'}
         onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
         onBack={() => {
           if (step === 'side') {
@@ -164,7 +171,7 @@ export function GuidedCapture({
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
             ? 'Photos are deleted as soon as inference finishes.'
-            : 'This can take a few minutes on the first fitting of the day. Keep this window open — photos are deleted as soon as inference finishes.'}
+            : 'The live GPU starts when both photos are submitted. This can take a few minutes on a cold start. Keep this window open — photos are deleted as soon as inference finishes.'}
         </p>
       </div>
     );

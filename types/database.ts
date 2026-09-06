@@ -63,6 +63,7 @@ export type TenantRow = {
   owner_user_id: string;
   allowed_domains: string[];
   status: TenantStatus;
+  api_key_hash: string;
   created_at: string;
   updated_at: string;
 };
@@ -73,6 +74,7 @@ export type TenantInsert = {
   owner_user_id: string;
   allowed_domains?: string[];
   status?: TenantStatus;
+  api_key_hash: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -102,6 +104,7 @@ export type GarmentCadProfileRow = GarmentCadMechanicalColumns & {
   ingest_tier: number | null;
   mode: GarmentIngestModeColumn | null;
   approximate_fit: boolean;
+  print_qa_passed: boolean;
   created_at: string;
 };
 
@@ -118,6 +121,7 @@ export type GarmentCadProfileInsert = GarmentCadMechanicalColumns & {
   ingest_tier?: number | null;
   mode?: GarmentIngestModeColumn | null;
   approximate_fit?: boolean;
+  print_qa_passed?: boolean;
   created_at?: string;
 };
 
@@ -138,6 +142,7 @@ export type GarmentCadProfileUpdate = {
   ingest_tier?: number | null;
   mode?: GarmentIngestModeColumn | null;
   approximate_fit?: boolean;
+  print_qa_passed?: boolean;
   created_at?: string;
 };
 
@@ -347,6 +352,7 @@ export type FitJobRow = {
   parametric_result: Json | null;
   inference_duration_ms: number | null;
   parametric_result_expires_at: string | null;
+  gpu_hold_until: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
@@ -368,6 +374,7 @@ export type FitJobInsert = {
   parametric_result?: Json | null;
   inference_duration_ms?: number | null;
   parametric_result_expires_at?: string | null;
+  gpu_hold_until?: string | null;
   error_message?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -389,6 +396,7 @@ export type FitJobUpdate = {
   parametric_result?: Json | null;
   inference_duration_ms?: number | null;
   parametric_result_expires_at?: string | null;
+  gpu_hold_until?: string | null;
   error_message?: string | null;
   created_at?: string;
   updated_at?: string;

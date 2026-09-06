@@ -14,6 +14,8 @@ import {
   type CaptureSex,
   type MhrParametricVector,
 } from '@/types/hmr';
+import { readRestLengthMesh, type GarmentCategory, type RestLengthMesh } from '@/types/garment';
+import type { SimDrapeMesh } from '@/types/graphics';
 
 export interface RunAnnyFitInput {
   frontImageUrl: string;
@@ -25,6 +27,44 @@ export interface RunAnnyFitInput {
 
 export interface DispatchAnnyFitPredictionInput extends RunAnnyFitInput {
   webhookUrl: string;
+}
+
+export interface RunDrapeInput {
+  colliderPositions: number[];
+  colliderIndices: number[];
+  garmentRestMesh: RestLengthMesh;
+  tensileStiffness: number;
+  bendingRigidity: number;
+  shearStiffness: number;
+  areaDensity: number;
+  originY: number;
+}
+
+export interface RunPatternSizeInput {
+  sizeCode: string;
+  chestCm: number;
+  waistCm: number;
+  hipCm: number;
+  lengthCm: number;
+}
+
+export interface RunPatternInput {
+  category: GarmentCategory;
+  productText: string;
+  sizeVariants: RunPatternSizeInput[];
+}
+
+export type PatternIngestStatus =
+  | 'ok'
+  | 'unsupported'
+  | 'self_intersecting'
+  | 'chart_mismatch'
+  | 'instantiate_failed';
+
+export interface PatternIngestResult {
+  status: PatternIngestStatus;
+  unsupportedReason: string | null;
+  meshes: RestLengthMesh[];
 }
 
 export interface ReplicatePredictionReceipt {
@@ -542,6 +582,105 @@ export function parseMhrParametricVector(
   return result;
 }
 
+function requireJsonNumberArray(value: unknown, label: string, expectedLength?: number): number[] {
+  const flattened = flattenNumberArray(value);
+  if (!flattened) {
+    throw new Error(`${label} must be a finite number array`);
+  }
+  if (expectedLength !== undefined && flattened.length !== expectedLength) {
+    throw new Error(`${label} must contain ${expectedLength} finite numbers`);
+  }
+  return flattened;
+}
+
+export function parseDrapeSimOutput(output: unknown): SimDrapeMesh {
+  const unwrapped = unwrapPredictionOutput(output);
+  if (!isRecord(unwrapped)) {
+    throw new Error('Drape Cog output must be an object');
+  }
+
+  if (unwrapped.topology_version !== MHR_TOPOLOGY_VERSION) {
+    throw new Error(
+      `Drape topology_version must be ${MHR_TOPOLOGY_VERSION}; got ${String(unwrapped.topology_version)}`,
+    );
+  }
+
+  const vertexCountValue = unwrapped.vertex_count;
+  if (!isFiniteNumber(vertexCountValue) || vertexCountValue <= 0) {
+    throw new Error('Drape vertex_count must be a positive number');
+  }
+  const vertexCount = Math.trunc(vertexCountValue);
+  const restPositions = new Float32Array(
+    requireJsonNumberArray(unwrapped.rest_positions, 'rest_positions', vertexCount * 3),
+  );
+  const delta = new Float32Array(requireJsonNumberArray(unwrapped.delta, 'delta', vertexCount * 3));
+  const strain = new Float32Array(requireJsonNumberArray(unwrapped.strain, 'strain', vertexCount));
+  const clearanceCm = new Float32Array(
+    requireJsonNumberArray(unwrapped.clearance_cm, 'clearance_cm', vertexCount),
+  );
+  const indexValues = requireJsonNumberArray(unwrapped.indices, 'indices');
+  if (indexValues.length < 3 || indexValues.length % 3 !== 0) {
+    throw new Error('Drape indices must be triangle faces');
+  }
+
+  const meanStrain = isFiniteNumber(unwrapped.mean_strain) ? unwrapped.mean_strain : 0;
+
+  return {
+    restPositions,
+    delta,
+    strain,
+    clearanceCm,
+    indices: Uint32Array.from(indexValues, (value) => Math.trunc(value)),
+    vertexCount,
+    topologyVersion: MHR_TOPOLOGY_VERSION,
+    meanStrain,
+  };
+}
+
+const PATTERN_INGEST_STATUSES: readonly PatternIngestStatus[] = [
+  'ok',
+  'unsupported',
+  'self_intersecting',
+  'chart_mismatch',
+  'instantiate_failed',
+];
+
+export function parsePatternPredictionOutput(output: unknown): PatternIngestResult {
+  const unwrapped = unwrapPredictionOutput(output);
+  if (!isRecord(unwrapped)) {
+    throw new Error('Pattern Cog output must be an object');
+  }
+
+  const statusRaw = unwrapped.status;
+  if (typeof statusRaw !== 'string' || !PATTERN_INGEST_STATUSES.includes(statusRaw as PatternIngestStatus)) {
+    throw new Error('Pattern Cog output.status is missing or invalid.');
+  }
+  const status = statusRaw as PatternIngestStatus;
+  const reason =
+    typeof unwrapped.unsupported_reason === 'string' && unwrapped.unsupported_reason.trim().length > 0
+      ? unwrapped.unsupported_reason.trim()
+      : null;
+
+  if (status !== 'ok') {
+    return { status, unsupportedReason: reason, meshes: [] };
+  }
+
+  if (!Array.isArray(unwrapped.meshes) || unwrapped.meshes.length === 0) {
+    throw new Error('Pattern Cog status=ok requires a non-empty meshes array.');
+  }
+
+  const meshes: RestLengthMesh[] = [];
+  for (const entry of unwrapped.meshes) {
+    const mesh = readRestLengthMesh(entry);
+    if (!mesh) {
+      throw new Error('Pattern Cog mesh is not a valid ashrium.rest_length.v1 panel.');
+    }
+    meshes.push(mesh);
+  }
+
+  return { status: 'ok', unsupportedReason: null, meshes };
+}
+
 function buildBodyPredictionInput(input: RunAnnyFitInput): Record<string, unknown> {
   const predictionInput: Record<string, unknown> = {
     task: 'body',
@@ -604,6 +743,36 @@ function readDeploymentStatus(
     maxInstances: readOptionalInt(configuration.max_instances),
     model: typeof release.model === 'string' ? release.model : null,
     version: typeof release.version === 'string' ? release.version : null,
+  };
+}
+
+export async function fetchReplicatePrediction(
+  predictionId: string,
+): Promise<ReplicatePredictionResponse> {
+  const response = await fetch(
+    `https://api.replicate.com/v1/predictions/${encodeURIComponent(predictionId)}`,
+    {
+      headers: { Authorization: `Bearer ${getReplicateApiToken()}` },
+    },
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Replicate prediction lookup failed (${response.status}): ${errorBody || response.statusText}`,
+    );
+  }
+
+  const payload: unknown = await response.json();
+  if (!isRecord(payload) || typeof payload.id !== 'string' || typeof payload.status !== 'string') {
+    throw new Error('Replicate prediction response was invalid.');
+  }
+
+  return {
+    id: payload.id,
+    status: payload.status,
+    output: payload.output,
+    error: typeof payload.error === 'string' ? payload.error : null,
   };
 }
 
@@ -698,6 +867,7 @@ export async function pinReplicateDeploymentHardware(): Promise<{
  */
 async function requestReplicatePrediction(
   body: Record<string, unknown>,
+  options?: { preferWaitSeconds?: number },
 ): Promise<ReplicatePredictionResponse> {
   const deployment = requireReplicateDeploymentRef();
   const payload: Record<string, unknown> = {
@@ -708,9 +878,17 @@ async function requestReplicatePrediction(
       : {}),
   };
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${getReplicateApiToken()}`,
+    'Content-Type': 'application/json',
+  };
+  if (options?.preferWaitSeconds && options.preferWaitSeconds > 0) {
+    headers.Prefer = `wait=${Math.trunc(options.preferWaitSeconds)}`;
+  }
+
   const response = await fetch(predictionRequestUrl(deployment), {
     method: 'POST',
-    headers: replicateAuthHeaders(),
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -744,6 +922,114 @@ export async function dispatchAnnyFitPrediction(
     id: prediction.id,
     status: prediction.status,
   };
+}
+
+function buildDrapePredictionInput(input: RunDrapeInput): Record<string, unknown> {
+  return {
+    task: 'drape',
+    collider_positions: JSON.stringify(input.colliderPositions),
+    collider_indices: JSON.stringify(input.colliderIndices),
+    garment_rest_mesh: JSON.stringify(input.garmentRestMesh),
+    tensile_stiffness: input.tensileStiffness,
+    bending_rigidity: input.bendingRigidity,
+    shear_stiffness: input.shearStiffness,
+    area_density: input.areaDensity,
+    origin_y: input.originY,
+  };
+}
+
+function buildPatternPredictionInput(input: RunPatternInput): Record<string, unknown> {
+  return {
+    task: 'pattern',
+    garment_category: input.category,
+    product_text: input.productText,
+    size_chart: JSON.stringify(input.sizeVariants),
+  };
+}
+
+export function isTerminalReplicatePredictionStatus(status: string): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+}
+
+export async function waitForReplicatePrediction(
+  predictionId: string,
+  options?: { timeoutMs?: number; pollMs?: number },
+): Promise<ReplicatePredictionResponse> {
+  const timeoutMs = options?.timeoutMs ?? 50_000;
+  const pollMs = options?.pollMs ?? 750;
+  const started = Date.now();
+  let latest = await fetchReplicatePrediction(predictionId);
+
+  while (!isTerminalReplicatePredictionStatus(latest.status)) {
+    if (Date.now() - started >= timeoutMs) {
+      throw new Error(
+        `Replicate prediction ${predictionId} timed out after ${timeoutMs}ms (status ${latest.status}).`,
+      );
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, pollMs);
+    });
+    latest = await fetchReplicatePrediction(predictionId);
+  }
+
+  if (latest.status !== 'succeeded') {
+    throw new Error(latest.error ?? `Replicate prediction ${latest.status}.`);
+  }
+
+  return latest;
+}
+
+export async function runDrapePrediction(input: RunDrapeInput): Promise<SimDrapeMesh> {
+  requireReplicateDeploymentRef();
+  getAnnyFitModelVersion();
+
+  const prediction = await requestReplicatePrediction(
+    { input: buildDrapePredictionInput(input) },
+    { preferWaitSeconds: 60 },
+  );
+
+  if (typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
+    throw new Error('Replicate drape dispatch returned an invalid response.');
+  }
+
+  const completed = isTerminalReplicatePredictionStatus(prediction.status)
+    ? prediction
+    : await waitForReplicatePrediction(prediction.id);
+
+  if (completed.status !== 'succeeded') {
+    throw new Error(completed.error ?? `Replicate drape ${completed.status}.`);
+  }
+
+  return parseDrapeSimOutput(completed.output);
+}
+
+export async function runPatternPrediction(input: RunPatternInput): Promise<PatternIngestResult> {
+  requireReplicateDeploymentRef();
+  getAnnyFitModelVersion();
+
+  if (input.sizeVariants.length === 0) {
+    throw new Error('task=pattern requires at least one size with published girths.');
+  }
+
+  const prediction = await requestReplicatePrediction(
+    { input: buildPatternPredictionInput(input) },
+    { preferWaitSeconds: 60 },
+  );
+
+  if (typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
+    throw new Error('Replicate pattern dispatch returned an invalid response.');
+  }
+
+  const completed = isTerminalReplicatePredictionStatus(prediction.status)
+    ? prediction
+    : await waitForReplicatePrediction(prediction.id, { timeoutMs: 180_000 });
+
+  if (completed.status !== 'succeeded') {
+    throw new Error(completed.error ?? `Replicate pattern ${completed.status}.`);
+  }
+
+  return parsePatternPredictionOutput(completed.output);
 }
 
 export async function confirmAnnyFitCogVersion(): Promise<AnnyFitCogVersionConfirmation> {

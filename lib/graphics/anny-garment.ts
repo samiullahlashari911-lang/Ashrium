@@ -1,8 +1,16 @@
 import * as THREE from 'three';
 
+import { albedoHexToRgbInteger } from '@/lib/graphics/print-qa';
 import { computeRadialHeatmapColors } from '@/lib/graphics/radial-heatmap';
 
 export type AnnyGarmentKind = 'tee' | 'pant' | 'dress';
+
+/** Cool stone, not skin. GDPR Art. 9 — do not infer a shopper's complexion. */
+export const MANNEQUIN_COLOR = 0x8a90a3;
+/** Neutral charcoal undergarment so the body is not a nude grey mesh. */
+export const UNDERGARMENT_COLOR = 0x2a2d38;
+export const MANNEQUIN_HEAD_START_T = 0.84;
+const UNDERGARMENT_THICKNESS_M = 0.004;
 
 export interface AnnyGarmentSize {
   chestCm: number;
@@ -234,8 +242,274 @@ export function buildAnnyGarmentGeometry(
     'color',
     new THREE.BufferAttribute(computeRadialHeatmapColors(clearances, easeCm), 3),
   );
+  geometry.setAttribute('uv', new THREE.BufferAttribute(garmentCodeUvsFromPositions(positions), 2));
   geometry.setIndex(compactFaces);
   geometry.computeVertexNormals();
 
+  return geometry;
+}
+
+/**
+ * Cylindrical UVs matching the GarmentCode rest-length wrap
+ * (`rows × ring_columns` from the 2D pattern). u is around the body, v is up.
+ */
+export function garmentCodeUvsFromPositions(positions: Float32Array): Float32Array {
+  const vertexCount = Math.floor(positions.length / 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  if (vertexCount === 0) {
+    return uvs;
+  }
+
+  let yMin = Number.POSITIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < vertexCount; index += 1) {
+    const y = positions[index * 3 + 1];
+    yMin = Math.min(yMin, y);
+    yMax = Math.max(yMax, y);
+  }
+
+  const height = Math.max(yMax - yMin, 1e-5);
+  for (let index = 0; index < vertexCount; index += 1) {
+    const base = index * 3;
+    const x = positions[base];
+    const y = positions[base + 1];
+    const z = positions[base + 2];
+    const angle = Math.atan2(x, z);
+    uvs[index * 2] = (angle / (Math.PI * 2) + 1) % 1;
+    uvs[index * 2 + 1] = (y - yMin) / height;
+  }
+
+  return uvs;
+}
+
+/**
+ * Replaces the head with a featureless dome so the avatar is a mannequin,
+ * not a face. Mutates the xyz buffer in place.
+ */
+export function sealMannequinHead(
+  positions: Float32Array,
+  headStartT: number = MANNEQUIN_HEAD_START_T,
+): void {
+  const vertexCount = Math.floor(positions.length / 3);
+  if (vertexCount < 3) {
+    return;
+  }
+
+  let yMin = Number.POSITIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < vertexCount; index += 1) {
+    const y = positions[index * 3 + 1];
+    yMin = Math.min(yMin, y);
+    yMax = Math.max(yMax, y);
+  }
+
+  const height = yMax - yMin;
+  if (height <= 1e-4) {
+    return;
+  }
+
+  const neckY = yMin + height * headStartT;
+  const neckBand = height * 0.02;
+  const neckRadii: number[] = [];
+  for (let index = 0; index < vertexCount; index += 1) {
+    const base = index * 3;
+    const y = positions[base + 1];
+    if (Math.abs(y - neckY) <= neckBand) {
+      neckRadii.push(Math.hypot(positions[base], positions[base + 2]));
+    }
+  }
+
+  neckRadii.sort((left, right) => left - right);
+  const neckR = neckRadii.length > 0
+    ? neckRadii[Math.floor(neckRadii.length / 2)]
+    : height * 0.055;
+  const capHeight = neckR * 0.42;
+  const capRadius = neckR * 0.7;
+
+  for (let index = 0; index < vertexCount; index += 1) {
+    const base = index * 3;
+    const x = positions[base];
+    const y = positions[base + 1];
+    const z = positions[base + 2];
+    if (y <= neckY) {
+      continue;
+    }
+
+    const t = Math.min((y - neckY) / Math.max(yMax - neckY, 1e-5), 1);
+    const radius = Math.hypot(x, z);
+    const nx = radius > 1e-6 ? x / radius : 0;
+    const nz = radius > 1e-6 ? z / radius : 1;
+    const dome = Math.sqrt(Math.max(0, 1 - t * t));
+    positions[base] = nx * capRadius * dome;
+    positions[base + 1] = neckY + capHeight * t;
+    positions[base + 2] = nz * capRadius * dome;
+  }
+}
+
+export function applyFacelessMannequin(mesh: THREE.Mesh): void {
+  const position = mesh.geometry.getAttribute('position');
+  if (!position || position.count < 3) {
+    return;
+  }
+
+  const array = position.array;
+  if (!(array instanceof Float32Array)) {
+    return;
+  }
+
+  sealMannequinHead(array);
+  position.needsUpdate = true;
+  mesh.geometry.computeVertexNormals();
+  mesh.geometry.computeBoundingBox();
+  mesh.geometry.computeBoundingSphere();
+}
+
+export function createMannequinMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: MANNEQUIN_COLOR,
+    roughness: 0.88,
+    metalness: 0.02,
+  });
+}
+
+export function createUndergarmentMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: UNDERGARMENT_COLOR,
+    roughness: 0.78,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
+}
+
+export function createGarmentAlbedoMaterial(input: {
+  map?: THREE.Texture | null;
+  albedoHex?: string | null;
+}): THREE.MeshStandardMaterial {
+  const hasMap = Boolean(input.map);
+  return new THREE.MeshStandardMaterial({
+    map: input.map ?? null,
+    color: hasMap ? 0xffffff : albedoHexToRgbInteger(input.albedoHex ?? '#5c5348'),
+    roughness: 0.64,
+    metalness: 0.02,
+    side: THREE.DoubleSide,
+  });
+}
+
+export function applyMannequinMaterial(root: THREE.Object3D): void {
+  root.traverse((node) => {
+    if (!(node instanceof THREE.Mesh)) {
+      return;
+    }
+
+    const previous = node.material;
+    node.material = createMannequinMaterial();
+    node.castShadow = true;
+    node.receiveShadow = true;
+    if (Array.isArray(previous)) {
+      previous.forEach((material) => material.dispose());
+    } else if (previous) {
+      previous.dispose();
+    }
+  });
+}
+
+function vertexInUndergarment(t: number): boolean {
+  return t >= 0.46 && t <= 0.8;
+}
+
+/** Neutral tank/brief layer so the mannequin is not a nude grey mesh. */
+export function buildUndergarmentGeometry(hullMesh: THREE.Mesh): THREE.BufferGeometry | null {
+  const positionAttr = hullMesh.geometry.getAttribute('position');
+  if (!positionAttr || positionAttr.count < 3) {
+    return null;
+  }
+
+  const vertexCount = positionAttr.count;
+  const world = new Float32Array(vertexCount * 3);
+  const scratch = new THREE.Vector3();
+
+  for (let index = 0; index < vertexCount; index += 1) {
+    hullMesh.getVertexPosition(index, scratch);
+    if (hullMesh instanceof THREE.SkinnedMesh) {
+      hullMesh.applyBoneTransform(index, scratch);
+    }
+    hullMesh.localToWorld(scratch);
+    const base = index * 3;
+    world[base] = scratch.x;
+    world[base + 1] = scratch.y;
+    world[base + 2] = scratch.z;
+  }
+
+  let yMin = Number.POSITIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < vertexCount; index += 1) {
+    const y = world[index * 3 + 1];
+    yMin = Math.min(yMin, y);
+    yMax = Math.max(yMax, y);
+  }
+
+  const height = yMax - yMin;
+  if (height <= 1e-4) {
+    return null;
+  }
+
+  const included = new Uint8Array(vertexCount);
+  for (let index = 0; index < vertexCount; index += 1) {
+    const t = (world[index * 3 + 1] - yMin) / height;
+    included[index] = vertexInUndergarment(t) ? 1 : 0;
+  }
+
+  const sourceIndex = readIndexArray(hullMesh.geometry);
+  const compactFaces: number[] = [];
+  const oldToNew = new Int32Array(vertexCount).fill(-1);
+  const used: number[] = [];
+
+  const remember = (vertex: number): number => {
+    if (oldToNew[vertex] >= 0) {
+      return oldToNew[vertex];
+    }
+
+    const next = used.length;
+    oldToNew[vertex] = next;
+    used.push(vertex);
+    return next;
+  };
+
+  for (let offset = 0; offset + 2 < sourceIndex.length; offset += 3) {
+    const a = sourceIndex[offset];
+    const b = sourceIndex[offset + 1];
+    const c = sourceIndex[offset + 2];
+    if (!included[a] || !included[b] || !included[c]) {
+      continue;
+    }
+
+    compactFaces.push(remember(a), remember(b), remember(c));
+  }
+
+  if (used.length < 3 || compactFaces.length < 3) {
+    return null;
+  }
+
+  const positions = new Float32Array(used.length * 3);
+  for (let compact = 0; compact < used.length; compact += 1) {
+    const source = used[compact];
+    const base = source * 3;
+    const x = world[base];
+    const y = world[base + 1];
+    const z = world[base + 2];
+    const dirLen = Math.hypot(x, z);
+    const nx = dirLen > 1e-6 ? x / dirLen : 0;
+    const nz = dirLen > 1e-6 ? z / dirLen : 0;
+    const bodyR = dirLen;
+    const outBase = compact * 3;
+    positions[outBase] = nx * (bodyR + UNDERGARMENT_THICKNESS_M);
+    positions[outBase + 1] = y;
+    positions[outBase + 2] = nz * (bodyR + UNDERGARMENT_THICKNESS_M);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(compactFaces);
+  geometry.computeVertexNormals();
   return geometry;
 }

@@ -1,9 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { gradeRestLengthSet } from '@/lib/catalog/laplacian-grade';
+import { patternProductText, shouldDispatchPattern } from '@/lib/catalog/pattern-ingest';
+import { evaluatePrintAlbedoUrl } from '@/lib/catalog/print-qa';
 import { writeRestLengthMesh } from '@/lib/catalog/rest-length-store';
+import { detectUnsupportedGeometry } from '@/lib/catalog/unsupported-geometry';
+import { runPatternPrediction } from '@/lib/ml/replicate';
 import type { Database, GarmentCadProfileInsert, Json } from '@/types/database';
-import type { CatalogGarmentDraft } from '@/types/garment';
+import type { CatalogGarmentDraft, RestLengthMesh } from '@/types/garment';
 
 function compositionJson(draft: CatalogGarmentDraft): Json | null {
   if (!draft.composition) {
@@ -13,12 +16,55 @@ function compositionJson(draft: CatalogGarmentDraft): Json | null {
   return { ...draft.composition };
 }
 
+async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
+  meshes: RestLengthMesh[];
+  approximateFit: boolean;
+}> {
+  const unsupported = detectUnsupportedGeometry({
+    category: draft.category,
+    title: draft.name,
+    description: draft.ingestCorpus ?? '',
+    composition: draft.composition,
+  });
+  if (unsupported || !shouldDispatchPattern(draft)) {
+    return { meshes: [], approximateFit: true };
+  }
+
+  const result = await runPatternPrediction({
+    category: draft.category,
+    productText: patternProductText(draft),
+    sizeVariants: draft.sizeVariants.map((variant) => ({
+      sizeCode: variant.sizeCode,
+      chestCm: variant.chestCm,
+      waistCm: variant.waistCm,
+      hipCm: variant.hipCm,
+      lengthCm: variant.lengthCm,
+    })),
+  });
+
+  if (result.status !== 'ok' || result.meshes.length === 0) {
+    return { meshes: [], approximateFit: true };
+  }
+
+  const byCode = new Map(result.meshes.map((mesh) => [mesh.sizeCode, mesh]));
+  const complete = draft.sizeVariants.every((variant) => byCode.has(variant.sizeCode));
+  if (!complete) {
+    return { meshes: [], approximateFit: true };
+  }
+
+  return { meshes: result.meshes, approximateFit: draft.approximateFit };
+}
+
 export async function persistCatalogGarment(
   supabase: SupabaseClient<Database, 'public'>,
   tenantId: string,
   draft: CatalogGarmentDraft,
   profileId?: string,
 ): Promise<{ garmentId: string; created: boolean }> {
+  const graded = await gradeWithGarmentCode(draft);
+  const printQa = await evaluatePrintAlbedoUrl(draft.cadPatternUrl);
+  const approximateFit = draft.approximateFit || graded.approximateFit || !printQa.passed;
+
   const profilePayload: GarmentCadProfileInsert = {
     tenant_id: tenantId,
     sku: draft.sku,
@@ -34,7 +80,8 @@ export async function persistCatalogGarment(
     ingest_confidence: draft.ingestConfidence,
     ingest_tier: draft.ingestTier,
     mode: draft.mode,
-    approximate_fit: draft.approximateFit,
+    approximate_fit: approximateFit,
+    print_qa_passed: printQa.passed,
   };
 
   let garmentId = profileId ?? '';
@@ -76,19 +123,10 @@ export async function persistCatalogGarment(
     throw new Error('Unable to resolve garment profile id.');
   }
 
-  const meshes =
-    draft.sizeVariants.length > 0
-      ? gradeRestLengthSet(draft.category, draft.sizeVariants)
-      : [];
   const restPaths = new Map<string, string>();
-
-  for (const mesh of meshes) {
-    try {
-      const path = await writeRestLengthMesh(tenantId, garmentId, mesh);
-      restPaths.set(mesh.sizeCode, path);
-    } catch {
-      // Measurements still persist; Phase 4 reads rest_length_path when present.
-    }
+  for (const mesh of graded.meshes) {
+    const path = await writeRestLengthMesh(tenantId, garmentId, mesh);
+    restPaths.set(mesh.sizeCode, path);
   }
 
   const { data: existingVariants, error: existingError } = await supabase

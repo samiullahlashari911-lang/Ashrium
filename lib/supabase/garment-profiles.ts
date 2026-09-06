@@ -207,13 +207,16 @@ export function toStorefrontGarment(
   row: GarmentCadProfileRow,
   variants: readonly GarmentSizeVariantRow[],
 ): StorefrontGarment {
+  const printQaPassed = row.print_qa_passed && Boolean(row.cad_pattern_url);
   return {
     sku: row.sku,
     name: row.name,
     category: readGarmentCategory(row.category),
     ingestConfidence: row.ingest_confidence,
     ingestTier: readGarmentIngestTier(row.ingest_tier),
-    approximateFit: row.approximate_fit,
+    approximateFit: row.approximate_fit || !printQaPassed,
+    albedoUrl: printQaPassed ? row.cad_pattern_url : null,
+    printQaPassed,
     sizeVariants: variants.map(toStorefrontSizeVariant),
   };
 }

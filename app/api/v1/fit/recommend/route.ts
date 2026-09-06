@@ -1,4 +1,5 @@
-import { isAnnyParametricVector, readFitParametricVector } from '@/types/hmr';
+import { isAnnyParametricVector, readFitParametricVector, readFitResiduals, readMhrParametricVector } from '@/types/hmr';
+import { mhrSimulationCacheVector } from '@/lib/fit/mhr-cache-vector';
 import { recommendFit } from '@/lib/fit/recommend';
 import { recommendSize } from '@/lib/fit/size-recommend';
 import { matchSimulationCache } from '@/lib/fit/simulation-match';
@@ -43,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
   const supabase = createServiceClient();
   const { data: job, error: jobError } = await supabase
     .from('fit_jobs')
-    .select('id, status, parametric_result')
+    .select('id, status, height_cm, parametric_result')
     .eq('id', body.jobId)
     .eq('tenant_id', tenantId)
     .maybeSingle();
@@ -73,15 +74,34 @@ export async function POST(request: Request): Promise<Response> {
     garment?.sizeVariants ?? [],
   );
 
-  const drape = isAnnyParametricVector(parametric)
+  const mhr = readMhrParametricVector(parametric);
+  const heightCm =
+    typeof job.height_cm === 'number' && Number.isFinite(job.height_cm) && job.height_cm >= 50
+      ? job.height_cm
+      : 170;
+  const residuals = readFitResiduals(parametric);
+  const drapeQuery = mhr
+    ? {
+        phenotype: mhrSimulationCacheVector({
+          measurements: mhr.derived_measurements,
+          heightCm,
+          heightResidualCm: residuals.heightResidualCm,
+          clothingResidual: residuals.clothingResidual,
+        }),
+        topologyVersion: mhr.topology_version,
+      }
+    : isAnnyParametricVector(parametric)
+      ? { phenotype: parametric.phenotype, topologyVersion: parametric.topology_version }
+      : null;
+  const drape = drapeQuery
     ? await matchSimulationCache({
         supabase,
         tenantId,
         variantId: size.variantId,
-        phenotype: parametric.phenotype,
+        phenotype: drapeQuery.phenotype,
+        topologyVersion: drapeQuery.topologyVersion,
       })
     : { similarity: null, xpbdCompleted: false, row: null };
-
   const recommendation = recommendFit({
     measurements: parametric.derived_measurements,
     category: garment?.category ?? null,
@@ -91,6 +111,9 @@ export async function POST(request: Request): Promise<Response> {
     approximateFit: garment?.approximateFit ?? true,
     hnswSimilarity: drape.similarity,
     xpbdCompleted: drape.xpbdCompleted,
+    heightResidualCm: residuals.heightResidualCm,
+    clothingResidual: residuals.clothingResidual,
+    printQaPassed: garment?.printQaPassed ?? false,
   });
 
   return Response.json({
@@ -108,6 +131,8 @@ export async function POST(request: Request): Promise<Response> {
       capturePassed: recommendation.gate.capturePassed,
       ingestPassed: recommendation.gate.ingestPassed,
       drapePassed: recommendation.gate.drapePassed,
+      residualPassed: recommendation.gate.residualPassed,
+      printPassed: recommendation.gate.printPassed,
       hnswSimilarity: recommendation.gate.hnswSimilarity,
       xpbdCompleted: recommendation.gate.xpbdCompleted,
     },

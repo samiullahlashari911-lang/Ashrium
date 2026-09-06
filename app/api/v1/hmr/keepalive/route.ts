@@ -1,5 +1,6 @@
 import { setReplicateSessionGpu, readReplicateSessionGpu } from '@/lib/ml/replicate';
 import { authorizeCronRequest } from '@/lib/server/cron-secret';
+import { authorizeGpuScaleRequest } from '@/lib/server/gpu-control-auth';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
 export const runtime = 'nodejs';
@@ -90,7 +91,9 @@ function sessionGpuJson(result: Awaited<ReturnType<typeof readReplicateSessionGp
 }
 
 async function handleKeepAlive(request: Request, action: 'warm' | 'sleep' | 'status'): Promise<Response> {
-  const denied = await authorizeKeepAlive(request);
+  const denied = action === 'status'
+    ? await authorizeKeepAlive(request)
+    : authorizeGpuScaleRequest(request);
   if (denied) {
     return denied;
   }

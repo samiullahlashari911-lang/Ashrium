@@ -7,6 +7,9 @@ import {
   ANNY_PHENOTYPE_DIM,
   ANNY_TOPOLOGY_VERSION,
   ANNY_VERTEX_COUNT,
+  MHR_JOINT_COUNT,
+  MHR_TOPOLOGY_VERSION,
+  MHR_VERTEX_COUNT,
   type AnnyDerivedMeasurements,
   type AnnyParametricVector,
 } from '@/types/hmr';
@@ -63,17 +66,24 @@ export interface AnnyHullGeometry {
   topologyVersion: typeof ANNY_TOPOLOGY_VERSION;
 }
 
+export interface MhrHullGeometry {
+  positions: Float32Array;
+  indices: Uint32Array;
+  topologyVersion: typeof MHR_TOPOLOGY_VERSION;
+}
+
 let cachedHull: AnnyHullGeometry | null = null;
+let cachedMhrHull: MhrHullGeometry | null = null;
 
 function readGlbJsonAndBin(buffer: Buffer): { json: GlbJson; bin: Buffer } {
   if (buffer.length < 20 || buffer.readUInt32LE(0) !== GLB_MAGIC) {
-    throw new Error('Invalid ANNY hull GLB magic.');
+    throw new Error('Invalid hull GLB magic.');
   }
 
   const jsonLength = buffer.readUInt32LE(12);
   const jsonType = buffer.readUInt32LE(16);
   if (jsonType !== CHUNK_JSON) {
-    throw new Error('ANNY hull GLB missing JSON chunk.');
+    throw new Error('Hull GLB missing JSON chunk.');
   }
 
   const jsonStart = 20;
@@ -83,11 +93,29 @@ function readGlbJsonAndBin(buffer: Buffer): { json: GlbJson; bin: Buffer } {
   const binLength = buffer.readUInt32LE(jsonEnd);
   const binType = buffer.readUInt32LE(jsonEnd + 4);
   if (binType !== CHUNK_BIN) {
-    throw new Error('ANNY hull GLB missing BIN chunk.');
+    throw new Error('Hull GLB missing BIN chunk.');
   }
 
   const bin = buffer.subarray(jsonEnd + 8, jsonEnd + 8 + binLength);
   return { json, bin };
+}
+
+async function loadHullGeometry(
+  relativePath: string,
+  expectedCount: number,
+  topologyVersion: string,
+): Promise<{ positions: Float32Array; indices: Uint32Array; topologyVersion: string }> {
+  const glbPath = path.join(process.cwd(), relativePath);
+  const buffer = await fs.readFile(glbPath);
+  const { json, bin } = readGlbJsonAndBin(buffer);
+  const primitive = json.meshes[0]?.primitives[0];
+  if (!primitive) {
+    throw new Error(`${relativePath} has no mesh primitive.`);
+  }
+
+  const positions = readAccessorFloat32(json, bin, primitive.attributes.POSITION, expectedCount);
+  const indices = readAccessorUint32(json, bin, primitive.indices);
+  return { positions, indices, topologyVersion };
 }
 
 function readAccessorFloat32(
@@ -99,12 +127,12 @@ function readAccessorFloat32(
   const accessor = json.accessors[accessorIndex];
   const view = json.bufferViews[accessor.bufferView];
   if (!accessor || !view || accessor.type !== 'VEC3' || accessor.componentType !== 5126) {
-    throw new Error('ANNY hull POSITION accessor is invalid.');
+    throw new Error('Hull POSITION accessor is invalid.');
   }
 
   if (accessor.count !== expectedCount) {
     throw new Error(
-      `ANNY hull vertex count ${accessor.count} does not match ${expectedCount}.`,
+      `Hull vertex count ${accessor.count} does not match ${expectedCount}.`,
     );
   }
 
@@ -122,7 +150,7 @@ function readAccessorUint32(
   const accessor = json.accessors[accessorIndex];
   const view = json.bufferViews[accessor.bufferView];
   if (!accessor || !view || accessor.type !== 'SCALAR' || accessor.componentType !== 5125) {
-    throw new Error('ANNY hull INDEX accessor is invalid.');
+    throw new Error('Hull INDEX accessor is invalid.');
   }
 
   const offset = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
@@ -140,26 +168,48 @@ export async function loadAnnyHullGeometry(): Promise<AnnyHullGeometry> {
     };
   }
 
-  const glbPath = path.join(process.cwd(), 'public', 'models', 'anny-hull.glb');
-  const buffer = await fs.readFile(glbPath);
-  const { json, bin } = readGlbJsonAndBin(buffer);
-  const primitive = json.meshes[0]?.primitives[0];
-  if (!primitive) {
-    throw new Error('ANNY hull GLB has no mesh primitive.');
-  }
-
-  const positions = readAccessorFloat32(json, bin, primitive.attributes.POSITION, ANNY_VERTEX_COUNT);
-  const indices = readAccessorUint32(json, bin, primitive.indices);
+  const loaded = await loadHullGeometry(
+    path.join('public', 'models', 'anny-hull.glb'),
+    ANNY_VERTEX_COUNT,
+    ANNY_TOPOLOGY_VERSION,
+  );
   cachedHull = {
-    positions,
-    indices,
+    positions: loaded.positions,
+    indices: loaded.indices,
     topologyVersion: ANNY_TOPOLOGY_VERSION,
   };
 
   return {
-    positions: positions.slice(),
-    indices: indices.slice(),
+    positions: loaded.positions.slice(),
+    indices: loaded.indices.slice(),
     topologyVersion: ANNY_TOPOLOGY_VERSION,
+  };
+}
+
+export async function loadMhrHullGeometry(): Promise<MhrHullGeometry> {
+  if (cachedMhrHull) {
+    return {
+      positions: cachedMhrHull.positions.slice(),
+      indices: cachedMhrHull.indices.slice(),
+      topologyVersion: cachedMhrHull.topologyVersion,
+    };
+  }
+
+  const loaded = await loadHullGeometry(
+    path.join('public', 'models', 'mhr-hull.glb'),
+    MHR_VERTEX_COUNT,
+    MHR_TOPOLOGY_VERSION,
+  );
+  cachedMhrHull = {
+    positions: loaded.positions,
+    indices: loaded.indices,
+    topologyVersion: MHR_TOPOLOGY_VERSION,
+  };
+
+  return {
+    positions: loaded.positions.slice(),
+    indices: loaded.indices.slice(),
+    topologyVersion: MHR_TOPOLOGY_VERSION,
   };
 }
 
@@ -167,10 +217,7 @@ export async function loadAnnyHullGeometry(): Promise<AnnyHullGeometry> {
  * Reads the shipped GLB stamp without loading vertex buffers. Phase 6 keeps
  * `anny-13380-104` unless a later licensed hull is dropped in its place.
  */
-export async function readShippedAnnyHullStamp(): Promise<ShippedAnnyHullStamp> {
-  const glbPath = path.join(process.cwd(), 'public', 'models', 'anny-hull.glb');
-  const buffer = await fs.readFile(glbPath);
-  const { json } = readGlbJsonAndBin(buffer);
+function readHullStampFromJson(json: GlbJson): Omit<ShippedAnnyHullStamp, 'matchesShippedTopology'> {
   const positionIndex = json.meshes[0]?.primitives[0]?.attributes.POSITION;
   const vertexCount =
     positionIndex === undefined ? 0 : (json.accessors[positionIndex]?.count ?? 0);
@@ -191,10 +238,36 @@ export async function readShippedAnnyHullStamp(): Promise<ShippedAnnyHullStamp> 
     stampedJointCount,
     embeddedJointCount,
     generator,
+  };
+}
+
+export async function readShippedAnnyHullStamp(): Promise<ShippedAnnyHullStamp> {
+  const glbPath = path.join(process.cwd(), 'public', 'models', 'anny-hull.glb');
+  const buffer = await fs.readFile(glbPath);
+  const { json } = readGlbJsonAndBin(buffer);
+  const stamp = readHullStampFromJson(json);
+
+  return {
+    ...stamp,
     matchesShippedTopology:
-      topologyVersion === ANNY_TOPOLOGY_VERSION
-      && vertexCount === ANNY_VERTEX_COUNT
-      && (stampedJointCount === null || stampedJointCount === ANNY_JOINT_COUNT),
+      stamp.topologyVersion === ANNY_TOPOLOGY_VERSION
+      && stamp.vertexCount === ANNY_VERTEX_COUNT
+      && (stamp.stampedJointCount === null || stamp.stampedJointCount === ANNY_JOINT_COUNT),
+  };
+}
+
+export async function readShippedMhrHullStamp(): Promise<ShippedAnnyHullStamp> {
+  const glbPath = path.join(process.cwd(), 'public', 'models', 'mhr-hull.glb');
+  const buffer = await fs.readFile(glbPath);
+  const { json } = readGlbJsonAndBin(buffer);
+  const stamp = readHullStampFromJson(json);
+
+  return {
+    ...stamp,
+    matchesShippedTopology:
+      stamp.topologyVersion === MHR_TOPOLOGY_VERSION
+      && stamp.vertexCount === MHR_VERTEX_COUNT
+      && (stamp.stampedJointCount === null || stamp.stampedJointCount === MHR_JOINT_COUNT),
   };
 }
 

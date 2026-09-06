@@ -1,0 +1,11 @@
+Ashrium ships public/models/mhr-hull.glb as Meta MHR LOD 1 rest-pose
+topology (18,439 vertices / 127 joints) from:
+
+  https://github.com/facebookresearch/MHR
+  v1.0.1 assets/lod1.fbx
+
+Momentum Human Rig assets are Copyright (c) Meta, licensed under Apache 2.0.
+The Cog loads the same topology from assets/mhr_model.pt in the SAM 3D Body
+snapshot. Do not height-scale anny-hull.glb as a substitute.
+
+Topology stamp: mhr-18439-127.

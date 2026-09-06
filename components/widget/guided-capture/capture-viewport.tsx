@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 
 import { SilhouetteOverlay } from '@/components/widget/guided-capture/silhouette-overlay';
-import { usePoseLandmarker } from '@/components/widget/guided-capture/use-pose-landmarker';
+import {
+  detectStillLandmarks,
+  usePoseLandmarker,
+} from '@/components/widget/guided-capture/use-pose-landmarker';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
-import { encodeVideoFrameToWebp } from '@/lib/widget/webp-encode';
+import { encodeImageFileToWebp, encodeVideoFrameToWebp } from '@/lib/widget/webp-encode';
 import type { CaptureView, PoseGateStatus } from '@/types/hmr';
 
 const ALIGNED_HOLD_MS = 1200;
@@ -14,6 +17,17 @@ interface CaptureViewportProps {
   view: CaptureView;
   onCaptured: (blob: Blob, gate: PoseGateStatus) => void;
   onBack: () => void;
+  allowGallery?: boolean;
+  requireConfirm?: boolean;
+  stepLabel: string;
+}
+
+type CaptureSource = 'live' | 'gallery';
+
+interface PendingCapture {
+  blob: Blob;
+  gate: PoseGateStatus;
+  previewUrl: string;
 }
 
 function stopStream(stream: MediaStream | null): void {
@@ -24,19 +38,44 @@ export function CaptureViewport({
   view,
   onCaptured,
   onBack,
+  allowGallery = false,
+  requireConfirm = false,
+  stepLabel,
 }: CaptureViewportProps): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const alignedSinceRef = useRef<number | null>(null);
   const capturingRef = useRef(false);
   const lastVideoTimeRef = useRef(-1);
+  const sourceRef = useRef<CaptureSource>('live');
   const { landmarkerRef, ready, error: poseError } = usePoseLandmarker();
+  const [source, setSource] = useState<CaptureSource>('live');
   const [gate, setGate] = useState<PoseGateStatus>('not_detected');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [encodeError, setEncodeError] = useState<string | null>(null);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [galleryBusy, setGalleryBusy] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
+  const [pending, setPending] = useState<PendingCapture | null>(null);
+
+  sourceRef.current = source;
 
   useEffect(() => {
+    return () => {
+      if (pending) {
+        URL.revokeObjectURL(pending.previewUrl);
+      }
+    };
+  }, [pending]);
+
+  useEffect(() => {
+    if (source !== 'live' || pending) {
+      stopStream(streamRef.current);
+      streamRef.current = null;
+      return;
+    }
+
     let cancelled = false;
 
     const startCamera = async (): Promise<void> => {
@@ -44,7 +83,7 @@ export function CaptureViewport({
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
-            facingMode: { ideal: 'environment' },
+            facingMode: { ideal: 'user' },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -63,7 +102,7 @@ export function CaptureViewport({
         }
       } catch {
         if (!cancelled) {
-          setCameraError('Camera access is required to capture your photos.');
+          setCameraError('Camera access is required to take a photo now. You can import from the gallery instead.');
         }
       }
     };
@@ -75,16 +114,20 @@ export function CaptureViewport({
       stopStream(streamRef.current);
       streamRef.current = null;
     };
-  }, []);
+  }, [pending, source]);
 
   useEffect(() => {
     let frameId = 0;
 
     const tick = (): void => {
       frameId = requestAnimationFrame(tick);
+      if (sourceRef.current !== 'live' || pending || capturingRef.current) {
+        return;
+      }
+
       const video = videoRef.current;
       const landmarker = landmarkerRef.current;
-      if (!video || !landmarker || video.readyState < 2 || capturingRef.current) {
+      if (!video || !landmarker || video.readyState < 2) {
         return;
       }
 
@@ -118,7 +161,20 @@ export function CaptureViewport({
         if (elapsed >= ALIGNED_HOLD_MS) {
           capturingRef.current = true;
           void encodeVideoFrameToWebp(video, pose)
-            .then((blob) => onCaptured(blob, 'aligned'))
+            .then((blob) => {
+              if (requireConfirm) {
+                setPending({
+                  blob,
+                  gate: 'aligned',
+                  previewUrl: URL.createObjectURL(blob),
+                });
+                stopStream(streamRef.current);
+                streamRef.current = null;
+                return;
+              }
+
+              onCaptured(blob, 'aligned');
+            })
             .catch(() => {
               capturingRef.current = false;
               alignedSinceRef.current = null;
@@ -134,19 +190,98 @@ export function CaptureViewport({
       }
     };
 
-    if (ready) {
+    if (ready && !pending) {
       frameId = requestAnimationFrame(tick);
     }
 
     return () => cancelAnimationFrame(frameId);
-  }, [landmarkerRef, onCaptured, ready, view]);
+  }, [landmarkerRef, onCaptured, pending, ready, requireConfirm, view]);
 
-  const stepLabel = view === 'front' ? 'Step 2 of 3' : 'Step 3 of 3';
   const title = view === 'front' ? 'Front, A-pose' : 'Side profile';
   const hint =
     view === 'front'
       ? 'Stand in the outline with your arms slightly open. We crop your head on-device before upload.'
       : 'Turn 90° and raise both wrists to your shoulders. We crop your head on-device before upload.';
+
+  const chooseLive = (): void => {
+    if (pending) {
+      URL.revokeObjectURL(pending.previewUrl);
+      setPending(null);
+    }
+    capturingRef.current = false;
+    alignedSinceRef.current = null;
+    setHoldProgress(0);
+    setGalleryError(null);
+    setEncodeError(null);
+    setCameraError(null);
+    setGate('not_detected');
+    setSource('live');
+  };
+
+  const handleGalleryFile = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    const landmarker = landmarkerRef.current;
+    if (!landmarker) {
+      setGalleryError('Pose guidance is still loading. Try again in a moment.');
+      return;
+    }
+
+    setGalleryBusy(true);
+    setGalleryError(null);
+    setEncodeError(null);
+    capturingRef.current = true;
+    sourceRef.current = 'gallery';
+    setSource('gallery');
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.src = objectUrl;
+
+    try {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      await image.decode();
+      const pose = await detectStillLandmarks(landmarker, image);
+      const nextGate = pose ? evaluatePoseGate(pose, view) : 'not_detected';
+      setGate(nextGate);
+      if (nextGate !== 'aligned' || !pose) {
+        setGalleryError(
+          `This photo does not pass the ${view} pose check: ${gateStatusCopy(nextGate, view)}.`,
+        );
+        capturingRef.current = false;
+        return;
+      }
+
+      const blob = await encodeImageFileToWebp(file, pose);
+      if (requireConfirm) {
+        if (pending) {
+          URL.revokeObjectURL(pending.previewUrl);
+        }
+        setPending({
+          blob,
+          gate: 'aligned',
+          previewUrl: URL.createObjectURL(blob),
+        });
+        return;
+      }
+
+      onCaptured(blob, 'aligned');
+    } catch {
+      setGalleryError(
+        'Could not verify that photo. Use a full-body shot so we can crop the head on this device.',
+      );
+      capturingRef.current = false;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      setGalleryBusy(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-obsidian-canvas text-obsidian-ink">
@@ -168,13 +303,27 @@ export function CaptureViewport({
       </header>
 
       <div className="relative mx-5 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-2xl bg-black">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        <SilhouetteOverlay view={view} />
+        {pending ? (
+          <div
+            role="img"
+            aria-label={`${view} pose, head cropped`}
+            className="absolute inset-0 bg-contain bg-center bg-no-repeat"
+            style={{ backgroundImage: `url(${pending.previewUrl})` }}
+          />
+        ) : (
+          <>
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className={[
+                'absolute inset-0 h-full w-full object-cover',
+                source === 'gallery' ? 'invisible' : '',
+              ].join(' ')}
+            />
+            <SilhouetteOverlay view={view} />
+          </>
+        )}
         <div className="absolute left-3 top-3">
           <span
             aria-live="polite"
@@ -185,20 +334,23 @@ export function CaptureViewport({
                 : 'border border-white/20 bg-obsidian-canvas/70 text-obsidian-ink',
             ].join(' ')}
           >
-            {gateStatusCopy(gate, view)}
+            {pending ? 'Pose verified' : gateStatusCopy(gate, view)}
           </span>
         </div>
-        <div className="absolute inset-x-8 bottom-4 h-1 overflow-hidden rounded-full bg-white/10">
-          <div
-            className="h-full bg-gradient-to-r from-obsidian-accent to-obsidian-accent-end transition-[width] duration-100"
-            style={{ width: `${Math.round(holdProgress * 100)}%` }}
-          />
-        </div>
+        {!pending ? (
+          <div className="absolute inset-x-8 bottom-4 h-1 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full bg-gradient-to-r from-obsidian-accent to-obsidian-accent-end transition-[width] duration-100"
+              style={{ width: `${Math.round(holdProgress * 100)}%` }}
+            />
+          </div>
+        ) : null}
       </div>
 
-      <div className="flex flex-col gap-2 px-5 py-4">
-        {cameraError ? <p className="text-sm text-rose-300">{cameraError}</p> : null}
+      <div className="flex flex-col gap-3 px-5 py-4">
+        {cameraError && source === 'live' ? <p className="text-sm text-rose-300">{cameraError}</p> : null}
         {encodeError ? <p className="text-sm text-rose-300">{encodeError}</p> : null}
+        {galleryError ? <p className="text-sm text-rose-300">{galleryError}</p> : null}
         {poseError ? (
           <p className="text-sm text-obsidian-muted">
             Pose guidance is required so we can crop your head on this device. Face pixels are
@@ -206,11 +358,64 @@ export function CaptureViewport({
           </p>
         ) : !ready ? (
           <p className="text-sm text-obsidian-subtle">Loading pose guidance…</p>
+        ) : pending ? (
+          <p className="text-sm text-obsidian-subtle">
+            {view === 'front'
+              ? 'Front pose passed. Tap Next for the side pose.'
+              : 'Side pose passed. We will start the live body fit next.'}
+          </p>
         ) : (
           <p className="text-sm text-obsidian-subtle">
             We capture automatically after a 1.2s hold when you are aligned.
           </p>
         )}
+
+        {allowGallery && !pending ? (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={chooseLive}
+              className={[
+                'rounded-full border px-3 py-2 text-xs font-medium',
+                source === 'live'
+                  ? 'border-obsidian-accent bg-obsidian-accent/15 text-obsidian-ink'
+                  : 'border-white/15 text-obsidian-muted',
+              ].join(' ')}
+            >
+              Take photo now
+            </button>
+            <button
+              type="button"
+              disabled={!ready || galleryBusy}
+              onClick={() => fileInputRef.current?.click()}
+              className={[
+                'rounded-full border px-3 py-2 text-xs font-medium disabled:opacity-50',
+                source === 'gallery'
+                  ? 'border-obsidian-accent bg-obsidian-accent/15 text-obsidian-ink'
+                  : 'border-white/15 text-obsidian-muted',
+              ].join(' ')}
+            >
+              {galleryBusy ? 'Checking pose…' : 'Import from gallery'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(event) => void handleGalleryFile(event)}
+            />
+          </div>
+        ) : null}
+
+        {pending && requireConfirm ? (
+          <button
+            type="button"
+            className="obsidian-cta"
+            onClick={() => onCaptured(pending.blob, pending.gate)}
+          >
+            Next
+          </button>
+        ) : null}
       </div>
     </div>
   );

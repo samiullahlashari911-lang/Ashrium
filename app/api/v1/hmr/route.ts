@@ -8,6 +8,7 @@ import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
 import { dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
+import { sleepGpuIfNoActiveFitJobs, warmGpuForShopperSubmit } from '@/lib/server/session-gpu';
 
 function getWebhookBaseUrl(): URL {
   const appBaseUrl = process.env.APP_BASE_URL?.trim();
@@ -123,6 +124,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    try {
+      await warmGpuForShopperSubmit();
+    } catch {
+      // Cold start is allowed. Do not fail a completed shopper submit.
+    }
+
     const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
     webhookUrl.searchParams.set('job_id', job.id);
     const prediction = await dispatchAnnyFitPrediction({
@@ -162,6 +169,7 @@ export async function POST(request: Request): Promise<Response> {
       .eq('id', job.id)
       .eq('tenant_id', tenantId);
 
+    void sleepGpuIfNoActiveFitJobs();
     return Response.json({ job_id: job.id, status: 'failed' }, { status: 502 });
   }
 

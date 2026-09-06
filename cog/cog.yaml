@@ -1,5 +1,8 @@
 # Ashrium VFR Cog — SAM 2 (Apache 2.0) + SAM 3D Body initializer (SAM License)
-# + two-view Meta MHR fit (Apache 2.0) on gpu-a100-large.
+# + two-view Meta MHR fit (Apache 2.0) + Newton XPBD drape (Apache 2.0 Warp)
+# + GarmentCode / PyGarment MIT 2D pattern ingest (task=pattern).
+# on gpu-a100-large. Never NvidiaWarp-GarmentCode (no Warp sim from that fork).
+# Pattern style is HTML/product-text parse, not Qwen3-VL (too heavy for the trial A100).
 # Set HF_TOKEN as a Replicate secret after gated access to
 # facebook/sam-3d-body-dinov3 is granted. Do not stub that step.
 build:
@@ -16,6 +19,11 @@ build:
     - libxrender1
     - libegl1
     - ffmpeg
+    - libcairo2
+    - libpango-1.0-0
+    - libpangocairo-1.0-0
+    - libgdk-pixbuf2.0-0
+    - shared-mime-info
   python_requirements: requirements.txt
   run:
     - git clone --depth 1 https://github.com/facebookresearch/sam-3d-body.git /src/sam-3d-body
@@ -23,5 +31,8 @@ build:
     - pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git@a1ce2f9"
     - pip install "git+https://github.com/facebookresearch/sam2.git"
     - pip install "git+https://github.com/microsoft/MoGe.git"
+    # GarmentCode MIT programs + body/design YAML. pygarment lives in this tree.
+    # --no-deps: pip pygarment pins numpy<2 and pulls cgal/libigl/nicegui (GUI + sim).
+    - git clone --depth 1 --branch v2.0.2 https://github.com/maria-korosteleva/GarmentCode.git /src/garmentcode
 
 predict: "predict.py:Predictor"

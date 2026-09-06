@@ -3,6 +3,11 @@
 MHR_VERTEX_COUNT = 18439
 MHR_JOINT_COUNT = 127
 MHR_TOPOLOGY_VERSION = "mhr-18439-127"
+# Cloth collider (Phase 4). Official LOD 3 is ~4,899 verts; accept a tight band
+# around that after cluster decimation of the live LOD 1 mesh.
+MHR_LOD3_VERTEX_COUNT = 4899
+MHR_LOD3_VERTEX_MIN = 4000
+MHR_LOD3_VERTEX_MAX = 6000
 MHR_IDENTITY_DIM = 45
 MHR_BODY_IDENTITY_DIM = 20
 MHR_SKELETON_DIM = 68

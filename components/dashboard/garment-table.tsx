@@ -55,8 +55,9 @@ export const GarmentTable: FC<GarmentTableProps> = ({
       <header className="mb-4 border-b border-white/10 pb-3">
         <h2 className="text-lg font-semibold text-obsidian-ink">CAD garment library</h2>
         <p className="text-sm text-obsidian-muted">
-          Ingest confidence, KES-mapped mechanics, and graded size variants. Mode B is
-          pipeline-validated from a product-page size chart plus material.
+          Ingest confidence, KES-mapped mechanics, and GarmentCode size variants. Mode B is
+          pipeline-validated from a product-page size chart plus material. Unsupported styles
+          stay Approximate with no 3D.
         </p>
       </header>
 

@@ -9,18 +9,23 @@ out/
 build/
 dist/
 
-# Environment variables and local secrets
+# Environment variables and local secrets. Never commit API keys,
+# .env files, service-account JSON, or database passwords.
 .env
 .env.*
 .env.local
 .env.*.local
-!.env.example
-!.env.*.example
 *.pem
 *.p12
 *.pfx
+*.key
 credentials.json
+*service-account*.json
+*-credentials.json
+google-services.json
 secrets/
+!.env.example
+!.env.*.example
 
 # Logs
 *.log
@@ -54,7 +59,14 @@ __pycache__/
 cog/checkpoints/
 cog/**/*.ckpt
 cog/**/*.pt
+cog/requirements-DESKTOP-*.txt
 
+# Local operator scratch (reads .env.local; not product)
+scripts/cancel-stuck-predictions.mjs
+scripts/verify-auth-create.mjs
+
+# Generated SQL paste dump — source of truth is supabase/migrations/
+supabase/_combined_migrations_for_sql_editor.sql
 
 # Local Supabase, Vercel, and temp artifacts
 supabase/.temp/

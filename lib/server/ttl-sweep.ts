@@ -2,6 +2,7 @@ import {
   isBiometricAssetPath,
   purgeBiometricJobImages,
 } from '@/lib/server/biometrics-wipe';
+import { sleepGpuIfNoActiveFitJobs } from '@/lib/server/session-gpu';
 import { createServiceClient } from '@/lib/supabase/service';
 import type { Json } from '@/types/database';
 
@@ -193,6 +194,12 @@ export async function runPrivacyTtlSweep(): Promise<PrivacyTtlSweepResult> {
     if (!leftoverError) {
       biometricObjectsRemoved = leftover.length;
     }
+  }
+
+  try {
+    await sleepGpuIfNoActiveFitJobs();
+  } catch {
+    // Privacy sweep must not fail because GPU scale failed.
   }
 
   return {

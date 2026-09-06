@@ -10,8 +10,7 @@ import { garmentKindFromCategory } from '@/lib/fit/size-recommend';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import { uploadDualWebpAndDispatch } from '@/lib/widget/fit-client';
 import { encodeImageFileToWebp } from '@/lib/widget/webp-encode';
-import type { FitParametricVector } from '@/types/hmr';
-import { isAnnyParametricVector } from '@/types/hmr';
+import { readFitResiduals, type FitParametricVector } from '@/types/hmr';
 
 interface DebugGalleryUploadProps {
   tenantId: string;
@@ -91,6 +90,7 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
         captureGatesPassed: false,
         ingestTier: null,
         approximateFit: true,
+        ...readFitResiduals(parametric),
       })
     : null;
 
@@ -143,26 +143,18 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
 
       {parametric && intake && debugRecommendation ? (
         <div className="mt-5">
-          {isAnnyParametricVector(parametric) ? (
-            <AnnyCanvas
-              parametric={parametric}
-              heightCm={intake.heightCm}
-              garment={{
-                kind: garmentKindFromCategory('tee'),
-                chestCm: debugRecommendation.size.chestCm,
-                waistCm: debugRecommendation.size.waistCm,
-                hipCm: debugRecommendation.size.hipCm,
-                easeCm: debugRecommendation.ease.chestCm,
-              }}
-              className="h-[420px] w-full overflow-hidden rounded-xl"
-            />
-          ) : (
-            <div className="rounded-xl border border-white/10 bg-obsidian-canvas/60 p-4 text-sm text-obsidian-muted">
-              Live MHR {parametric.topology_version}: chest {parametric.derived_measurements.chest_cm.toFixed(1)} cm,
-              waist {parametric.derived_measurements.waist_cm.toFixed(1)} cm, hip{' '}
-              {parametric.derived_measurements.hip_cm.toFixed(1)} cm.
-            </div>
-          )}
+          <AnnyCanvas
+            parametric={parametric}
+            heightCm={intake.heightCm}
+            garment={{
+              kind: garmentKindFromCategory('tee'),
+              chestCm: debugRecommendation.size.chestCm,
+              waistCm: debugRecommendation.size.waistCm,
+              hipCm: debugRecommendation.size.hipCm,
+              easeCm: debugRecommendation.ease.chestCm,
+            }}
+            className="h-[420px] w-full overflow-hidden rounded-xl"
+          />
           <div className="mt-3 flex justify-end">
             <ConfidenceBadge
               sizeCode={debugRecommendation.size.sizeCode}

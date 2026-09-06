@@ -10,6 +10,10 @@
 export const MHR_VERTEX_COUNT = 18439;
 export const MHR_JOINT_COUNT = 127;
 export const MHR_TOPOLOGY_VERSION = 'mhr-18439-127';
+/** Cloth collider target after cluster-decimating live LOD 1. */
+export const MHR_LOD3_VERTEX_COUNT = 4899;
+export const MHR_LOD3_VERTEX_MIN = 4000;
+export const MHR_LOD3_VERTEX_MAX = 6000;
 export const MHR_HULL_GLB_PUBLIC_PATH = '/models/mhr-hull.glb';
 export const MHR_IDENTITY_DIM = 45;
 export const MHR_BODY_IDENTITY_DIM = 20;
@@ -285,4 +289,19 @@ export function isAnnyParametricVector(value: unknown): value is AnnyParametricV
 
 export function readFitParametricVector(value: unknown): FitParametricVector | null {
   return readMhrParametricVector(value) ?? readAnnyParametricVector(value);
+}
+
+export function readFitResiduals(value: FitParametricVector): {
+  heightResidualCm: number | null;
+  clothingResidual: number | null;
+} {
+  const mhr = readMhrParametricVector(value);
+  if (!mhr) {
+    return { heightResidualCm: null, clothingResidual: null };
+  }
+
+  return {
+    heightResidualCm: mhr.height_residual_cm ?? null,
+    clothingResidual: mhr.clothing_residual ?? null,
+  };
 }

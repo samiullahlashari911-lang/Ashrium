@@ -10,7 +10,7 @@ import {
 } from '@/components/widget/guided-capture/guided-capture';
 import { recommendFit } from '@/lib/fit/recommend';
 import { garmentKindFromCategory } from '@/lib/fit/size-recommend';
-import { isAnnyParametricVector } from '@/types/hmr';
+import { readFitResiduals } from '@/types/hmr';
 
 export interface WidgetPreviewClientProps {
   tenantId: string;
@@ -32,6 +32,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
       return null;
     }
 
+    const residuals = readFitResiduals(result.parametric);
     return recommendFit({
       measurements: result.parametric.derived_measurements,
       category: 'tee',
@@ -39,6 +40,8 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
       captureGatesPassed: result.session.captureGatesPassed,
       ingestTier: null,
       approximateFit: true,
+      heightResidualCm: residuals.heightResidualCm,
+      clothingResidual: residuals.clothingResidual,
     });
   }, [result]);
 
@@ -46,32 +49,18 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
     <main className="relative min-h-screen bg-obsidian-canvas text-obsidian-ink">
       {result && recommendation ? (
         <div className="flex min-h-screen flex-col">
-          {isAnnyParametricVector(result.parametric) ? (
-            <AnnyCanvas
-              parametric={result.parametric}
-              heightCm={result.session.heightCm}
-              garment={{
-                kind: garmentKindFromCategory('tee'),
-                chestCm: recommendation.size.chestCm,
-                waistCm: recommendation.size.waistCm,
-                hipCm: recommendation.size.hipCm,
-                easeCm: recommendation.ease.chestCm,
-              }}
-              className="min-h-[520px] flex-1 w-full"
-            />
-          ) : (
-            <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
-                MHR {result.parametric.topology_version}
-              </p>
-              <p className="text-lg font-semibold text-obsidian-ink">Live body params landed</p>
-              <p className="max-w-md text-sm text-obsidian-muted">
-                Chest {result.parametric.derived_measurements.chest_cm.toFixed(1)} cm · waist{' '}
-                {result.parametric.derived_measurements.waist_cm.toFixed(1)} cm · hip{' '}
-                {result.parametric.derived_measurements.hip_cm.toFixed(1)} cm.
-              </p>
-            </div>
-          )}
+          <AnnyCanvas
+            parametric={result.parametric}
+            heightCm={result.session.heightCm}
+            garment={{
+              kind: garmentKindFromCategory('tee'),
+              chestCm: recommendation.size.chestCm,
+              waistCm: recommendation.size.waistCm,
+              hipCm: recommendation.size.hipCm,
+              easeCm: recommendation.ease.chestCm,
+            }}
+            className="min-h-[520px] flex-1 w-full"
+          />
           <div className="flex items-start justify-between gap-3 px-5 py-4">
             <p className="text-sm text-obsidian-muted">
               Live Cog body result. Size is girth plus the published chart.
@@ -95,6 +84,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
         <GuidedCapture
           tenantId={tenantId}
           embedToken={embedToken}
+          allowGallery
           onComplete={handleComplete}
         />
       )}

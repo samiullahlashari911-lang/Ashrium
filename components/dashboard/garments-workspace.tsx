@@ -162,7 +162,7 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
                         <td className="px-2 py-2">{variant.length_cm.toFixed(1)}</td>
                         <td className="px-2 py-2 font-mono text-xs">{variant.external_sku ?? '—'}</td>
                         <td className="px-2 py-2 text-xs text-obsidian-muted">
-                          {variant.rest_length_path ? 'Graded' : '—'}
+                          {variant.rest_length_path ? 'GarmentCode' : '—'}
                         </td>
                       </tr>
                     ))}

@@ -13,8 +13,11 @@ import {
   parseReplicateHardwareSku,
 } from '@/lib/ml/replicate';
 import {
+  GPU_HOLD_AFTER_BODY_MS,
+  GPU_HOLD_DURING_DRAPE_MS,
   REPLICATE_A100_USD_PER_SEC,
   SESSION_GPU_SAFETY_TIMEOUT_MS,
+  sessionGpuShouldSleep,
 } from '@/lib/ml/session-gpu';
 import {
   MHR_BODY_IDENTITY_DIM,
@@ -23,9 +26,14 @@ import {
   MHR_TOPOLOGY_VERSION,
 } from '@/types/hmr';
 
-test('session GPU safety timeout is 45 minutes', () => {
+test('session GPU stays warm through body and drape, then sleeps', () => {
   assert.equal(SESSION_GPU_SAFETY_TIMEOUT_MS, 45 * 60 * 1000);
+  assert.equal(GPU_HOLD_AFTER_BODY_MS, 10 * 60 * 1000);
+  assert.equal(GPU_HOLD_DURING_DRAPE_MS, 20 * 60 * 1000);
   assert.equal(REPLICATE_A100_USD_PER_SEC, 0.0014);
+  assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 1, activeDrapeHoldCount: 0 }), false);
+  assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 1 }), false);
+  assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 0 }), true);
 });
 
 test('A100 80GB sku is gpu-a100-large and is the default hardware pin', () => {

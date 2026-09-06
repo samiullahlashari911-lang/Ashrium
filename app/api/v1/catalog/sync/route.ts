@@ -6,7 +6,7 @@ import { loadShopifyCredentials } from '@/lib/server/shopify-credentials';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

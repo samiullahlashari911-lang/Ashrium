@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { persistCatalogGarment } from '@/lib/catalog/persist-garment';
 import { lookupKesProperties, mechanicalDeltaRatio } from '@/lib/catalog/kes-lookup';
 import { parseCompositionText } from '@/lib/catalog/parse-product';
+import { detectUnsupportedGeometry } from '@/lib/catalog/unsupported-geometry';
 import {
   deleteGarmentProfileRow,
   fetchTenantGarmentsWithVariants,
@@ -145,8 +146,10 @@ function toDraft(input: GarmentFormInput): CatalogGarmentDraft {
     && !usingFormDefaults
     && mechanicalDeltaRatio(formMechanical, kesMechanical) > 0.05;
 
+  let draft: CatalogGarmentDraft;
+
   if (composition && sizeVariants.length > 0 && explicitKesOverride) {
-    return {
+    draft = {
       sku: input.sku.trim(),
       name: input.name.trim(),
       category,
@@ -160,10 +163,8 @@ function toDraft(input: GarmentFormInput): CatalogGarmentDraft {
       cadPatternUrl,
       sizeVariants,
     };
-  }
-
-  if (composition && sizeVariants.length > 0) {
-    return {
+  } else if (composition && sizeVariants.length > 0) {
+    draft = {
       sku: input.sku.trim(),
       name: input.name.trim(),
       category,
@@ -177,22 +178,34 @@ function toDraft(input: GarmentFormInput): CatalogGarmentDraft {
       cadPatternUrl,
       sizeVariants,
     };
+  } else {
+    draft = {
+      sku: input.sku.trim(),
+      name: input.name.trim(),
+      category,
+      composition,
+      gsm,
+      ingestConfidence: 0.35,
+      ingestTier: 2,
+      mode: 'C',
+      approximateFit: true,
+      mechanical: formMechanical,
+      cadPatternUrl,
+      sizeVariants,
+    };
   }
 
-  return {
-    sku: input.sku.trim(),
-    name: input.name.trim(),
-    category,
-    composition,
-    gsm,
-    ingestConfidence: 0.35,
-    ingestTier: 2,
-    mode: 'C',
-    approximateFit: true,
-    mechanical: formMechanical,
-    cadPatternUrl,
-    sizeVariants,
-  };
+  draft.ingestCorpus = draft.name;
+  if (
+    detectUnsupportedGeometry({
+      category: draft.category,
+      title: draft.name,
+      composition: draft.composition,
+    })
+  ) {
+    draft.approximateFit = true;
+  }
+  return draft;
 }
 
 function saveMessage(draft: CatalogGarmentDraft, updated: boolean): string {

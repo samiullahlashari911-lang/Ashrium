@@ -8,7 +8,7 @@ import {
   isCurrentSimDelta,
 } from '@/lib/graphics/meshopt-delta';
 import { DEFAULT_EASE_CM, mapRadialClearanceToColor } from '@/lib/graphics/radial-heatmap';
-import { ANNY_TOPOLOGY_VERSION } from '@/types/hmr';
+import { ANNY_TOPOLOGY_VERSION, MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 import type { SimDrapeMesh } from '@/types/graphics';
 
 const EASE_CM = DEFAULT_EASE_CM;
@@ -94,4 +94,20 @@ test('encoding refuses a mesh whose clearance channel is the wrong length', () =
   const broken: SimDrapeMesh = { ...mesh, clearanceCm: new Float32Array([1, 2]) };
 
   assert.throws(() => encodeSimDelta(broken), /do not match vertexCount/);
+});
+
+test('sim delta round-trips MHR topology hashes', () => {
+  const clearanceCm = new Float32Array([2, 8, 20]);
+  const mesh: SimDrapeMesh = {
+    ...simDrapeFixture(clearanceCm),
+    topologyVersion: MHR_TOPOLOGY_VERSION,
+  };
+  const encoded = encodeSimDelta(mesh);
+
+  assert.equal(isCurrentSimDelta(encoded, MHR_TOPOLOGY_VERSION), true);
+  assert.equal(isCurrentSimDelta(encoded, ANNY_TOPOLOGY_VERSION), false);
+
+  const decoded = decodeSimDelta(encoded);
+  assert.equal(decoded.topologyVersion, MHR_TOPOLOGY_VERSION);
+  assert.deepEqual(Array.from(decoded.clearanceCm), Array.from(clearanceCm));
 });

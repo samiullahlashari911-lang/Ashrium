@@ -10,6 +10,10 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "test": "node ./scripts/run-tests.mjs",
     "merchant:invite": "node ./scripts/invite-merchant.mjs",
+    "merchant:invite:local": "node ./scripts/invite-merchant-local.mjs",
+    "merchant:set-password": "node ./scripts/set-merchant-password.mjs",
+    "db:repair-auth": "node ./scripts/apply-auth-repair.mjs",
+    "supabase:push": "npx --yes supabase@2.110.0 db push --linked --yes",
     "supabase:start": "npx --yes supabase@2.110.0 start",
     "supabase:verify": "npx --yes supabase@2.110.0 db reset --local",
     "supabase:stop": "npx --yes supabase@2.110.0 stop --no-backup"

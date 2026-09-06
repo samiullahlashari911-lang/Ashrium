@@ -303,8 +303,9 @@ export function buildRestLengthMesh(
 }
 
 /**
- * Grades a size set from a base size (prefer M) using uniform Laplacian coordinates
- * so local rest-length structure is preserved while chest/waist/hip/length change.
+ * Legacy uniform Laplacian grader. Product ingest no longer calls this —
+ * persist-garment dispatches Cog task=pattern (GarmentCode MIT, 2D re-instantiate).
+ * Kept only so existing rest-length JSON can still be inspected.
  */
 export function gradeRestLengthSet(
   category: GarmentCategory,

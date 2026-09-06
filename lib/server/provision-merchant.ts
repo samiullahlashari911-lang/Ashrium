@@ -32,6 +32,10 @@ export function isValidCompanyName(value: string): boolean {
   return companyName.length >= 1 && companyName.length <= 160;
 }
 
+function tenantApiKeyHash(userId: string): string {
+  return userId.replaceAll('-', '');
+}
+
 export async function provisionContractedMerchant(
   input: ProvisionMerchantInput,
 ): Promise<ProvisionMerchantResult> {
@@ -55,7 +59,15 @@ export async function provisionContractedMerchant(
   });
 
   if (createError || !created.user) {
-    throw new Error(createError?.message ?? 'Unable to create the invited Auth user.');
+    const detail =
+      typeof createError === 'object' && createError !== null
+        ? JSON.stringify(createError)
+        : String(createError ?? 'unknown');
+    throw new Error(
+      createError?.message && createError.message !== '{}'
+        ? createError.message
+        : `Unable to create the invited Auth user: ${detail}`,
+    );
   }
 
   const userId = created.user.id;
@@ -65,6 +77,7 @@ export async function provisionContractedMerchant(
     company_name: companyName,
     owner_user_id: userId,
     status: 'active',
+    api_key_hash: tenantApiKeyHash(userId),
   });
 
   if (tenantError) {
@@ -76,7 +89,7 @@ export async function provisionContractedMerchant(
     id: userId,
     name: companyName,
     domain: `tenant-${userId}.internal`,
-    api_key_hash: userId.replaceAll('-', ''),
+    api_key_hash: tenantApiKeyHash(userId),
   });
 
   if (merchantError) {

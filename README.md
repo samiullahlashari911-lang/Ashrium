@@ -47,8 +47,8 @@ do not use a local tunnel.
 
 `REPLICATE_HMR_MODEL_VERSION` must be a live Cog version: a 64-character
 hash, or `owner/name:<hash>`. `REPLICATE_DEPLOYMENT=owner/name` is
-required. Shopper inference and sandbox Warm/Sleep both talk to that
-Deployment. There is no default hash, no mock model, and no dummy
+required. Shopper inference talks to that Deployment. Merchants cannot
+Warm/Sleep it. There is no default hash, no mock model, and no dummy
 keep-alive prediction.
 
 ### Push the A100 Cog and create a Deployment
@@ -69,13 +69,13 @@ Then in the Replicate dashboard: create a **Deployment** of that model on
 Nvidia A100 80GB (`gpu-a100-large`), leave `min_instances=0` until a test
 session, and put the version hash plus `owner/name` into `.env.local`.
 
-A signed-in merchant can POST `/api/v1/hmr/keepalive` from `/sandbox`
-("Warm A100 for this session") to PATCH `min_instances=1`. **Sleep A100**
-and a 45-minute safety timeout PATCH `min_instances=0`. GET on that route
-only reads status — it does not warm the GPU, so a Vercel cron cannot
-burn the trial credit. `$5 ≈ 3,571s` of billed A100 including idle
-(`$0.001400/s`). One warm test hour is the credit. Do not leave
-`min_instances=1` overnight.
+`POST /api/v1/hmr` warms the Deployment (`min_instances=1`) when a shopper
+submits both verified photos. The GPU sleeps (`min_instances=0`) when no
+fit job is still pending or processing. Merchants cannot scale the GPU.
+Manual Warm/Sleep is operator-only (`ASHRIUM_OPERATOR_SECRET` or
+`CRON_SECRET` on `POST /api/v1/hmr/keepalive`). GET on that route only
+reads status. `$5 ≈ 3,571s` of billed A100 including idle
+(`$0.001400/s`). Do not leave `min_instances=1` overnight.
 
 TTL sweep cron (`GET /api/v1/cron/ttl-sweep` with `CRON_SECRET`) stays
 separate. Immediate photo wipe on inference success or failure is still

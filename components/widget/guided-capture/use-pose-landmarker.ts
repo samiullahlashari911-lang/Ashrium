@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { PoseLandmarker } from '@mediapipe/tasks-vision';
 
+import type { PoseLandmarkSample } from '@/lib/widget/pose-gates';
+
 const MEDIAPIPE_VERSION = '1.0.1';
 const WASM_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
 const POSE_MODEL_URL =
@@ -67,4 +69,17 @@ export function usePoseLandmarker(): {
   }, []);
 
   return { landmarkerRef, ready, error };
+}
+
+export async function detectStillLandmarks(
+  landmarker: PoseLandmarker,
+  image: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+): Promise<PoseLandmarkSample[] | undefined> {
+  await landmarker.setOptions({ runningMode: 'IMAGE' });
+  try {
+    const result = landmarker.detect(image);
+    return result.landmarks[0] as PoseLandmarkSample[] | undefined;
+  } finally {
+    await landmarker.setOptions({ runningMode: 'VIDEO' });
+  }
 }

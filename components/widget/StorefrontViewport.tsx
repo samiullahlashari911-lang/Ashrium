@@ -20,7 +20,7 @@ import {
 } from '@/lib/widget/fit-client';
 import { postWidgetEvent, subscribeToHostEvents } from '@/lib/widget/bridge';
 import type { FitRecommendation, StorefrontGarment } from '@/types/garment';
-import { isAnnyParametricVector } from '@/types/hmr';
+import { readFitResiduals } from '@/types/hmr';
 
 interface StorefrontViewportProps {
   garments: StorefrontGarment[];
@@ -28,6 +28,7 @@ interface StorefrontViewportProps {
   targetOrigin: string;
   tenantId: string;
   embedToken: string;
+  allowGallery?: boolean;
 }
 
 function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation {
@@ -46,6 +47,8 @@ function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation
       capturePassed: payload.gate.capturePassed,
       ingestPassed: payload.gate.ingestPassed,
       drapePassed: payload.gate.drapePassed,
+      residualPassed: payload.gate.residualPassed,
+      printPassed: payload.gate.printPassed !== false,
       hnswSimilarity: payload.gate.hnswSimilarity,
       xpbdCompleted: payload.gate.xpbdCompleted,
     },
@@ -60,6 +63,7 @@ export function StorefrontViewport({
   targetOrigin,
   tenantId,
   embedToken,
+  allowGallery = false,
 }: StorefrontViewportProps): React.JSX.Element {
   const rootRef = useRef<HTMLElement | null>(null);
   const emittedSizeRef = useRef<string | null>(null);
@@ -69,6 +73,7 @@ export function StorefrontViewport({
   const [result, setResult] = useState<GuidedCaptureResult | null>(null);
   const [remoteRecommendation, setRemoteRecommendation] = useState<FitRecommendation | null>(null);
   const [drapeResolve, setDrapeResolve] = useState<FitResolveResponse | null>(null);
+  const [clientPrintQaPassed, setClientPrintQaPassed] = useState<boolean | null>(null);
 
   const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
@@ -76,6 +81,7 @@ export function StorefrontViewport({
     emittedSizeRef.current = null;
     setRemoteRecommendation(null);
     setDrapeResolve(null);
+    setClientPrintQaPassed(null);
     setResult(next);
   }, []);
 
@@ -122,20 +128,26 @@ export function StorefrontViewport({
     return () => observer.disconnect();
   }, [targetOrigin]);
 
+  const printQaPassed = (activeGarment?.printQaPassed ?? false) && clientPrintQaPassed !== false;
+
   const localRecommendation = useMemo((): FitRecommendation | null => {
     if (!result || !activeGarment) {
       return null;
     }
 
+    const residuals = readFitResiduals(result.parametric);
     return recommendFit({
       measurements: result.parametric.derived_measurements,
       category: activeGarment.category,
       variants: activeGarment.sizeVariants,
       captureGatesPassed: result.session.captureGatesPassed,
       ingestTier: activeGarment.ingestTier,
-      approximateFit: activeGarment.approximateFit,
+      approximateFit: activeGarment.approximateFit || !printQaPassed,
+      heightResidualCm: residuals.heightResidualCm,
+      clothingResidual: residuals.clothingResidual,
+      printQaPassed,
     });
-  }, [activeGarment, result]);
+  }, [activeGarment, printQaPassed, result]);
 
   useEffect(() => {
     if (!result?.session.fitJobId || !activeSku) {
@@ -145,6 +157,7 @@ export function StorefrontViewport({
     let cancelled = false;
     setRemoteRecommendation(null);
     setDrapeResolve(null);
+    setClientPrintQaPassed(null);
 
     void fetchFitRecommendation(embedToken, {
       jobId: result.session.fitJobId,
@@ -189,20 +202,34 @@ export function StorefrontViewport({
       return base;
     }
 
-    if (!drapeResolve) {
+    if (!drapeResolve && printQaPassed) {
       return base;
     }
 
+    const residuals = result ? readFitResiduals(result.parametric) : {
+      heightResidualCm: null,
+      clothingResidual: null,
+    };
     const gate = evaluateConfidenceGate({
       captureGatesPassed: base.gate.capturePassed,
       ingestTier: activeGarment.ingestTier,
-      approximateFit: activeGarment.approximateFit,
-      hnswSimilarity: drapeResolve.similarity ?? base.gate.hnswSimilarity,
-      xpbdCompleted: drapeResolve.xpbdCompleted || base.gate.xpbdCompleted,
+      approximateFit: activeGarment.approximateFit || !printQaPassed,
+      hnswSimilarity: drapeResolve?.similarity ?? base.gate.hnswSimilarity,
+      xpbdCompleted: Boolean(drapeResolve?.xpbdCompleted || base.gate.xpbdCompleted),
+      heightResidualCm: residuals.heightResidualCm,
+      clothingResidual: residuals.clothingResidual,
+      printQaPassed,
     });
 
     return { ...base, gate };
-  }, [activeGarment, drapeResolve, localRecommendation, remoteRecommendation]);
+  }, [
+    activeGarment,
+    drapeResolve,
+    localRecommendation,
+    printQaPassed,
+    remoteRecommendation,
+    result,
+  ]);
 
   const drapePayloadBase64 = drapeResolve?.payloadBase64 ?? null;
 
@@ -230,6 +257,8 @@ export function StorefrontViewport({
         waistCm: recommendation.size.waistCm,
         hipCm: recommendation.size.hipCm,
         easeCm: recommendation.ease.chestCm,
+        albedoUrl: printQaPassed ? activeGarment?.albedoUrl ?? null : null,
+        printQaPassed,
       }
     : null;
 
@@ -240,28 +269,14 @@ export function StorefrontViewport({
     >
       {result ? (
         <div className="flex flex-col">
-          {isAnnyParametricVector(result.parametric) ? (
-            <AnnyCanvas
-              parametric={result.parametric}
-              heightCm={result.session.heightCm}
-              garment={canvasGarment}
-              drapePayloadBase64={drapePayloadBase64}
-              className="h-[min(78vw,640px)] min-h-[420px] w-full"
-            />
-          ) : (
-            <div className="flex h-[min(78vw,640px)] min-h-[420px] w-full flex-col items-center justify-center gap-2 px-6 text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
-                MHR {result.parametric.topology_version}
-              </p>
-              <p className="text-lg font-semibold text-obsidian-ink">Live body params landed</p>
-              <p className="max-w-md text-sm text-obsidian-muted">
-                Chest {result.parametric.derived_measurements.chest_cm.toFixed(1)} cm · waist{' '}
-                {result.parametric.derived_measurements.waist_cm.toFixed(1)} cm · hip{' '}
-                {result.parametric.derived_measurements.hip_cm.toFixed(1)} cm. The MHR viewport
-                consumes these vertices in the next slice.
-              </p>
-            </div>
-          )}
+          <AnnyCanvas
+            parametric={result.parametric}
+            heightCm={result.session.heightCm}
+            garment={canvasGarment}
+            drapePayloadBase64={printQaPassed ? drapePayloadBase64 : null}
+            onPrintQaFail={() => setClientPrintQaPassed(false)}
+            className="h-[min(78vw,640px)] min-h-[420px] w-full"
+          />
           <div className="flex items-start justify-between gap-3 px-5 py-4">
             <div>
               <AshriumWordmark
@@ -274,11 +289,13 @@ export function StorefrontViewport({
               </p>
               <p className="mt-1 text-sm text-obsidian-muted">
                 Rotate and zoom.
-                {drapePayloadBase64
-                  ? ' Cached or XPBD drape with strain heatmap.'
-                  : activeGarment
-                    ? ` ${activeGarment.name} is draped with a radial ease heatmap.`
-                    : ' Size recommendation comes after a confident drape.'}
+                {!printQaPassed
+                  ? ' 3D garment is off until print QA passes. Size is still from girths plus the published chart.'
+                  : drapePayloadBase64
+                    ? ' Newton drape is on the avatar. Clearance heatmap is a toggle; loose reads blue.'
+                    : activeGarment
+                      ? ` ${activeGarment.name} size is from girths plus the published chart. Approximate until Newton drape lands.`
+                      : ' Size recommendation comes after a confident drape.'}
               </p>
             </div>
             <div className="flex flex-col items-end gap-3">
@@ -292,6 +309,7 @@ export function StorefrontViewport({
                   setResult(null);
                   setRemoteRecommendation(null);
                   setDrapeResolve(null);
+                  setClientPrintQaPassed(null);
                   emittedSizeRef.current = null;
                 }}
                 className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
@@ -305,6 +323,7 @@ export function StorefrontViewport({
         <GuidedCapture
           tenantId={tenantId}
           embedToken={embedToken}
+          allowGallery={allowGallery}
           onComplete={handleComplete}
         />
       )}

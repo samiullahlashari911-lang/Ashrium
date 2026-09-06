@@ -4,15 +4,15 @@ import { parseResolveRequest } from '@/lib/server/fit-request';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
-import { ANNY_TOPOLOGY_VERSION } from '@/types/hmr';
+import { MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 /**
  * Cache hit → meshopt delta payload.
- * Cache miss → server XPBD (2.5–6s OK), write delta to garment-simulations,
- * insert simulation_cache. Does not block avatar inference — call after HMR completes.
+ * Cache miss → Cog task=drape (Newton XPBD on MHR LOD 3), write delta to
+ * garment-simulations, insert simulation_cache. Does not block avatar inference.
  */
 export async function POST(request: Request): Promise<Response> {
   let payload: unknown;
@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
       source: result.source,
       similarity: result.similarity,
       xpbdCompleted: result.xpbdCompleted,
-      topologyVersion: result.topologyVersion || ANNY_TOPOLOGY_VERSION,
+      topologyVersion: result.topologyVersion || MHR_TOPOLOGY_VERSION,
       meanStrain: result.meanStrain,
       payloadBase64: result.payloadBase64,
     });

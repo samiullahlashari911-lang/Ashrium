@@ -3,8 +3,11 @@ import * as THREE from 'three';
 import {
   ANNY_PHENOTYPE_LABELS,
   ANNY_TOPOLOGY_VERSION,
+  MHR_TOPOLOGY_VERSION,
+  MHR_VERTEX_COUNT,
   type AnnyParametricVector,
   type AnnyPhenotype,
+  type MhrParametricVector,
 } from '@/types/hmr';
 
 /** Rest-pose height of the shipped `anny-hull.glb` bounding box, in meters. */
@@ -97,6 +100,75 @@ export function applyAnnyParametricDeform(
 
   const targetHeight = heightCm / 100;
   root.scale.multiplyScalar(targetHeight / size.y);
+}
+
+/** Cog vertex buffers are centimetres; extent under 8 is already metres. */
+export function vertexBufferToMeters(values: readonly number[]): Float32Array {
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let index = 1; index < values.length; index += 3) {
+    minY = Math.min(minY, values[index]);
+    maxY = Math.max(maxY, values[index]);
+  }
+
+  const scale = maxY - minY < 8 ? 1 : 0.01;
+  const meters = new Float32Array(values.length);
+  for (let index = 0; index < values.length; index += 1) {
+    meters[index] = values[index] * scale;
+  }
+
+  return meters;
+}
+
+export function findMhrHullMesh(root: THREE.Object3D): THREE.Mesh | null {
+  let found: THREE.Mesh | null = null;
+  root.traverse((node) => {
+    if (found || !(node instanceof THREE.Mesh)) {
+      return;
+    }
+
+    const position = node.geometry.getAttribute('position');
+    if (position && position.count === MHR_VERTEX_COUNT) {
+      found = node;
+    }
+  });
+  return found;
+}
+
+/**
+ * Writes Cog `vertex_positions` onto the shipped MHR hull. Does not height-scale
+ * a dummy mesh. Missing vertices leave the official rest-pose LOD 1 in place.
+ */
+export function applyMhrVertexPositions(
+  root: THREE.Object3D,
+  vector: MhrParametricVector,
+): void {
+  if (vector.topology_version !== MHR_TOPOLOGY_VERSION) {
+    throw new Error(
+      `MHR topology ${vector.topology_version} does not match shipped hull ${MHR_TOPOLOGY_VERSION}`,
+    );
+  }
+
+  const mesh = findMhrHullMesh(root);
+  if (!mesh) {
+    throw new Error(`Shipped MHR hull does not have ${MHR_VERTEX_COUNT} vertices.`);
+  }
+
+  if (!vector.vertex_positions) {
+    return;
+  }
+
+  const position = mesh.geometry.getAttribute('position');
+  const meters = vertexBufferToMeters(vector.vertex_positions);
+  if (!position || position.count !== MHR_VERTEX_COUNT || position.array.length !== meters.length) {
+    throw new Error('MHR vertex_positions do not match the shipped LOD 1 hull.');
+  }
+
+  (position.array as Float32Array).set(meters);
+  position.needsUpdate = true;
+  mesh.geometry.computeVertexNormals();
+  mesh.geometry.computeBoundingBox();
+  mesh.geometry.computeBoundingSphere();
 }
 
 export function findAnnyHullMesh(root: THREE.Object3D): THREE.Mesh | null {

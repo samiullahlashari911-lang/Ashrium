@@ -1,23 +1,47 @@
 'use client';
 
-import { useEffect, useRef, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { RadialHeatmapLegend } from '@/components/vfr/radial-heatmap-legend';
 import { obsidianTitanium } from '@/lib/design-tokens';
-import { buildAnnyGarmentGeometry, type AnnyGarmentKind } from '@/lib/graphics/anny-garment';
-import { applyAnnyParametricDeform, findAnnyHullMesh } from '@/lib/graphics/anny-hull';
+import {
+  applyFacelessMannequin,
+  applyMannequinMaterial,
+  buildAnnyGarmentGeometry,
+  buildUndergarmentGeometry,
+  createGarmentAlbedoMaterial,
+  createUndergarmentMaterial,
+  garmentCodeUvsFromPositions,
+  type AnnyGarmentKind,
+} from '@/lib/graphics/anny-garment';
+import {
+  applyAnnyParametricDeform,
+  applyMhrVertexPositions,
+  findAnnyHullMesh,
+  findMhrHullMesh,
+} from '@/lib/graphics/anny-hull';
 import { disposeObject3D, disposeRendererSession } from '@/lib/graphics/dispose-session';
 import {
   compositeSimPositions,
   decodeSimDelta,
   simDeltaFromBase64,
 } from '@/lib/graphics/meshopt-delta';
+import {
+  evaluatePrintQaFromImage,
+  failedPrintQa,
+  type PrintQaResult,
+} from '@/lib/graphics/print-qa';
 import { DEFAULT_EASE_CM } from '@/lib/graphics/radial-heatmap';
 import { createFitShaderMaterial } from '@/lib/graphics/strain-shader';
-import { ANNY_HULL_GLB_PUBLIC_PATH, type AnnyParametricVector } from '@/types/hmr';
+import {
+  ANNY_HULL_GLB_PUBLIC_PATH,
+  MHR_HULL_GLB_PUBLIC_PATH,
+  isMhrParametricVector,
+  type FitParametricVector,
+} from '@/types/hmr';
 
 export interface AnnyCanvasGarment {
   kind: AnnyGarmentKind;
@@ -25,15 +49,72 @@ export interface AnnyCanvasGarment {
   waistCm: number;
   hipCm: number;
   easeCm: number;
+  albedoUrl?: string | null;
+  printQaPassed?: boolean;
 }
 
 export interface AnnyCanvasProps {
-  parametric: AnnyParametricVector;
+  parametric: FitParametricVector;
   heightCm: number;
   garment?: AnnyCanvasGarment | null;
   /** Base64 meshopt delta from /api/v1/fit/resolve. When set, V_final = V_0 + ΔX. */
   drapePayloadBase64?: string | null;
+  /** Client pixel QA can still fail after ingest; parent ORs this into Approximate. */
+  onPrintQaFail?: () => void;
   className?: string;
+}
+
+interface LoadedAlbedo {
+  qa: PrintQaResult;
+  texture: THREE.Texture | null;
+}
+
+function inspectAlbedoImage(url: string): Promise<LoadedAlbedo> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => {
+      let pixels: Uint8ClampedArray | undefined;
+      try {
+        const canvas = document.createElement('canvas');
+        const width = Math.max(1, Math.min(96, image.naturalWidth));
+        const height = Math.max(1, Math.min(96, image.naturalHeight));
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (context) {
+          context.drawImage(image, 0, 0, width, height);
+          pixels = context.getImageData(0, 0, width, height).data;
+        }
+      } catch {
+        pixels = undefined;
+      }
+
+      const qa = evaluatePrintQaFromImage({
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        pixels,
+      });
+      if (!qa.passed) {
+        resolve({ qa, texture: null });
+        return;
+      }
+
+      const texture = new THREE.Texture(image);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.needsUpdate = true;
+      resolve({
+        qa,
+        texture: qa.mode === 'texture' ? texture : null,
+      });
+    };
+    image.onerror = () => {
+      resolve({ qa: failedPrintQa('load_failed'), texture: null });
+    };
+    image.src = url;
+  });
 }
 
 export const AnnyCanvas: FC<AnnyCanvasProps> = ({
@@ -41,15 +122,21 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   heightCm,
   garment = null,
   drapePayloadBase64 = null,
+  onPrintQaFail,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const printQaFailRef = useRef(onPrintQaFail);
+  printQaFailRef.current = onPrintQaFail;
+  const [showClearanceHeatmap, setShowClearanceHeatmap] = useState(false);
 
   const garmentKind = garment?.kind;
   const garmentChestCm = garment?.chestCm;
   const garmentWaistCm = garment?.waistCm;
   const garmentHipCm = garment?.hipCm;
   const garmentEaseCm = garment?.easeCm;
+  const albedoUrl = garment?.albedoUrl ?? null;
+  const ingestPrintQaPassed = garment?.printQaPassed;
 
   useEffect(() => {
     const mountElement = mountRef.current;
@@ -64,6 +151,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     let disposed = false;
     let animationFrameId: number | null = null;
     let strainMaterial: THREE.ShaderMaterial | null = null;
+    let albedoTexture: THREE.Texture | null = null;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(obsidianTitanium.canvas);
@@ -111,30 +199,63 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     scene.add(floorMesh);
 
     const loader = new GLTFLoader();
-    void loader.loadAsync(ANNY_HULL_GLB_PUBLIC_PATH).then((gltf) => {
+    const hullPath = isMhrParametricVector(parametric)
+      ? MHR_HULL_GLB_PUBLIC_PATH
+      : ANNY_HULL_GLB_PUBLIC_PATH;
+
+    const visualizationOff = ingestPrintQaPassed === false;
+
+    void (async () => {
+      let loadedAlbedo: LoadedAlbedo | null = null;
+      if (!visualizationOff && albedoUrl) {
+        loadedAlbedo = await inspectAlbedoImage(albedoUrl);
+        if (disposed) {
+          loadedAlbedo.texture?.dispose();
+          return;
+        }
+
+        if (!loadedAlbedo.qa.passed) {
+          loadedAlbedo.texture?.dispose();
+          loadedAlbedo = { qa: loadedAlbedo.qa, texture: null };
+          printQaFailRef.current?.();
+        } else {
+          albedoTexture = loadedAlbedo.texture;
+        }
+      }
+
+      const showGarment = !visualizationOff && (loadedAlbedo === null || loadedAlbedo.qa.passed);
+
+      let gltf: Awaited<ReturnType<GLTFLoader['loadAsync']>>;
+      try {
+        gltf = await loader.loadAsync(hullPath);
+      } catch {
+        return;
+      }
+
       if (disposed) {
         disposeObject3D(gltf.scene);
         return;
       }
 
       const hull = gltf.scene;
-      hull.traverse((node) => {
-        if (node instanceof THREE.Mesh) {
-          node.castShadow = true;
-          node.receiveShadow = true;
-          if (node.material instanceof THREE.MeshStandardMaterial) {
-            node.material.color.set(0xc5cad3);
-            node.material.roughness = 0.62;
-            node.material.metalness = 0.04;
-          }
-        }
-      });
+      applyMannequinMaterial(hull);
 
       try {
-        applyAnnyParametricDeform(hull, parametric, heightCm);
+        if (isMhrParametricVector(parametric)) {
+          applyMhrVertexPositions(hull, parametric);
+        } else {
+          applyAnnyParametricDeform(hull, parametric, heightCm);
+        }
       } catch {
         disposeObject3D(hull);
         return;
+      }
+
+      const bodyMesh = isMhrParametricVector(parametric)
+        ? findMhrHullMesh(hull)
+        : findAnnyHullMesh(hull);
+      if (bodyMesh) {
+        applyFacelessMannequin(bodyMesh);
       }
 
       const bounds = new THREE.Box3().setFromObject(hull);
@@ -149,6 +270,27 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
 
       scene.add(hull);
 
+      hull.updateMatrixWorld(true);
+      const hullMesh = findAnnyHullMesh(hull);
+      if (hullMesh) {
+        const undergarmentGeometry = buildUndergarmentGeometry(hullMesh);
+        if (undergarmentGeometry) {
+          const undergarment = new THREE.Mesh(undergarmentGeometry, createUndergarmentMaterial());
+          undergarment.castShadow = true;
+          undergarment.receiveShadow = true;
+          scene.add(undergarment);
+        }
+      }
+
+      if (!showGarment) {
+        return;
+      }
+
+      const albedoMaterial = () => createGarmentAlbedoMaterial({
+        map: loadedAlbedo?.texture ?? null,
+        albedoHex: loadedAlbedo?.qa.albedoHex,
+      });
+
       if (drapePayloadBase64) {
         try {
           const mesh = decodeSimDelta(simDeltaFromBase64(drapePayloadBase64));
@@ -156,12 +298,19 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
           geometry.setAttribute('aClearanceCm', new THREE.BufferAttribute(mesh.clearanceCm, 1));
+          geometry.setAttribute(
+            'uv',
+            new THREE.BufferAttribute(garmentCodeUvsFromPositions(mesh.restPositions), 2),
+          );
           geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
           geometry.computeVertexNormals();
-          strainMaterial = createFitShaderMaterial(garmentEaseCm ?? DEFAULT_EASE_CM);
-          const draped = new THREE.Mesh(geometry, strainMaterial);
-          // XPBD positions are already height-scaled server-side. Apply only
-          // the root translation used to center the visible ANNY hull.
+          const drapedMaterial = showClearanceHeatmap
+            ? createFitShaderMaterial(garmentEaseCm ?? DEFAULT_EASE_CM)
+            : albedoMaterial();
+          if (showClearanceHeatmap) {
+            strainMaterial = drapedMaterial as THREE.ShaderMaterial;
+          }
+          const draped = new THREE.Mesh(geometry, drapedMaterial);
           draped.position.copy(hull.position);
           draped.castShadow = true;
           draped.receiveShadow = true;
@@ -178,13 +327,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         || garmentWaistCm === undefined
         || garmentHipCm === undefined
         || garmentEaseCm === undefined
+        || !hullMesh
       ) {
-        return;
-      }
-
-      hull.updateMatrixWorld(true);
-      const hullMesh = findAnnyHullMesh(hull);
-      if (!hullMesh) {
         return;
       }
 
@@ -203,19 +347,12 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         return;
       }
 
-      const garmentMaterial = new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.48,
-        metalness: 0.04,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.88,
-      });
+      const garmentMaterial = albedoMaterial();
       const garmentMesh = new THREE.Mesh(garmentGeometry, garmentMaterial);
       garmentMesh.castShadow = true;
       garmentMesh.receiveShadow = true;
       scene.add(garmentMesh);
-    });
+    })();
 
     const animate = (): void => {
       animationFrameId = requestAnimationFrame(animate);
@@ -244,10 +381,11 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         scene,
         renderer,
         mountElement,
-        extras: [strainMaterial],
+        extras: [strainMaterial, albedoTexture],
       });
     };
   }, [
+    albedoUrl,
     drapePayloadBase64,
     garmentChestCm,
     garmentEaseCm,
@@ -255,13 +393,27 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     garmentKind,
     garmentWaistCm,
     heightCm,
+    ingestPrintQaPassed,
     parametric,
+    showClearanceHeatmap,
   ]);
+
+  const heatmapAvailable = Boolean(drapePayloadBase64) && ingestPrintQaPassed !== false;
 
   return (
     <div className={`relative ${className}`}>
       <div ref={mountRef} className="h-full w-full" />
-      {garment || drapePayloadBase64 ? <RadialHeatmapLegend /> : null}
+      {heatmapAvailable ? (
+        <button
+          type="button"
+          aria-pressed={showClearanceHeatmap}
+          onClick={() => setShowClearanceHeatmap((value) => !value)}
+          className="absolute right-4 top-4 z-10 rounded-full border border-white/15 bg-obsidian-canvas/70 px-3 py-1.5 text-xs text-obsidian-muted backdrop-blur-md"
+        >
+          {showClearanceHeatmap ? 'Hide clearance' : 'Show clearance'}
+        </button>
+      ) : null}
+      {showClearanceHeatmap && heatmapAvailable ? <RadialHeatmapLegend /> : null}
     </div>
   );
 };

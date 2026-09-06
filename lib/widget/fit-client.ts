@@ -231,6 +231,8 @@ export interface FitRecommendResponse {
     capturePassed: boolean;
     ingestPassed: boolean;
     drapePassed: boolean;
+    residualPassed: boolean;
+    printPassed?: boolean;
     hnswSimilarity: number | null;
     xpbdCompleted: boolean;
   };
@@ -256,6 +258,8 @@ function isFitRecommendResponse(value: unknown): value is FitRecommendResponse {
     && typeof value.gate.capturePassed === 'boolean'
     && typeof value.gate.ingestPassed === 'boolean'
     && typeof value.gate.drapePassed === 'boolean'
+    && typeof value.gate.residualPassed === 'boolean'
+    && (value.gate.printPassed === undefined || typeof value.gate.printPassed === 'boolean')
     && (value.gate.hnswSimilarity === null || typeof value.gate.hnswSimilarity === 'number')
     && typeof value.gate.xpbdCompleted === 'boolean'
     && typeof value.sku === 'string'

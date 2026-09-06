@@ -2,16 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { DebugGalleryUpload } from '@/components/widget/guided-capture/debug-gallery-upload';
+import { EmptyState } from '@/components/dashboard/empty-state';
 import {
   ReplicateRuntimeBanner,
   type ReplicateRuntimeBannerConfig,
 } from '@/components/dashboard/replicate-runtime-banner';
+import type { GarmentIngestMode, GarmentIngestTier } from '@/types/garment';
 
-interface DemoProduct {
-  name: string;
-  price: string;
+export interface SandboxGarmentOption {
   sku: string;
+  name: string;
+  mode: GarmentIngestMode | null;
+  ingestTier: GarmentIngestTier | null;
+  approximateFit: boolean;
 }
 
 interface EventLogEntry {
@@ -32,12 +35,6 @@ interface SandboxWindow extends Window {
   AshriumVfrWidget?: VfrWidgetController;
 }
 
-const DEMO_PRODUCTS: readonly DemoProduct[] = [
-  { sku: 'SKU-DENIM-001', name: 'Structured Denim', price: '$89.00' },
-  { sku: 'SKU-COTTON-002', name: 'Essential Cotton Tee', price: '$32.00' },
-  { sku: 'SKU-KNIT-003', name: 'Merino Knit', price: '$118.00' },
-];
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -52,21 +49,34 @@ function isWidgetMessage(value: unknown): value is {
     && isRecord(value.payload);
 }
 
+function ingestLabel(garment: SandboxGarmentOption): string {
+  const mode = garment.mode ?? '—';
+  const tier = garment.ingestTier ? `Tier ${garment.ingestTier}` : 'no tier';
+  const fit = garment.approximateFit ? 'Approximate' : 'Validated';
+  return `${mode} · ${tier} · ${fit}`;
+}
+
 export function StorefrontSandbox({
-  tenantId,
   token,
   replicate,
+  garments,
 }: {
   tenantId: string;
   token: string;
   replicate: ReplicateRuntimeBannerConfig;
+  garments: readonly SandboxGarmentOption[];
 }): React.JSX.Element {
   const scriptMountRef = useRef<HTMLDivElement | null>(null);
   const nextLogIdRef = useRef(1);
-  const [selectedSku, setSelectedSku] = useState(DEMO_PRODUCTS[0].sku);
+  const initialSku = garments[0]?.sku ?? '';
+  const [selectedSku, setSelectedSku] = useState(initialSku);
   const [recommendedSize, setRecommendedSize] = useState<string | null>(null);
   const [widgetReady, setWidgetReady] = useState(false);
   const [events, setEvents] = useState<EventLogEntry[]>([]);
+
+  const selectedGarment = garments.find((garment) => garment.sku === selectedSku)
+    ?? garments[0]
+    ?? null;
 
   const addEvent = useCallback(
     (
@@ -91,7 +101,7 @@ export function StorefrontSandbox({
   useEffect(() => {
     const sandboxWindow = window as SandboxWindow;
     const mount = scriptMountRef.current;
-    if (!mount) {
+    if (!mount || !initialSku) {
       return;
     }
 
@@ -99,7 +109,8 @@ export function StorefrontSandbox({
     script.src = '/vfr-widget.js';
     script.async = true;
     script.dataset.embedToken = token;
-    script.dataset.sku = DEMO_PRODUCTS[0].sku;
+    script.dataset.sku = initialSku;
+    script.dataset.allowGallery = 'true';
     mount.appendChild(script);
 
     const onWidgetMessage = (event: MessageEvent<unknown>): void => {
@@ -127,10 +138,10 @@ export function StorefrontSandbox({
       delete sandboxWindow.AshriumVfrWidget;
       delete sandboxWindow.__ASHRIUM_VFR_WIDGET__;
     };
-  }, [addEvent, token]);
+  }, [addEvent, initialSku, token]);
 
   useEffect(() => {
-    if (!widgetReady) {
+    if (!widgetReady || !selectedSku) {
       return;
     }
 
@@ -150,85 +161,96 @@ export function StorefrontSandbox({
         <p className="text-sm font-medium text-obsidian-accent-muted">Storefront integration harness</p>
         <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Ashrium Outfitters</h1>
         <p className="mt-2 text-sm text-obsidian-muted">
-          Simulate product changes and inspect the isolated widget event bridge.
+          Try On uses SKUs ingested on Garments. Submit both photos to warm the A100;
+          it sleeps when no job is active. Gallery upload is sandbox-only.
         </p>
       </header>
 
       <ReplicateRuntimeBanner config={replicate} />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="obsidian-glass p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="font-mono text-xs text-obsidian-accent-muted">{selectedSku}</p>
-              <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
-                {DEMO_PRODUCTS.find((product) => product.sku === selectedSku)?.name}
-              </h2>
+      {garments.length === 0 ? (
+        <EmptyState
+          title="Ingest one SKU before Try On"
+          description="Sandbox loads CAD garments from this tenant. Test one SKU on Garments first. Fake catalog SKUs are not a fitting path."
+          action={{ href: '/dashboard/garments', label: 'Open Garments' }}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="obsidian-glass p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="font-mono text-xs text-obsidian-accent-muted">{selectedGarment?.sku}</p>
+                <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
+                  {selectedGarment?.name}
+                </h2>
+                {selectedGarment ? (
+                  <p className="mt-1 text-xs text-obsidian-muted">{ingestLabel(selectedGarment)}</p>
+                ) : null}
+              </div>
             </div>
-            <p className="text-lg font-semibold text-obsidian-ink">
-              {DEMO_PRODUCTS.find((product) => product.sku === selectedSku)?.price}
-            </p>
-          </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            {DEMO_PRODUCTS.map((product) => (
-              <button
-                key={product.sku}
-                type="button"
-                onClick={() => setSelectedSku(product.sku)}
-                className={[
-                  'rounded-full border px-4 py-2 text-sm transition',
-                  product.sku === selectedSku
-                    ? 'border-obsidian-accent bg-obsidian-accent/20 text-obsidian-ink'
-                    : 'border-white/10 bg-obsidian-canvas/50 text-obsidian-muted hover:border-white/25',
-                ].join(' ')}
-              >
-                {product.name}
-              </button>
-            ))}
-          </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {garments.map((garment) => (
+                <button
+                  key={garment.sku}
+                  type="button"
+                  onClick={() => {
+                    setRecommendedSize(null);
+                    setSelectedSku(garment.sku);
+                  }}
+                  className={[
+                    'rounded-full border px-4 py-2 text-left text-sm transition',
+                    garment.sku === selectedSku
+                      ? 'border-obsidian-accent bg-obsidian-accent/20 text-obsidian-ink'
+                      : 'border-white/10 bg-obsidian-canvas/50 text-obsidian-muted hover:border-white/25',
+                  ].join(' ')}
+                >
+                  <span className="block">{garment.name}</span>
+                  <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-obsidian-subtle">
+                    {ingestLabel(garment)}
+                  </span>
+                </button>
+              ))}
+            </div>
 
-          <div className="mt-6 rounded-xl border border-white/10 bg-obsidian-canvas/50 p-3">
-            <div ref={scriptMountRef} />
-          </div>
+            <div className="mt-6 rounded-xl border border-white/10 bg-obsidian-canvas/50 p-3">
+              <div ref={scriptMountRef} />
+            </div>
 
-          <div className="mt-5 flex items-center gap-3">
-            <span className="text-sm text-obsidian-muted">Recommended size</span>
-            <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
-              {recommendedSize ?? 'Awaiting a confident size'}
-            </span>
-          </div>
+            <div className="mt-5 flex items-center gap-3">
+              <span className="text-sm text-obsidian-muted">Recommended size</span>
+              <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
+                {recommendedSize ?? 'Awaiting a confident size'}
+              </span>
+            </div>
+          </section>
 
-          <div className="mt-6">
-            <DebugGalleryUpload tenantId={tenantId} />
-          </div>
-        </section>
-
-        <aside className="obsidian-glass p-5">
-          <h2 className="text-lg font-semibold text-obsidian-ink">Event inspector</h2>
-          <p className="mt-1 text-sm text-obsidian-muted">Newest event first. Payloads are captured at the host boundary.</p>
-          <ol className="mt-4 flex max-h-[720px] flex-col gap-3 overflow-y-auto pr-1">
-            {events.length === 0 ? (
-              <li className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-obsidian-subtle">
-                Waiting for widget traffic.
-              </li>
-            ) : (
-              events.map((event) => (
-                <li key={event.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono text-xs text-obsidian-accent-muted">{event.direction}</span>
-                    <time className="text-xs text-obsidian-subtle">{event.timestamp}</time>
-                  </div>
-                  <p className="mt-2 text-sm font-semibold text-obsidian-ink">{event.type}</p>
-                  <pre className="mt-2 overflow-x-auto rounded bg-obsidian-canvas p-2 text-xs text-obsidian-muted">
-                    {JSON.stringify(event.payload, null, 2)}
-                  </pre>
+          <aside className="obsidian-glass p-5">
+            <h2 className="text-lg font-semibold text-obsidian-ink">Event inspector</h2>
+            <p className="mt-1 text-sm text-obsidian-muted">Newest event first. Payloads are captured at the host boundary.</p>
+            <ol className="mt-4 flex max-h-[720px] flex-col gap-3 overflow-y-auto pr-1">
+              {events.length === 0 ? (
+                <li className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-obsidian-subtle">
+                  Waiting for widget traffic.
                 </li>
-              ))
-            )}
-          </ol>
-        </aside>
-      </div>
+              ) : (
+                events.map((event) => (
+                  <li key={event.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-xs text-obsidian-accent-muted">{event.direction}</span>
+                      <time className="text-xs text-obsidian-subtle">{event.timestamp}</time>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-obsidian-ink">{event.type}</p>
+                    <pre className="mt-2 overflow-x-auto rounded bg-obsidian-canvas p-2 text-xs text-obsidian-muted">
+                      {JSON.stringify(event.payload, null, 2)}
+                    </pre>
+                  </li>
+                ))
+              )}
+            </ol>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }

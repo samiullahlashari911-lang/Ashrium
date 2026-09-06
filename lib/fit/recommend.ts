@@ -17,6 +17,9 @@ export interface RecommendFitInput {
   approximateFit: boolean;
   hnswSimilarity?: number | null;
   xpbdCompleted?: boolean;
+  heightResidualCm?: number | null;
+  clothingResidual?: number | null;
+  printQaPassed?: boolean;
 }
 
 export function recommendFit(input: RecommendFitInput): FitRecommendation {
@@ -27,6 +30,9 @@ export function recommendFit(input: RecommendFitInput): FitRecommendation {
     approximateFit: input.approximateFit,
     hnswSimilarity: input.hnswSimilarity ?? null,
     xpbdCompleted: input.xpbdCompleted ?? false,
+    heightResidualCm: input.heightResidualCm,
+    clothingResidual: input.clothingResidual,
+    printQaPassed: input.printQaPassed,
   });
 
   return {

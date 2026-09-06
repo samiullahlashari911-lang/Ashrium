@@ -115,35 +115,26 @@ function extractTables(html: string): string[][][] {
 }
 
 function completeMeasurements(
-  sizeCode: string,
   partial: Partial<Pick<CatalogSizeVariantInput, GirthKey>>,
-): CatalogSizeVariantInput | null {
-  const chest = partial.chestCm;
-  const waist = partial.waistCm;
-  const hip = partial.hipCm;
-  const length = partial.lengthCm;
-  if (chest == null && waist == null && hip == null) {
+): Partial<Pick<CatalogSizeVariantInput, GirthKey>> | null {
+  if (
+    partial.chestCm == null
+    && partial.waistCm == null
+    && partial.hipCm == null
+    && partial.lengthCm == null
+  ) {
     return null;
   }
 
-  const resolvedChest = chest ?? (waist != null ? waist + 16 : (hip ?? 0));
-  const resolvedWaist = waist ?? (chest != null ? chest - 16 : (hip != null ? hip - 8 : resolvedChest - 16));
-  const resolvedHip = hip ?? (chest != null ? chest : resolvedWaist + 8);
-  const resolvedLength = length ?? 70;
-
-  return {
-    sizeCode,
-    chestCm: resolvedChest,
-    waistCm: resolvedWaist > 0 ? resolvedWaist : resolvedChest - 16,
-    hipCm: resolvedHip,
-    lengthCm: resolvedLength,
-    externalSku: null,
-    measurementsFromSource: true,
-  };
+  // Keep only values published by the merchant. Missing chart cells are
+  // deliberately retained as missing so downstream ingest stays approximate.
+  return partial;
 }
 
-function parseHtmlTables(html: string): Map<string, CatalogSizeVariantInput> {
-  const chart = new Map<string, CatalogSizeVariantInput>();
+function parseHtmlTables(
+  html: string,
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
+  const chart = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
   for (const rows of extractTables(html)) {
     const header = rows[0].map((cell) => headerGirth(cell));
     const sizeIndex = header.findIndex((kind) => kind === 'size');
@@ -178,7 +169,7 @@ function parseHtmlTables(html: string): Map<string, CatalogSizeVariantInput> {
         partial[column.kind] = toCentimetres(value, cellUnit);
       }
 
-      const complete = completeMeasurements(sizeCode, partial);
+      const complete = completeMeasurements(partial);
       if (complete) {
         chart.set(sizeCode, complete);
       }
@@ -188,14 +179,16 @@ function parseHtmlTables(html: string): Map<string, CatalogSizeVariantInput> {
   return chart;
 }
 
-function parseTripletLines(text: string): Map<string, CatalogSizeVariantInput> {
-  const chart = new Map<string, CatalogSizeVariantInput>();
+function parseTripletLines(
+  text: string,
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
+  const chart = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
   const lineRe =
     /\b(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL)\b\s*[:\-–]\s*(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)/gi;
   let match = lineRe.exec(text);
   while (match) {
     const sizeCode = normalizeSizeCode(match[1]);
-    const complete = completeMeasurements(sizeCode, {
+    const complete = completeMeasurements({
       chestCm: Number(match[2]),
       waistCm: Number(match[3]),
       hipCm: Number(match[4]),
@@ -210,7 +203,9 @@ function parseTripletLines(text: string): Map<string, CatalogSizeVariantInput> {
   return chart;
 }
 
-function parseLabeledGirthRows(text: string): Map<string, CatalogSizeVariantInput> {
+function parseLabeledGirthRows(
+  text: string,
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
   const bySize = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
   const rowRe = /(chest|bust|waist|hip|hips|length|inseam)\s*(?:\((cm|in|inches)\))?\s*[:\-]\s*([^\n]+)/gi;
   let rowMatch = rowRe.exec(text);
@@ -238,9 +233,9 @@ function parseLabeledGirthRows(text: string): Map<string, CatalogSizeVariantInpu
     rowMatch = rowRe.exec(text);
   }
 
-  const chart = new Map<string, CatalogSizeVariantInput>();
+  const chart = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
   for (const [sizeCode, partial] of bySize) {
-    const complete = completeMeasurements(sizeCode, partial);
+    const complete = completeMeasurements(partial);
     if (complete) {
       chart.set(sizeCode, complete);
     }
@@ -250,21 +245,21 @@ function parseLabeledGirthRows(text: string): Map<string, CatalogSizeVariantInpu
 }
 
 function mergeCharts(
-  ...charts: Array<Map<string, CatalogSizeVariantInput>>
-): Map<string, CatalogSizeVariantInput> {
-  const merged = new Map<string, CatalogSizeVariantInput>();
+  ...charts: Array<Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>>
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
+  const merged = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
   for (const chart of charts) {
     for (const [sizeCode, row] of chart) {
-      if (!merged.has(sizeCode)) {
-        merged.set(sizeCode, row);
-      }
+      merged.set(sizeCode, { ...merged.get(sizeCode), ...row });
     }
   }
 
   return merged;
 }
 
-export function scanSizeChartFromPage(htmlOrText: string): Map<string, CatalogSizeVariantInput> {
+export function scanSizeChartFromPage(
+  htmlOrText: string,
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
   const text = stripHtml(htmlOrText);
   return mergeCharts(parseHtmlTables(htmlOrText), parseTripletLines(text), parseLabeledGirthRows(text));
 }

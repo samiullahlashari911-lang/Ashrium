@@ -137,9 +137,14 @@ block.
 - **Design tokens:** `lib/design-tokens.ts` (Obsidian — indigo canvas, glass
   panels, purple→magenta CTAs); do not introduce a new UI kit unless asked.
 
-Session GPU warm uses Deployment PATCH `min_instances=1`; Sleep and the
-sandbox 45-minute safety timeout set `min_instances=0`. Do not add 24/7
-Vercel cron keep-alive against the trial A100 credit.
+Session GPU warm uses Deployment PATCH `min_instances=1` when a shopper
+submits both photos. The GPU stays warm through `task=body` **and**
+`task=drape` on that session (`gpu_hold_until` on `fit_jobs`). It sleeps
+(`min_instances=0`) when no fit job is pending or processing **and** no
+drape hold is still in the future. Do not sleep after HMR success — Newton
+would cold-start. Merchants cannot scale the Deployment.
+Operator/cron may POST `/api/v1/hmr/keepalive`. Do not add 24/7 Vercel
+cron keep-alive against the trial A100 credit.
 
 To retire (do not build new work against these):
 
@@ -179,7 +184,8 @@ Shopify Admin directly.
 
 - Do not rename `fit_jobs`. Extend it: `height_cm`, `sex`, `weight_kg`
   (nullable), `front_image_path`, `side_image_path`,
-  `parametric_result jsonb`, `inference_duration_ms`. Stop writing to
+  `parametric_result jsonb`, `inference_duration_ms`, `gpu_hold_until`
+  (session A100 hold through Newton drape). Stop writing to
   `gltf_output_url` as the product output — that field is legacy. Stamp
   `topology_version` inside `parametric_result`. New rows use
   **`mhr-18439-127`**. Do not write `anny-13380-104` on new rows.
@@ -211,17 +217,17 @@ Shopify Admin directly.
 | Area | Files |
 |---|---|
 | Types | `types/hmr.ts` (`MhrParametricVector`; stop writing new ANNY rows), `types/graphics.ts`, `types/garment.ts`, `types/database.ts` |
-| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
+| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
-| Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
-| Cog (Python) | `cog/predict.py`, `cog/cog.yaml`, `cog/requirements.txt`, `cog/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, ISO girths). Tasks: `body` (this phase), `drape` / `pattern` fail closed until later phases. |
-| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/status/route.ts`, `app/api/v1/hmr/keepalive/route.ts` (session `min_instances`, not dummy predict), `app/api/v1/cron/ttl-sweep/route.ts`, `app/api/v1/webhooks/replicate/route.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Cog `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
-| ML | `lib/ml/replicate.ts` (Deployment fetch; parse MHR output; PATCH `min_instances`) |
+| Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (faceless mannequin, undergarment, GarmentCode UVs), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
+| Cog (Python) | `cog/predict.py`, `cog/cog.yaml`, `cog/requirements.txt`, `cog/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, ISO girths), `cog/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `cog/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject). Never `NvidiaWarp-GarmentCode`. |
+| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/status/route.ts` (Replicate GET reconcile), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper submit warms), `app/api/v1/cron/ttl-sweep/route.ts`, `app/api/v1/webhooks/replicate/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Cog `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
+| ML | `lib/ml/replicate.ts` (Deployment fetch; parse MHR output; GET prediction; PATCH `min_instances`) |
 | Merchant UI | `app/page.tsx`, `app/privacy/page.tsx`, `lib/privacy/consent-copy.ts`, `lib/privacy/illinois-bipa.ts` (BIPA geofence ship flag; off until counsel), `app/(dashboard)/dashboard-navigation.tsx`, `app/(dashboard)/onboarding/page.tsx`, `app/(dashboard)/onboarding/onboarding-wizard.tsx`, `app/(dashboard)/settings/page.tsx`, `app/(dashboard)/settings/integrations/shopify-form.tsx`, `components/settings/domain-allowlist-form.tsx`, `components/settings/telemetry-secret-form.tsx`, `components/dashboard/empty-state.tsx`, `components/dashboard/catalog-sync-bar.tsx`, `components/dashboard/replicate-runtime-banner.tsx`, `lib/onboarding.ts`, `lib/server/tenant-settings.ts` |
 | Theme | `lib/design-tokens.ts`, `components/theme/atmosphere-backdrop.tsx` |
 | Auth / access | `app/(auth)/sign-in/auth-form.tsx`, `lib/supabase/merchant-access.ts`, `lib/server/provision-merchant.ts`, `lib/server/operator-secret.ts`, `scripts/invite-merchant.mjs` |
 | Storefront twins | `extensions/shopify-vfr/blocks/vfr_embed.liquid`, `extensions/woocommerce-vfr/ashrium-vfr.php` |
-| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, confidence gate, route parsers, cron auth) |
+| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, confidence gate, route parsers, cron auth, catalog honesty, GarmentCode pattern ingest, print QA / mannequin albedo) |
 | DB | migrations for `fit_jobs` columns, WebP paths, size variants, vector cache, `match_simulation_cache` RPC, `garment-simulations` bucket, Realtime trigger, invite-only merchant access (`tenants.status`), Shopify catalog credentials + `garment-cad` rest-length bucket, durable `rate_limit_hits` + TTL sweep RPCs |
 
 ---
@@ -258,13 +264,18 @@ patterns to replicate, not copy pixel-for-pixel:
   the product texture. Legend sits at the edge, not overlapping the model.
   Strain is not a verdict.
 - **GPU session chrome (sandbox):** shopper/sandbox path uses a Replicate
-  Deployment. **Warm A100 for this session** sets `min_instances=1` (idle
-  billed, no cold start). **Sleep A100** and a **45-minute safety timeout**
-  set `min_instances=0`. Do **not** run 24/7 Vercel cron keep-alive. The
-  trial credit is ~$5 ≈ 3,571s of billed A100 including idle
-  (`$0.001400/s`). One warm test hour **is** the credit. Do not leave
-  `min_instances=1` overnight. Ingest (`task=pattern`) may cold-start; do
-  not hold `min_instances` for catalog.
+  Deployment. The A100 warms (`min_instances=1`) only when a shopper
+  submits both verified photos on `POST /api/v1/hmr`. It stays warm until
+  Newton drape on that session finishes (or the `gpu_hold_until` window
+  lapses). It sleeps (`min_instances=0`) when no fit job is pending or
+  processing **and** no drape hold is active. Do not sleep between
+  `task=body` and `task=drape`.
+  Merchants cannot Warm/Sleep the GPU. Manual scale is operator-only
+  (`ASHRIUM_OPERATOR_SECRET` or `CRON_SECRET` on
+  `POST /api/v1/hmr/keepalive`). Do **not** run 24/7 Vercel cron keep-alive.
+  The trial credit is ~$5 ≈ 3,571s of billed A100 including idle
+  (`$0.001400/s`). Ingest (`task=pattern`) may cold-start; do not hold
+  `min_instances` for catalog.
 - Use the existing **Obsidian design tokens** (`lib/design-tokens.ts`) for
   the widget, dashboard, and auth chrome: deep indigo canvas, glass panels,
   and purple-to-magenta CTAs. Do not add a component/UI kit unless
@@ -324,9 +335,9 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   `lib/graphics/xpbd-cloth.ts`. A miss must **not** withhold size; size is
   girth + chart. Drape may land late on `fit_job:{id}` Realtime. **Drape
   must never block the avatar SLA** (`task=body` stays the avatar path).
-- **Client 8s drape deadline:** if drape has not landed, still show the
-  girth-based size with an **Approximate** badge. Do not write a hard size
-  into the cart.
+  Until drape lands, show the girth-based size with an **Approximate**
+  badge. When Newton or a cache hit lands — at any wait — re-evaluate the
+  AND-gate; do not discard a late drape.
 - **Client-side compositing:** `V_final = V_0 + ΔX`. Heatmap is
   **clearance** (loose regions = blue). Strain may exist as a debug channel;
   it is not a size verdict. Keep `lib/graphics/pbd-cloth.ts` /
@@ -337,8 +348,8 @@ This is the most failure-prone area of the codebase. Follow these exactly.
      on-device head crop)
   2. garment ingest confidence is Tier 1 or pipeline-validated Tier 2
   3. clothing / height residual is within tolerance
-  4. drape has landed (cache hit **or** completed Newton run) within the 8s
-     client deadline
+  4. drape has landed (cache hit **or** completed Newton run), with no
+     client time cutoff
   If any condition fails, render "Approximate fit" — never emit a hard size
   claim without the full AND-gate. The **size number** is always from
   girths + the published size chart. KES and clearance must not flip that
@@ -421,8 +432,10 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   If HuggingFace access to SAM 3D Body weights is not granted, stop — do
   not stub the initializer.
 - **Session GPU, not 24/7 cron.** Shopper path uses the Deployment.
-  Test/sandbox: `min_instances=1` while the session is warm; `0` on Sleep
-  or the 45-minute safety timeout. Do not keep-alive with dummy predictions
+  `min_instances=1` after a complete shopper submit; stay warm through
+  Newton drape; `0` when no body job is pending/processing **and** no
+  drape hold is active. Merchants cannot Warm/Sleep. Operator/cron
+  may scale via keepalive. Do not keep-alive with dummy predictions
   against the ~$5 A100 credit.
 - **Ask before changing existing UI** that isn't part of the current task's
   file map.
@@ -459,12 +472,12 @@ kept and consumed — not redone.
 |---|---|---|
 | **0 — AGENTS.md rewrite** | This file: MHR topology, A100 Cog, clearance heatmap, head crop, session `min_instances`, no ANNY-Fit, Newton in Cog, GarmentCode ingest | — |
 | **1 — Privacy and capture** | Consent + age attestation, fitted-clothing copy, side wrist gate, on-device head crop into headless WebPs, optional Illinois ship flag, crop + wrist-gate tests. Demo: sandbox produces two headless WebPs; `/privacy` matches the checkbox. | 0 |
-| **2 — Replicate A100 Cog + session-warm GPU** | `cog/` with live SAM 2 → SAM 3D Body init → MHR `task=body`; model + Deployment on `gpu-a100-large`; `REPLICATE_DEPLOYMENT` required; replace dummy keep-alive with PATCH `min_instances=1/0`; sandbox Warm / Sleep + 45-minute safety timeout. Demo: Warm A100 shows `min_instances=1` + `gpu-a100-large`; a real body predict returns MHR params or the **real** Replicate error. | 0 |
+| **2 — Replicate A100 Cog + session-warm GPU** | `cog/` with live SAM 2 → SAM 3D Body init → MHR `task=body`; model + Deployment on `gpu-a100-large`; `REPLICATE_DEPLOYMENT` required; shopper submit PATCHes `min_instances=1`; stay warm through `task=drape`; sleep when no job is active and no drape hold remains. Demo: a completed shopper submit warms `gpu-a100-large` and a real body predict returns MHR params or the **real** Replicate error. | 0 |
 | **3 — App body contract (ANNY → MHR)** | `MhrParametricVector`; ship `mhr-hull.glb`; viewport + webhook/status parse MHR; wipe biometrics on success or failure; size rec + AND-gate; Approximate if clothing/height residual is large. Demo: Sandbox Try On shows a **real** MHR avatar from the live Cog, not a height-scaled dummy hull. | 1 + 2 |
-| **4 — Newton drape on the same warm GPU** | Cog `task=drape`; collider = MHR LOD 3; clearance into sim-delta v2; `resolve-drape.ts` → Replicate; JS XPBD debug-only; cache hit optional; miss must not withhold size; 8s client deadline → Approximate. Demo: one SKU draped on the live avatar; heatmap toggle; loose regions blue. | 3 |
+| **4 — Newton drape on the same warm GPU** | Cog `task=drape`; collider = MHR LOD 3; clearance into sim-delta v2; `resolve-drape.ts` → Replicate; JS XPBD debug-only; cache hit optional; miss must not withhold size; Approximate until drape lands, then AND-gate with no client time cutoff. Demo: one SKU draped on the live avatar; heatmap toggle; loose regions blue. | 3 |
 | **5 — Catalog honesty + GarmentCode** | Stop inventing girths; per-SKU primary; Cog `task=pattern` (Qwen3-VL-8B Apache 2.0 or HTML parse → GarmentCode); hard-reject self-intersection; cross-check size chart; grade by re-instantiating 2D pattern per size; unsupported styles = Approximate / no 3D; KES does not flip size. Ingest may cold-start. Demo: paste one product URL → one graded garment → visible tier/confidence → no invented chest=waist+16. | 0 |
 | **6 — Texture and mannequin** | Faceless non-skin-toned mannequin, neutral undergarment, garment albedo on GarmentCode UVs; failed print QA → visualization off + Approximate; heatmap remains a toggle. Demo: shopper can recognize the SKU color; body is not a nude grey mesh. | 4 + 5 |
-| **7 — Merchant lifecycle on a Shopify development store** | Invite → onboard → allowlist → Admin token → Test this SKU → Liquid block → Warm A100 → Try On → size to cart when AND-gate passes → Sleep A100. A Partner development store is a real shop with a real Admin API — not a mock JSON catalog. | 3 + 5 + 6 |
+| **7 — Merchant lifecycle on a Shopify development store** | Invite → onboard → allowlist → Admin token → Test this SKU → Liquid block → Try On (shopper submit warms A100) → size to cart when AND-gate passes. GPU sleeps when no job is active. A Partner development store is a real shop with a real Admin API — not a mock JSON catalog. | 3 + 5 + 6 |
 
 **Order is strict:** 0 → 1 → 2 → 3 → 4; 5 may run after 0 in parallel with
 1–3; 6 after 4+5; 7 last. If a credential is missing, stop and ask — do

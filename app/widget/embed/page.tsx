@@ -8,6 +8,7 @@ import {
 } from '@/lib/supabase/garment-profiles';
 import { createServiceClient } from '@/lib/supabase/service';
 import { verifyWidgetEmbedToken } from '@/lib/server/widget-embed';
+import { isWidgetEmbedParentAuthorized } from '@/lib/widget/embed-origin';
 import type { StorefrontGarment } from '@/types/garment';
 
 interface WidgetEmbedPageProps {
@@ -15,6 +16,7 @@ interface WidgetEmbedPageProps {
     parent_origin?: string;
     sku?: string;
     token?: string;
+    allow_gallery?: string;
   }>;
 }
 
@@ -44,6 +46,8 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
     ingestConfidence: null,
     ingestTier: null,
     approximateFit: true,
+    albedoUrl: null,
+    printQaPassed: false,
     sizeVariants: [],
   },
   {
@@ -53,6 +57,8 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
     ingestConfidence: null,
     ingestTier: null,
     approximateFit: true,
+    albedoUrl: null,
+    printQaPassed: false,
     sizeVariants: [],
   },
   {
@@ -62,6 +68,8 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
     ingestConfidence: null,
     ingestTier: null,
     approximateFit: true,
+    albedoUrl: null,
+    printQaPassed: false,
     sizeVariants: [],
   },
 ];
@@ -112,14 +120,19 @@ export default async function WidgetEmbedPage({
     ? configuredOrigins
     : [merchantDomainOrigin(merchant.domain)].filter((origin): origin is string => origin !== null);
   const isDevelopment = process.env.NODE_ENV === 'development';
+  const requestHost = requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host');
+  const appOrigin = requestHost ? normalizeOrigin(`https://${requestHost}`) : null;
+  const hostMatchesParent = parentOrigin !== null && appOrigin !== null && parentOrigin === appOrigin;
+  const allowGallery = params.allow_gallery === '1' && (isDevelopment || hostMatchesParent);
 
   if (
-    !isDevelopment
-    && (
-      !trustedOrigins.includes(parentOrigin)
-      || !referrerOrigin
-      || !trustedOrigins.includes(referrerOrigin)
-    )
+    !isWidgetEmbedParentAuthorized({
+      isDevelopment,
+      parentOrigin,
+      referrerOrigin,
+      appOrigin,
+      trustedOrigins,
+    })
   ) {
     return renderEmbedError('This widget is not authorized for the current storefront.');
   }
@@ -158,6 +171,7 @@ export default async function WidgetEmbedPage({
       targetOrigin={isDevelopment ? '*' : parentOrigin}
       tenantId={claims.tenantId}
       embedToken={embedToken}
+      allowGallery={allowGallery}
     />
   );
 }

@@ -55,6 +55,9 @@ export interface StorefrontGarment {
   ingestConfidence: number | null;
   ingestTier: GarmentIngestTier | null;
   approximateFit: boolean;
+  /** Public product image. Not CAD rest-lengths. Null when print QA failed. */
+  albedoUrl: string | null;
+  printQaPassed: boolean;
   sizeVariants: StorefrontSizeVariant[];
 }
 
@@ -91,6 +94,10 @@ export interface ConfidenceGateInput {
   approximateFit: boolean;
   hnswSimilarity: number | null;
   xpbdCompleted: boolean;
+  heightResidualCm?: number | null;
+  clothingResidual?: number | null;
+  /** False when product-image print QA fails. Omit to leave the gate unchanged. */
+  printQaPassed?: boolean;
 }
 
 export interface ConfidenceGateResult {
@@ -98,6 +105,8 @@ export interface ConfidenceGateResult {
   capturePassed: boolean;
   ingestPassed: boolean;
   drapePassed: boolean;
+  residualPassed: boolean;
+  printPassed: boolean;
   hnswSimilarity: number | null;
   xpbdCompleted: boolean;
 }
@@ -193,6 +202,8 @@ export interface CatalogGarmentDraft {
   mechanical: GarmentMechanicalProperties;
   cadPatternUrl: string | null;
   sizeVariants: CatalogSizeVariantInput[];
+  /** Product-page text used by Cog task=pattern (HTML parse). Not a secret. */
+  ingestCorpus?: string;
 }
 
 export const REST_LENGTH_SCHEMA = 'ashrium.rest_length.v1' as const;

@@ -15,6 +15,7 @@
   var scriptUrl = new URL(script.src, window.location.href);
   var widgetOrigin = scriptUrl.origin;
   var sku = script.getAttribute('data-sku') || '';
+  var allowGallery = script.getAttribute('data-allow-gallery') === 'true';
   var root = document.getElementById('vfr-widget-root');
 
   if (root) return;
@@ -37,6 +38,7 @@
   frameUrl.searchParams.set('token', token);
   frameUrl.searchParams.set('parent_origin', window.location.origin);
   if (sku) frameUrl.searchParams.set('sku', sku);
+  if (allowGallery) frameUrl.searchParams.set('allow_gallery', '1');
 
   frame.className = 'vfr-frame';
   frame.title = 'Ashrium Virtual Fitting Room';
