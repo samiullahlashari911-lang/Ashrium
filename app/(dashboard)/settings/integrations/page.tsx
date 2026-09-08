@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 
 import { ReplicateKeyForm } from '@/app/(dashboard)/settings/integrations/replicate-key-form';
 import { ShopifyForm } from '@/app/(dashboard)/settings/integrations/shopify-form';
@@ -56,7 +57,19 @@ export default async function IntegrationsPage() {
         </p>
       </header>
 
-      <ShopifyForm connected={shopify.connected} shopDomain={shopify.shopDomain} />
+      <Suspense
+        fallback={
+          <section className="obsidian-glass p-6 text-sm text-obsidian-muted">
+            Loading Shopify integration…
+          </section>
+        }
+      >
+        <ShopifyForm
+          connected={shopify.connected}
+          shopDomain={shopify.shopDomain}
+          usesOAuth={shopify.usesOAuth}
+        />
+      </Suspense>
 
       {isEnterprise ? (
         <ReplicateKeyForm hasActiveKey={hasActiveKey} />

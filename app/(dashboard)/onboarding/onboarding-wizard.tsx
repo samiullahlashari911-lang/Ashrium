@@ -166,13 +166,13 @@ export function OnboardingWizard({
         index={3}
         complete={shopifyConnected}
         title="Connect Shopify and install the block"
-        description="Catalog ingest runs server-side with your Admin API token."
+        description="Authorize the Ashrium VFR Partner app once; catalog ingest runs server-side."
       >
         <div className="obsidian-glass flex flex-col gap-4 p-6">
           <p className="text-sm text-obsidian-muted">
             {shopifyConnected && shopDomain
               ? `Connected to ${shopDomain}. Add the "Virtual fitting room" app block to your product template.`
-              : 'Store your shop domain and Admin API token, then add the "Virtual fitting room" app block to your product template.'}
+              : 'Connect Shopify with OAuth, then add the "Virtual fitting room" app block to your product template.'}
           </p>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">

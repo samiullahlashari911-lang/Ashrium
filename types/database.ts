@@ -278,6 +278,9 @@ export type TenantIntegrationRow = {
   telemetry_webhook_secret_ciphertext: string | null;
   shopify_shop_domain: string | null;
   shopify_admin_token_ciphertext: string | null;
+  shopify_token_expires_at: string | null;
+  shopify_refresh_token_ciphertext: string | null;
+  shopify_refresh_token_expires_at: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -291,6 +294,9 @@ export type TenantIntegrationInsert = {
   telemetry_webhook_secret_ciphertext?: string | null;
   shopify_shop_domain?: string | null;
   shopify_admin_token_ciphertext?: string | null;
+  shopify_token_expires_at?: string | null;
+  shopify_refresh_token_ciphertext?: string | null;
+  shopify_refresh_token_expires_at?: string | null;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -304,6 +310,9 @@ export type TenantIntegrationUpdate = {
   telemetry_webhook_secret_ciphertext?: string | null;
   shopify_shop_domain?: string | null;
   shopify_admin_token_ciphertext?: string | null;
+  shopify_token_expires_at?: string | null;
+  shopify_refresh_token_ciphertext?: string | null;
+  shopify_refresh_token_expires_at?: string | null;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;

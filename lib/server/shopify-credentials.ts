@@ -1,11 +1,21 @@
 import { decryptTenantSecret, encryptTenantSecret } from '@/lib/server/secret-crypto';
+import {
+  normalizeShopifyShopDomain,
+  refreshShopifyAccessToken,
+  saveShopifyOAuthTokens,
+  shopifyAccessTokenNeedsRefresh,
+} from '@/lib/server/shopify-oauth';
 import { verifyShopifyAdminCredentials } from '@/lib/catalog/shopify-admin';
 import { createServiceClient } from '@/lib/supabase/service';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
+export { normalizeShopifyShopDomain };
+
 export interface ShopifyConnectionStatus {
   connected: boolean;
   shopDomain: string | null;
+  tokenExpiresAt: string | null;
+  usesOAuth: boolean;
 }
 
 export interface SaveShopifyCredentialsResult {
@@ -14,16 +24,98 @@ export interface SaveShopifyCredentialsResult {
   shopDomain: string;
 }
 
-const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+export interface DisconnectShopifyResult {
+  success: boolean;
+  message: string;
+}
 
-function normalizeShopifyShopDomain(raw: string): string | null {
-  let value = raw.trim().toLowerCase();
-  value = value.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  if (!value.includes('.')) {
-    value = `${value}.myshopify.com`;
+interface ShopifyIntegrationRow {
+  shopify_shop_domain: string | null;
+  shopify_admin_token_ciphertext: string | null;
+  shopify_token_expires_at: string | null;
+  shopify_refresh_token_ciphertext: string | null;
+  shopify_refresh_token_expires_at: string | null;
+  is_active: boolean | null;
+}
+
+class ShopifyCredentialRefreshError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShopifyCredentialRefreshError';
+  }
+}
+
+async function readShopifyIntegrationRow(
+  tenantId: string,
+): Promise<ShopifyIntegrationRow | null> {
+  const serviceClient = createServiceClient();
+  const { data, error } = await serviceClient
+    .from('tenant_integrations')
+    .select(
+      'shopify_shop_domain, shopify_admin_token_ciphertext, shopify_token_expires_at, shopify_refresh_token_ciphertext, shopify_refresh_token_expires_at, is_active',
+    )
+    .eq('tenant_id', tenantId)
+    .eq('provider', 'shopify')
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
   }
 
-  return SHOP_DOMAIN_PATTERN.test(value) ? value : null;
+  return data;
+}
+
+async function refreshStoredShopifyToken(
+  tenantId: string,
+  row: ShopifyIntegrationRow,
+): Promise<{ shopDomain: string; adminToken: string }> {
+  const shopDomain = row.shopify_shop_domain;
+  const refreshTokenCiphertext = row.shopify_refresh_token_ciphertext;
+
+  if (!shopDomain || !refreshTokenCiphertext) {
+    throw new ShopifyCredentialRefreshError(
+      'Shopify access token expired. Reconnect Shopify in Settings → Integrations.',
+    );
+  }
+
+  const refreshToken = decryptTenantSecret(refreshTokenCiphertext);
+  if (!refreshToken) {
+    throw new ShopifyCredentialRefreshError(
+      'Stored Shopify refresh token could not be decrypted. Reconnect Shopify in Settings → Integrations.',
+    );
+  }
+
+  const refreshTokenExpiresAt = row.shopify_refresh_token_expires_at;
+  if (
+    refreshTokenExpiresAt
+    && Date.parse(refreshTokenExpiresAt) <= Date.now()
+  ) {
+    throw new ShopifyCredentialRefreshError(
+      'Shopify refresh token expired. Reconnect Shopify in Settings → Integrations.',
+    );
+  }
+
+  let tokens;
+  try {
+    tokens = await refreshShopifyAccessToken(shopDomain, refreshToken);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Shopify token refresh failed.';
+    throw new ShopifyCredentialRefreshError(
+      `${message} Reconnect Shopify in Settings → Integrations.`,
+    );
+  }
+
+  await saveShopifyOAuthTokens({
+    tenantId,
+    shopDomain,
+    tokens,
+  });
+
+  return { shopDomain, adminToken: tokens.accessToken };
 }
 
 export async function loadShopifyCredentials(
@@ -34,42 +126,44 @@ export async function loadShopifyCredentials(
     return null;
   }
 
-  const serviceClient = createServiceClient();
-  const { data, error } = await serviceClient
-    .from('tenant_integrations')
-    .select('shopify_shop_domain, shopify_admin_token_ciphertext, is_active')
-    .eq('tenant_id', tenantId)
-    .eq('provider', 'shopify')
-    .eq('is_active', true)
-    .maybeSingle();
-
-  if (error || !data?.shopify_shop_domain || !data.shopify_admin_token_ciphertext) {
+  const row = await readShopifyIntegrationRow(tenantId);
+  if (!row?.shopify_shop_domain || !row.shopify_admin_token_ciphertext) {
     return null;
   }
 
-  const adminToken = decryptTenantSecret(data.shopify_admin_token_ciphertext);
+  const shopDomain = row.shopify_shop_domain;
+  let adminToken = decryptTenantSecret(row.shopify_admin_token_ciphertext);
   if (!adminToken) {
     return null;
   }
 
-  return { shopDomain: data.shopify_shop_domain, adminToken };
+  if (shopifyAccessTokenNeedsRefresh(row.shopify_token_expires_at)) {
+    try {
+      return await refreshStoredShopifyToken(tenantId, row);
+    } catch (error) {
+      if (error instanceof ShopifyCredentialRefreshError) {
+        throw error;
+      }
+
+      throw new ShopifyCredentialRefreshError(
+        'Shopify token refresh failed. Reconnect Shopify in Settings → Integrations.',
+      );
+    }
+  }
+
+  return { shopDomain, adminToken };
 }
 
 export async function getShopifyConnectionStatus(
   tenantId: string,
 ): Promise<ShopifyConnectionStatus> {
-  const serviceClient = createServiceClient();
-  const { data } = await serviceClient
-    .from('tenant_integrations')
-    .select('shopify_shop_domain, is_active')
-    .eq('tenant_id', tenantId)
-    .eq('provider', 'shopify')
-    .eq('is_active', true)
-    .maybeSingle();
+  const row = await readShopifyIntegrationRow(tenantId);
 
   return {
-    connected: Boolean(data?.shopify_shop_domain),
-    shopDomain: data?.shopify_shop_domain ?? null,
+    connected: Boolean(row?.shopify_shop_domain),
+    shopDomain: row?.shopify_shop_domain ?? null,
+    tokenExpiresAt: row?.shopify_token_expires_at ?? null,
+    usesOAuth: Boolean(row?.shopify_refresh_token_ciphertext),
   };
 }
 
@@ -131,6 +225,9 @@ export async function saveMerchantShopifyCredentials(
       provider: 'shopify',
       shopify_shop_domain: shopDomain,
       shopify_admin_token_ciphertext: encryptTenantSecret(adminToken),
+      shopify_token_expires_at: null,
+      shopify_refresh_token_ciphertext: null,
+      shopify_refresh_token_expires_at: null,
       is_active: true,
     },
     { onConflict: 'tenant_id,provider' },
@@ -148,5 +245,43 @@ export async function saveMerchantShopifyCredentials(
     success: true,
     message: `Connected to ${shopDomain}. Test one SKU on Garments — full catalog sync is optional.`,
     shopDomain,
+  };
+}
+
+export async function disconnectMerchantShopify(): Promise<DisconnectShopifyResult> {
+  try {
+    await requireCurrentTenantId();
+  } catch {
+    return {
+      success: false,
+      message: 'Sign in with an active merchant account.',
+    };
+  }
+
+  const tenantId = await requireCurrentTenantId();
+  const serviceClient = createServiceClient();
+  const { error } = await serviceClient
+    .from('tenant_integrations')
+    .update({
+      is_active: false,
+      shopify_shop_domain: null,
+      shopify_admin_token_ciphertext: null,
+      shopify_token_expires_at: null,
+      shopify_refresh_token_ciphertext: null,
+      shopify_refresh_token_expires_at: null,
+    })
+    .eq('tenant_id', tenantId)
+    .eq('provider', 'shopify');
+
+  if (error) {
+    return {
+      success: false,
+      message: 'Unable to disconnect Shopify.',
+    };
+  }
+
+  return {
+    success: true,
+    message: 'Shopify disconnected.',
   };
 }
