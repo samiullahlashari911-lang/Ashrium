@@ -142,7 +142,6 @@ export function GuidedCapture({
       <CaptureViewport
         view={view}
         allowGallery={allowGallery}
-        requireConfirm={step === 'front'}
         stepLabel={step === 'front' ? 'Step 5 of 6' : 'Step 6 of 6'}
         onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
         onBack={() => {

@@ -62,6 +62,22 @@ export function CaptureViewport({
   sourceRef.current = source;
 
   useEffect(() => {
+    capturingRef.current = false;
+    alignedSinceRef.current = null;
+    lastVideoTimeRef.current = -1;
+    setHoldProgress(0);
+    setPending((current) => {
+      if (current) {
+        URL.revokeObjectURL(current.previewUrl);
+      }
+      return null;
+    });
+    setEncodeError(null);
+    setGalleryError(null);
+    setGate('not_detected');
+  }, [view]);
+
+  useEffect(() => {
     return () => {
       if (pending) {
         URL.revokeObjectURL(pending.previewUrl);
@@ -173,6 +189,9 @@ export function CaptureViewport({
                 return;
               }
 
+              capturingRef.current = false;
+              alignedSinceRef.current = null;
+              setHoldProgress(0);
               onCaptured(blob, 'aligned');
             })
             .catch(() => {
@@ -271,6 +290,7 @@ export function CaptureViewport({
         return;
       }
 
+      capturingRef.current = false;
       onCaptured(blob, 'aligned');
     } catch {
       setGalleryError(
@@ -284,7 +304,7 @@ export function CaptureViewport({
   };
 
   return (
-    <div className="flex h-full flex-col bg-obsidian-canvas text-obsidian-ink">
+    <div className="flex h-[100dvh] max-h-[100dvh] flex-col bg-obsidian-canvas text-obsidian-ink">
       <header className="flex items-start justify-between gap-3 px-5 pt-5">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
@@ -347,7 +367,7 @@ export function CaptureViewport({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-3 px-5 py-4">
+      <div className="flex shrink-0 flex-col gap-3 px-5 py-4">
         {cameraError && source === 'live' ? <p className="text-sm text-rose-300">{cameraError}</p> : null}
         {encodeError ? <p className="text-sm text-rose-300">{encodeError}</p> : null}
         {galleryError ? <p className="text-sm text-rose-300">{galleryError}</p> : null}

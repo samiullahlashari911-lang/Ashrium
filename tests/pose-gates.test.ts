@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
@@ -161,5 +163,15 @@ test('side is aligned when only the near wrist is visible and raised', () => {
   });
 
   assert.equal(evaluatePoseGate(nearOnly, 'side'), 'aligned');
+});
+
+const guidedCapture = readFileSync(
+  path.join(process.cwd(), 'components/widget/guided-capture/guided-capture.tsx'),
+  'utf8',
+);
+
+test('a verified front capture advances to side without a confirm Next', () => {
+  assert.match(guidedCapture, /setStep\('side'\)/);
+  assert.doesNotMatch(guidedCapture, /requireConfirm/);
 });
 
