@@ -28,9 +28,9 @@
   var style = document.createElement('style');
   style.textContent = [
     ':host{all:initial}',
-    '.vfr-shell{box-sizing:border-box;display:block;width:100%;min-height:420px;overflow:hidden;',
+    '.vfr-shell{box-sizing:border-box;display:block;width:100%;min-height:420px;overflow:auto;',
     'border-radius:16px;background:#0B0B1E;box-shadow:0 12px 36px rgba(8,6,28,.45)}',
-    '.vfr-frame{display:block;width:100%;height:clamp(520px,78vw,720px);border:0;background:#0B0B1E}',
+    '.vfr-frame{display:block;width:100%;height:clamp(640px,85vw,820px);border:0;background:#0B0B1E}',
   ].join('');
 
   var frame = document.createElement('iframe');
@@ -42,11 +42,14 @@
 
   frame.className = 'vfr-frame';
   frame.title = 'Ashrium Virtual Fitting Room';
-  frame.src = frameUrl.toString();
   frame.loading = 'lazy';
   frame.allow = 'camera; fullscreen';
-  frame.sandbox = 'allow-scripts allow-same-origin';
   frame.referrerPolicy = 'strict-origin-when-cross-origin';
+  // Do not set sandbox. allow-scripts + allow-same-origin already voids it
+  // (Chrome warns it can escape), and without allow-forms Chrome blocks
+  // every form submit to '' — including consent Next. Isolation stays:
+  // iframe document + embed token + origin allowlist; no merchant creds.
+  frame.src = frameUrl.toString();
 
   var shell = document.createElement('div');
   shell.className = 'vfr-shell';
@@ -55,6 +58,7 @@
   shadow.appendChild(shell);
 
   script.parentNode.insertBefore(root, script.nextSibling);
+  window.__ASHRIUM_VFR_WIDGET__ = true;
 
   function send(type, payload) {
     if (!frame.contentWindow) return;

@@ -188,7 +188,7 @@ function ashrium_vfr_render_embed()
           if (!payload || typeof payload.token !== 'string') return;
 
           var script = document.createElement('script');
-          script.src = appOrigin + '/vfr-widget.js';
+          script.src = appOrigin + '/vfr-widget.js?v=no-sandbox-1';
           script.async = true;
           script.dataset.embedToken = payload.token;
           script.dataset.sku = mount.dataset.sku || '';

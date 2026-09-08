@@ -4,6 +4,11 @@
  * the App Router) and must work on HTTPS without adding the app origin
  * to tenants.allowed_domains.
  */
+
+/** Bump when `public/vfr-widget.js` changes so hosts skip a stale cache. */
+export const VFR_WIDGET_SCRIPT_VERSION = 'no-sandbox-1';
+
+export const VFR_WIDGET_SCRIPT_SRC = `/vfr-widget.js?v=${VFR_WIDGET_SCRIPT_VERSION}`;
 export function isWidgetEmbedParentAuthorized(input: {
   appOrigin: string | null;
   isDevelopment: boolean;

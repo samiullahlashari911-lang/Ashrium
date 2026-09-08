@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AnnyCanvas } from '@/components/vfr/anny-canvas';
 import { ConfidenceBadge } from '@/components/vfr/confidence-badge';
@@ -52,8 +52,7 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
     );
   }, [jobId]);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
+  const handleSubmit = async (): Promise<void> => {
     if (!intake || !frontFile || !sideFile) {
       setError('Add front and side photos.');
       return;
@@ -112,7 +111,7 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
           onSubmit={setIntake}
         />
       ) : (
-        <form onSubmit={(event) => void handleSubmit(event)} className="mt-4 flex flex-col gap-4">
+        <div className="mt-4 flex flex-col gap-4">
           <p className="text-xs text-obsidian-subtle">Tenant {tenantId}</p>
           <label className="flex flex-col gap-2 text-sm text-obsidian-muted">
             Front photo
@@ -132,13 +131,16 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
           </label>
           {error ? <p className="text-sm text-rose-300">{error}</p> : null}
           <button
-            type="submit"
+            type="button"
             disabled={busy}
+            onClick={() => {
+              void handleSubmit();
+            }}
             className="obsidian-cta disabled:opacity-50"
           >
             {busy ? 'Running live MHR fit…' : 'Upload and infer'}
           </button>
-        </form>
+        </div>
       )}
 
       {parametric && intake && debugRecommendation ? (

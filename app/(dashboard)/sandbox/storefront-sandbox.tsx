@@ -7,6 +7,7 @@ import {
   ReplicateRuntimeBanner,
   type ReplicateRuntimeBannerConfig,
 } from '@/components/dashboard/replicate-runtime-banner';
+import { VFR_WIDGET_SCRIPT_SRC } from '@/lib/widget/embed-origin';
 import type { GarmentIngestMode, GarmentIngestTier } from '@/types/garment';
 
 export interface SandboxGarmentOption {
@@ -106,7 +107,7 @@ export function StorefrontSandbox({
     }
 
     const script = document.createElement('script');
-    script.src = '/vfr-widget.js';
+    script.src = VFR_WIDGET_SCRIPT_SRC;
     script.async = true;
     script.dataset.embedToken = token;
     script.dataset.sku = initialSku;
@@ -220,7 +221,7 @@ export function StorefrontSandbox({
             <div className="mt-5 flex items-center gap-3">
               <span className="text-sm text-obsidian-muted">Recommended size</span>
               <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
-                {recommendedSize ?? 'Awaiting a confident size'}
+                {recommendedSize ?? 'Complete Try On first'}
               </span>
             </div>
           </section>

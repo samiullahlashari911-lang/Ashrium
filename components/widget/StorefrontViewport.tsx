@@ -118,7 +118,9 @@ export function StorefrontViewport({
       postWidgetEvent(
         {
           type: 'VFR_RESIZE_VIEWPORT',
-          payload: { height: Math.ceil(entry.contentRect.height) },
+          payload: {
+            height: Math.ceil(Math.max(entry.contentRect.height, root.scrollHeight)),
+          },
         },
         targetOrigin,
       );
@@ -265,7 +267,11 @@ export function StorefrontViewport({
   return (
     <main
       ref={rootRef}
-      className="relative min-h-[520px] overflow-hidden bg-obsidian-canvas text-obsidian-ink"
+      className={
+        result
+          ? 'relative min-h-[520px] overflow-x-hidden overflow-y-auto bg-obsidian-canvas text-obsidian-ink'
+          : 'relative h-[100dvh] overflow-hidden bg-obsidian-canvas text-obsidian-ink'
+      }
     >
       {result ? (
         <div className="flex flex-col">

@@ -217,7 +217,7 @@ Shopify Admin directly.
 | Area | Files |
 |---|---|
 | Types | `types/hmr.ts` (`MhrParametricVector`; stop writing new ANNY rows), `types/graphics.ts`, `types/garment.ts`, `types/database.ts` |
-| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
+| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
 | Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (faceless mannequin, undergarment, GarmentCode UVs), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
 | Cog (Python) | `cog/predict.py`, `cog/cog.yaml`, `cog/requirements.txt`, `cog/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, ISO girths), `cog/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `cog/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject). Never `NvidiaWarp-GarmentCode`. |
@@ -227,7 +227,7 @@ Shopify Admin directly.
 | Theme | `lib/design-tokens.ts`, `components/theme/atmosphere-backdrop.tsx` |
 | Auth / access | `app/(auth)/sign-in/auth-form.tsx`, `lib/supabase/merchant-access.ts`, `lib/server/provision-merchant.ts`, `lib/server/operator-secret.ts`, `scripts/invite-merchant.mjs` |
 | Storefront twins | `extensions/shopify-vfr/blocks/vfr_embed.liquid`, `extensions/woocommerce-vfr/ashrium-vfr.php` |
-| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, confidence gate, route parsers, cron auth, catalog honesty, GarmentCode pattern ingest, print QA / mannequin albedo) |
+| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, confidence gate, iframe consent submit / `allow-forms`, route parsers, cron auth, catalog honesty, GarmentCode pattern ingest, print QA / mannequin albedo) |
 | DB | migrations for `fit_jobs` columns, WebP paths, size variants, vector cache, `match_simulation_cache` RPC, `garment-simulations` bucket, Realtime trigger, invite-only merchant access (`tenants.status`), Shopify catalog credentials + `garment-cad` rest-length bucket, durable `rate_limit_hits` + TTL sweep RPCs |
 
 ---
