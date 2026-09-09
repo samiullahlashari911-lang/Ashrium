@@ -5,7 +5,11 @@ import {
   saveShopifyOAuthTokens,
   shopifyAccessTokenNeedsRefresh,
 } from '@/lib/server/shopify-oauth';
-import { verifyShopifyAdminCredentials } from '@/lib/catalog/shopify-admin';
+import {
+  assertShopifyReadProductsAccess,
+  ShopifyAccessScopeError,
+  verifyShopifyAdminCredentials,
+} from '@/lib/catalog/shopify-admin';
 import { createServiceClient } from '@/lib/supabase/service';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
@@ -209,10 +213,15 @@ export async function saveMerchantShopifyCredentials(
         shopDomain,
       };
     }
-  } catch {
+
+    await assertShopifyReadProductsAccess({ shopDomain, adminToken });
+  } catch (error) {
     return {
       success: false,
-      message: 'Shopify rejected this shop domain or Admin token.',
+      message:
+        error instanceof ShopifyAccessScopeError
+          ? error.message
+          : 'Shopify rejected this shop domain or Admin token.',
       shopDomain,
     };
   }

@@ -32,6 +32,11 @@ body {
     linear-gradient(180deg, var(--obsidian-canvas) 0%, var(--obsidian-lift) 100%);
 }
 
+html:has(.dashboard-surface),
+html:has(.dashboard-surface) body {
+  background-image: none;
+}
+
 @layer components {
   .obsidian-glass {
     border-radius: 1.75rem;
@@ -46,6 +51,14 @@ body {
       -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
     }
+  }
+
+  /* Dashboard scroll: skip backdrop-filter so sticky nav + glass panels do not
+     re-composite a blur layer on every frame. Widget / marketing glass is unchanged. */
+  .dashboard-surface .obsidian-glass {
+    background: rgba(22, 22, 43, 0.88);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .obsidian-cta {
@@ -110,5 +123,40 @@ body {
 
   .obsidian-input-box:focus {
     border-color: rgba(255, 255, 255, 0.28);
+  }
+
+  @keyframes capture-guide-pulse {
+    0%,
+    100% {
+      opacity: 0.78;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .capture-guide-stroke {
+    animation: capture-guide-pulse 2.2s ease-in-out infinite;
+  }
+
+  .capture-guide-aligned {
+    opacity: 1;
+  }
+
+  .capture-height-dial {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      #000 16%,
+      #000 84%,
+      transparent 100%
+    );
+  }
+
+  .capture-height-dial::-webkit-scrollbar {
+    display: none;
   }
 }

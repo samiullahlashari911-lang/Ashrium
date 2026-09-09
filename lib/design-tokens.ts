@@ -33,6 +33,8 @@ export const glassTokens = {
   fill: 'rgba(255, 255, 255, 0.07)',
   border: 'rgba(255, 255, 255, 0.12)',
   blurPx: 20,
+  /** Dashboard sets `backdrop-filter: none` via `.dashboard-surface`. */
+  dashboardBlurPx: 0,
   radiusPx: 28,
 } as const;
 

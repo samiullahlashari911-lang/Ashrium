@@ -61,9 +61,12 @@ test('intake and gallery do not use a <form> that Chrome can block in an iframe'
   assert.doesNotMatch(intakeSource, /type="submit"/);
   assert.match(intakeSource, /isConsentContinueEnabled/);
   assert.match(intakeSource, /setPage\('height'\)/);
+  assert.match(intakeSource, /HeightDial/);
+  assert.doesNotMatch(intakeSource, /grid-cols-3/);
 });
 
 test('sandbox host cache-busts vfr-widget.js when the embed script changes', () => {
   assert.match(VFR_WIDGET_SCRIPT_SRC, /^\/vfr-widget\.js\?v=/);
   assert.match(VFR_WIDGET_SCRIPT_SRC, /no-sandbox/);
+  assert.match(widgetSource, /capture-ux-1/);
 });

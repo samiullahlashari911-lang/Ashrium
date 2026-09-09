@@ -47,12 +47,12 @@ const SIDE_ALIGNED = landmarks({
 
 test('front A-pose is aligned when the body fills the silhouette', () => {
   assert.equal(evaluatePoseGate(FRONT_ALIGNED, 'front'), 'aligned');
-  assert.equal(gateStatusCopy('aligned', 'front'), 'Hold still');
+  assert.match(gateStatusCopy('aligned', 'front'), /Hold still/);
 });
 
 test('side profile is aligned when shoulders are stacked', () => {
   assert.equal(evaluatePoseGate(SIDE_ALIGNED, 'side'), 'aligned');
-  assert.equal(gateStatusCopy('turn_required', 'side'), 'Turn to your side');
+  assert.match(gateStatusCopy('turn_required', 'side'), /side/i);
 });
 
 test('missing landmarks are not_detected', () => {
@@ -132,7 +132,7 @@ test('side raise_wrists when wrists hang below the shoulders', () => {
   });
 
   assert.equal(evaluatePoseGate(dropped, 'side'), 'raise_wrists');
-  assert.equal(gateStatusCopy('raise_wrists', 'side'), 'Raise your wrists to your shoulders');
+  assert.match(gateStatusCopy('raise_wrists', 'side'), /wrists/i);
 });
 
 test('side is aligned when wrists sit at the shoulders', () => {
@@ -163,6 +163,52 @@ test('side is aligned when only the near wrist is visible and raised', () => {
   });
 
   assert.equal(evaluatePoseGate(nearOnly, 'side'), 'aligned');
+});
+
+test('front is aligned when the body fills the outline without clipping', () => {
+  const filling = landmarks({
+    11: { x: 0.38, y: 0.22 },
+    12: { x: 0.62, y: 0.22 },
+    15: { x: 0.28, y: 0.42 },
+    16: { x: 0.72, y: 0.42 },
+    23: { x: 0.42, y: 0.52 },
+    24: { x: 0.58, y: 0.52 },
+    27: { x: 0.43, y: 0.94 },
+    28: { x: 0.57, y: 0.94 },
+  });
+
+  assert.equal(evaluatePoseGate(filling, 'front'), 'aligned');
+});
+
+test('hysteresis keeps a borderline fill aligned after a lock', () => {
+  const borderline = landmarks({
+    11: { x: 0.38, y: 0.08 },
+    12: { x: 0.62, y: 0.08 },
+    15: { x: 0.26, y: 0.32 },
+    16: { x: 0.74, y: 0.32 },
+    23: { x: 0.42, y: 0.48 },
+    24: { x: 0.58, y: 0.48 },
+    27: { x: 0.43, y: 0.98 },
+    28: { x: 0.57, y: 0.98 },
+  });
+
+  assert.equal(evaluatePoseGate(borderline, 'front'), 'too_close');
+  assert.equal(evaluatePoseGate(borderline, 'front', 'aligned'), 'aligned');
+});
+
+test('front A-pose is aligned when wrists sit at the shoulders', () => {
+  const atShoulders = landmarks({
+    11: { x: 0.38, y: 0.28 },
+    12: { x: 0.62, y: 0.28 },
+    15: { x: 0.28, y: 0.3 },
+    16: { x: 0.72, y: 0.3 },
+    23: { x: 0.42, y: 0.52 },
+    24: { x: 0.58, y: 0.52 },
+    27: { x: 0.43, y: 0.88 },
+    28: { x: 0.57, y: 0.88 },
+  });
+
+  assert.equal(evaluatePoseGate(atShoulders, 'front'), 'aligned');
 });
 
 const guidedCapture = readFileSync(

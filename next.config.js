@@ -13,6 +13,15 @@ const nextConfig = {
           },
         ],
       },
+      {
+        source: '/widget/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, must-revalidate',
+          },
+        ],
+      },
     ];
   },
 };

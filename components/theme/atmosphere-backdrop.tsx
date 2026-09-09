@@ -3,21 +3,35 @@ import type { JSX, ReactNode } from 'react';
 export { AshriumMark } from '@/components/brand/ashrium-logo';
 
 export type AtmosphereIntensity = 'hero' | 'subtle';
+export type ThemeSurface = 'marketing' | 'dashboard';
 
 interface AtmosphereBackdropProps {
   intensity?: AtmosphereIntensity;
+  surface?: ThemeSurface;
 }
 
 export function AtmosphereBackdrop({
   intensity = 'subtle',
+  surface = 'marketing',
 }: AtmosphereBackdropProps): JSX.Element {
   const isHero = intensity === 'hero';
+  const isDashboard = surface === 'dashboard';
+
+  if (isDashboard) {
+    return (
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-0 h-[240px] w-[480px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(106,50,201,0.12),transparent_70%)]" />
+      </div>
+    );
+  }
+
+  const softFilter = 'url(#obsidian-soft)';
 
   return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden"
-    >
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
       <div
         className={
           isHero
@@ -58,7 +72,7 @@ export function AtmosphereBackdrop({
           r={isHero ? 168 : 110}
           fill="url(#obsidian-sphere)"
           opacity={isHero ? 0.95 : 0.55}
-          filter="url(#obsidian-soft)"
+          filter={softFilter}
         />
 
         <ellipse
@@ -80,7 +94,7 @@ export function AtmosphereBackdrop({
           }
           fill="url(#obsidian-crystal)"
           opacity={isHero ? 0.88 : 0.4}
-          filter="url(#obsidian-soft)"
+          filter={softFilter}
         />
       </svg>
     </div>
@@ -90,13 +104,22 @@ export function AtmosphereBackdrop({
 export function ThemeShell({
   children,
   intensity = 'subtle',
+  surface = 'marketing',
 }: {
   children: ReactNode;
   intensity?: AtmosphereIntensity;
+  surface?: ThemeSurface;
 }): JSX.Element {
   return (
-    <div className="relative min-h-screen bg-obsidian-canvas text-obsidian-ink">
-      <AtmosphereBackdrop intensity={intensity} />
+    <div
+      className={[
+        'relative min-h-screen bg-obsidian-canvas text-obsidian-ink',
+        surface === 'dashboard' ? 'dashboard-surface' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <AtmosphereBackdrop intensity={intensity} surface={surface} />
       <div className="relative z-10">{children}</div>
     </div>
   );

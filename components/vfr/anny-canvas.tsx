@@ -24,6 +24,7 @@ import {
   findMhrHullMesh,
 } from '@/lib/graphics/anny-hull';
 import { disposeObject3D, disposeRendererSession } from '@/lib/graphics/dispose-session';
+import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import {
   compositeSimPositions,
   decodeSimDelta,
@@ -354,13 +355,37 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       scene.add(garmentMesh);
     })();
 
+    let renderActive = true;
+
+    const stopLoop = (): void => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
     const animate = (): void => {
+      if (!renderActive) {
+        animationFrameId = null;
+        return;
+      }
+
       animationFrameId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
     };
 
-    animate();
+    const stopActivity = subscribeViewportActivity(mountElement, (active) => {
+      renderActive = active;
+      if (active) {
+        if (animationFrameId === null) {
+          animate();
+        }
+        return;
+      }
+
+      stopLoop();
+    });
 
     const handleResize = (): void => {
       const nextWidth = mountElement.clientWidth;
@@ -375,6 +400,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     return () => {
       disposed = true;
       window.removeEventListener('resize', handleResize);
+      stopActivity();
+      stopLoop();
       disposeRendererSession({
         animationFrameId,
         controls,

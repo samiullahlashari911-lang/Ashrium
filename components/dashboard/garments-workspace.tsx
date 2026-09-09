@@ -23,7 +23,7 @@ const FALLBACK_PATTERN_URL = 'https://placehold.co/512x512/1e293b/e2e8f0?text=Fa
 const DEFAULT_VIEWPORT_CONFIG: ViewportConfig = {
   showHeatmap: true,
   showWireframe: false,
-  autoRotate: true,
+  autoRotate: false,
 };
 
 export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({

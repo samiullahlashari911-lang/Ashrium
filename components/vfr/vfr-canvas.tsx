@@ -11,6 +11,7 @@ import {
   PbdClothSimulator,
 } from '@/lib/graphics/pbd-cloth';
 import { disposeRendererSession } from '@/lib/graphics/dispose-session';
+import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import {
   computeVertexStrainColors,
   computeVertexStrains,
@@ -185,7 +186,15 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
     stageGroup.add(floorMesh);
 
     let animationFrameId: number | null = null;
+    let renderActive = true;
     const clock = new THREE.Clock();
+
+    const stopLoop = (): void => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
 
     const warmUpSteps = 90;
     for (let step = 0; step < warmUpSteps; step += 1) {
@@ -193,6 +202,11 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
     }
 
     const animate = (): void => {
+      if (!renderActive) {
+        animationFrameId = null;
+        return;
+      }
+
       animationFrameId = requestAnimationFrame(animate);
 
       const deltaSeconds = Math.min(clock.getDelta(), 0.033);
@@ -224,7 +238,18 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
       renderer.render(scene, camera);
     };
 
-    animate();
+    const stopActivity = subscribeViewportActivity(mountElement, (active) => {
+      renderActive = active;
+      if (active) {
+        if (animationFrameId === null) {
+          clock.getDelta();
+          animate();
+        }
+        return;
+      }
+
+      stopLoop();
+    });
 
     const handleResize = (): void => {
       const nextWidth = mountElement.clientWidth;
@@ -239,6 +264,8 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      stopActivity();
+      stopLoop();
       disposeRendererSession({
         animationFrameId,
         controls,

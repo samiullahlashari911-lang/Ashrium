@@ -1,4 +1,4 @@
-import { ShopifyAdminError } from '@/lib/catalog/shopify-admin';
+import { catalogSyncShopifyFailure } from '@/lib/catalog/shopify-admin';
 import { syncShopifyCatalog, syncShopifyProduct } from '@/lib/catalog/sync-catalog';
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
@@ -80,7 +80,14 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
   } catch (error) {
-    if (error instanceof ShopifyAdminError && (error.status === 401 || error.status === 403)) {
+    const shopifyFailure = catalogSyncShopifyFailure(error);
+    if (shopifyFailure?.code === 'SHOPIFY_SCOPE_DENIED') {
+      return Response.json(
+        { code: shopifyFailure.code, message: shopifyFailure.message },
+        { status: shopifyFailure.status },
+      );
+    }
+    if (shopifyFailure?.code === 'SHOPIFY_AUTH_FAILED') {
       return Response.json({ code: 'SHOPIFY_AUTH_FAILED' }, { status: 502 });
     }
 

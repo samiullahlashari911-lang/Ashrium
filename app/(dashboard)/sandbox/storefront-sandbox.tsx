@@ -73,6 +73,7 @@ export function StorefrontSandbox({
   const [selectedSku, setSelectedSku] = useState(initialSku);
   const [recommendedSize, setRecommendedSize] = useState<string | null>(null);
   const [widgetReady, setWidgetReady] = useState(false);
+  const [widgetHostVisible, setWidgetHostVisible] = useState(false);
   const [events, setEvents] = useState<EventLogEntry[]>([]);
 
   const selectedGarment = garments.find((garment) => garment.sku === selectedSku)
@@ -100,9 +101,35 @@ export function StorefrontSandbox({
   );
 
   useEffect(() => {
-    const sandboxWindow = window as SandboxWindow;
     const mount = scriptMountRef.current;
     if (!mount || !initialSku) {
+      return;
+    }
+
+    const rect = mount.getBoundingClientRect();
+    if (rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight) {
+      setWidgetHostVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0)) {
+          setWidgetHostVisible(true);
+          observer.disconnect();
+        }
+      },
+      { root: null, rootMargin: '80px 0px', threshold: 0 },
+    );
+    observer.observe(mount);
+
+    return () => observer.disconnect();
+  }, [initialSku]);
+
+  useEffect(() => {
+    const sandboxWindow = window as SandboxWindow;
+    const mount = scriptMountRef.current;
+    if (!mount || !initialSku || !widgetHostVisible) {
       return;
     }
 
@@ -139,7 +166,7 @@ export function StorefrontSandbox({
       delete sandboxWindow.AshriumVfrWidget;
       delete sandboxWindow.__ASHRIUM_VFR_WIDGET__;
     };
-  }, [addEvent, initialSku, token]);
+  }, [addEvent, initialSku, token, widgetHostVisible]);
 
   useEffect(() => {
     if (!widgetReady || !selectedSku) {
@@ -215,7 +242,13 @@ export function StorefrontSandbox({
             </div>
 
             <div className="mt-6 rounded-xl border border-white/10 bg-obsidian-canvas/50 p-3">
-              <div ref={scriptMountRef} />
+              <div ref={scriptMountRef} className="min-h-[640px]">
+                {widgetHostVisible ? null : (
+                  <p className="px-2 py-8 text-sm text-obsidian-subtle">
+                    Try On loads when this panel is on screen.
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="mt-5 flex items-center gap-3">

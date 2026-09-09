@@ -3,6 +3,7 @@ import {
   purgeBiometricJobImages,
 } from '@/lib/server/biometrics-wipe';
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
+import { BIOMETRIC_SIGNED_READ_SECONDS } from '@/lib/server/biometric-upload';
 import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/server/hmr-request';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
@@ -69,8 +70,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const serviceClient = createServiceClient();
   const [signedFront, signedSide] = await Promise.all([
-    serviceClient.storage.from('biometrics').createSignedUrl(body.frontImagePath, 60),
-    serviceClient.storage.from('biometrics').createSignedUrl(body.sideImagePath, 60),
+    serviceClient.storage.from('biometrics').createSignedUrl(
+      body.frontImagePath,
+      BIOMETRIC_SIGNED_READ_SECONDS,
+    ),
+    serviceClient.storage.from('biometrics').createSignedUrl(
+      body.sideImagePath,
+      BIOMETRIC_SIGNED_READ_SECONDS,
+    ),
   ]);
 
   if (signedFront.error || !signedFront.data || signedSide.error || !signedSide.data) {
@@ -124,12 +131,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    try {
-      await warmGpuForShopperSubmit();
-    } catch {
-      // Cold start is allowed. Do not fail a completed shopper submit.
-    }
-
+    const warmPromise = warmGpuForShopperSubmit().catch(() => undefined);
     const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
     webhookUrl.searchParams.set('job_id', job.id);
     const prediction = await dispatchAnnyFitPrediction({
@@ -140,6 +142,7 @@ export async function POST(request: Request): Promise<Response> {
       weightKg: body.weightKg,
       webhookUrl: webhookUrl.toString(),
     });
+    await warmPromise;
 
     const { error: dispatchUpdateError } = await serviceClient
       .from('fit_jobs')

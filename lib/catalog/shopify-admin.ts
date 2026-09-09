@@ -3,13 +3,86 @@ import type { ShopifyProductSelector } from '@/lib/catalog/shopify-selector';
 export const SHOPIFY_ADMIN_API_VERSION = '2025-10';
 
 export class ShopifyAdminError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
     super(message);
     this.name = 'ShopifyAdminError';
+    this.status = status;
   }
+}
+
+export class ShopifyAccessScopeError extends ShopifyAdminError {
+  constructor(message = describeMissingShopifyReadProducts()) {
+    super(message, 403);
+    this.name = 'ShopifyAccessScopeError';
+  }
+}
+
+export function describeMissingShopifyReadProducts(): string {
+  return [
+    'This Admin token cannot read products — Shopify denied the products field (missing read_products).',
+    'In Shopify Admin → Settings → Apps, open the custom app, add the read_products access scope, reinstall the app, then save the new Admin API token.',
+    'Ashrium will not store a token that cannot query products.',
+  ].join(' ');
+}
+
+export function isShopifyReadProductsGraphqlDenial(errors: unknown): boolean {
+  if (!Array.isArray(errors)) {
+    return false;
+  }
+
+  for (const entry of errors) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const message = readString(entry.message);
+    if (/read_products/i.test(message) || /access denied for products?\b/i.test(message)) {
+      return true;
+    }
+
+    const extensions = isRecord(entry.extensions) ? entry.extensions : null;
+    const code = extensions ? readString(extensions.code).toUpperCase() : '';
+    const pathTouchesProduct =
+      Array.isArray(entry.path)
+      && entry.path.some((segment) => String(segment).toLowerCase().includes('product'));
+
+    if (code === 'ACCESS_DENIED' && (pathTouchesProduct || /product/i.test(message))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isShopifyReadProductsDeniedText(body: string): boolean {
+  const text = body.toLowerCase();
+  return text.includes('read_products') || /access denied for products?\b/.test(text);
+}
+
+export function catalogSyncShopifyFailure(error: unknown): {
+  code: 'SHOPIFY_SCOPE_DENIED' | 'SHOPIFY_AUTH_FAILED';
+  status: number;
+  message: string;
+} | null {
+  if (error instanceof ShopifyAccessScopeError) {
+    return {
+      code: 'SHOPIFY_SCOPE_DENIED',
+      status: 403,
+      message: error.message,
+    };
+  }
+
+  if (error instanceof ShopifyAdminError && (error.status === 401 || error.status === 403)) {
+    return {
+      code: 'SHOPIFY_AUTH_FAILED',
+      status: 502,
+      message: error.message,
+    };
+  }
+
+  return null;
 }
 
 export interface ShopifyMetafield {
@@ -52,6 +125,12 @@ export interface ShopifyCredentials {
 }
 
 const SHOP_IDENTITY_QUERY = `query ShopIdentity { shop { name myshopifyDomain } }`;
+
+const READ_PRODUCTS_PROBE_QUERY = `query ReadProductsCapability {
+  products(first: 1) {
+    nodes { id }
+  }
+}`;
 
 const CATALOG_PRODUCTS_QUERY = `query CatalogProducts($cursor: String) {
   products(first: 50, after: $cursor, query: "status:active") {
@@ -235,6 +314,11 @@ async function shopifyGraphql(
   }
 
   if (response.status === 401 || response.status === 403) {
+    const errorBody = await response.text();
+    if (isShopifyReadProductsDeniedText(errorBody)) {
+      throw new ShopifyAccessScopeError();
+    }
+
     throw new ShopifyAdminError('Shopify Admin rejected the stored access token.', response.status);
   }
 
@@ -248,6 +332,10 @@ async function shopifyGraphql(
   }
 
   if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    if (isShopifyReadProductsGraphqlDenial(payload.errors)) {
+      throw new ShopifyAccessScopeError();
+    }
+
     const first = payload.errors[0];
     const message = isRecord(first) ? readString(first.message) : '';
     throw new ShopifyAdminError(message || 'Shopify Admin GraphQL returned errors.', 502);
@@ -271,6 +359,12 @@ export async function verifyShopifyAdminCredentials(
   }
 
   return { shopName, myshopifyDomain };
+}
+
+export async function assertShopifyReadProductsAccess(
+  credentials: ShopifyCredentials,
+): Promise<void> {
+  await shopifyGraphql(credentials, READ_PRODUCTS_PROBE_QUERY);
 }
 
 export async function fetchShopifyCatalogProducts(

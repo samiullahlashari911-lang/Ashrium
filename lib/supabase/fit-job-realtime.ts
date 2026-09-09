@@ -3,6 +3,7 @@ import { fetchFitJobStatus } from '@/lib/widget/fit-client';
 import type { FitJobStatusPayload } from '@/types/hmr';
 
 const POLL_INTERVAL_MS = 2000;
+const MAX_CONSECUTIVE_POLL_ERRORS = 5;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -29,15 +30,18 @@ export function watchFitJob(
   const supabase = createClient();
   const topic = `fit_job:${jobId}`;
   let cancelled = false;
+  let consecutiveErrors = 0;
 
   const refresh = async (): Promise<void> => {
     try {
       const job = await fetchFitJobStatus(embedToken, jobId);
+      consecutiveErrors = 0;
       if (!cancelled) {
         onChange(job);
       }
     } catch (error) {
-      if (!cancelled) {
+      consecutiveErrors += 1;
+      if (!cancelled && consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
         onError(error instanceof Error ? error : new Error('Fit job status failed.'));
       }
     }

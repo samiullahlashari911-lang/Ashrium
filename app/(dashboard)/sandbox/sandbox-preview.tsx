@@ -61,7 +61,7 @@ const INITIAL_AVATAR: AvatarMeasurements = {
 const INITIAL_VIEWPORT_CONFIG: ViewportConfig = {
   showHeatmap: true,
   showWireframe: false,
-  autoRotate: true,
+  autoRotate: false,
 };
 
 interface MeasurementSliderProps {

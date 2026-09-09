@@ -29,7 +29,7 @@ export function DashboardNavigation() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/10 bg-obsidian-canvas/55 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-white/10 bg-obsidian-canvas/95">
       <nav
         aria-label="Dashboard navigation"
         className="mx-auto flex w-full max-w-7xl items-center gap-4 px-6 py-4"

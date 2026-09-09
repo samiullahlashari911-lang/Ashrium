@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import { shouldDispatchPattern } from '@/lib/catalog/pattern-ingest';
 import { detectUnsupportedGeometry } from '@/lib/catalog/unsupported-geometry';
-import { parsePatternPredictionOutput } from '@/lib/ml/replicate';
+import {
+  describePatternCogMismatch,
+  isPatternCogBodyImageMismatch,
+  isPatternCogBodyOutput,
+  parsePatternPredictionOutput,
+  rewritePatternCogError,
+} from '@/lib/ml/replicate';
 import { REST_LENGTH_SCHEMA, type CatalogGarmentDraft } from '@/types/garment';
+import { MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 
 function teeDraft(overrides: Partial<CatalogGarmentDraft> = {}): CatalogGarmentDraft {
   return {
@@ -93,4 +102,58 @@ test('parsePatternPredictionOutput accepts GarmentCode rest-length meshes and re
   assert.equal(rejected.meshes.length, 0);
 
   assert.throws(() => parsePatternPredictionOutput({ status: 'ok', meshes: [] }));
+});
+
+test('task=pattern body-image errors are a deployment mismatch, not a fallback', () => {
+  const replicate422 = [
+    'Replicate API request failed (422):',
+    '{"detail":"- input.front_image: field required\\n- input.side_image: field required"}',
+  ].join(' ');
+  assert.equal(isPatternCogBodyImageMismatch(replicate422), true);
+  assert.equal(isPatternCogBodyImageMismatch('front_image is required'), true);
+  assert.equal(isPatternCogBodyImageMismatch('task=body requires front_image and side_image.'), true);
+  assert.equal(
+    isPatternCogBodyImageMismatch('Replicate prediction timed out after 180000ms (status processing).'),
+    false,
+  );
+  assert.equal(
+    isPatternCogBodyImageMismatch('task=pattern requires at least one size with published girths.'),
+    false,
+  );
+
+  const rewritten = rewritePatternCogError(new Error(replicate422));
+  assert.equal(rewritten.message, describePatternCogMismatch());
+  assert.match(rewritten.message, /REPLICATE_DEPLOYMENT/);
+  assert.match(rewritten.message, /task=pattern/);
+  assert.match(rewritten.message, /no mock, Laplacian, or fixture fallback/i);
+
+  const unrelated = rewritePatternCogError(new Error('Replicate pattern failed.'));
+  assert.equal(unrelated.message, 'Replicate pattern failed.');
+});
+
+test('body Cog output on a pattern request is a mismatch, not an approximate mesh', () => {
+  const bodyOutput = {
+    topology_version: MHR_TOPOLOGY_VERSION,
+    shape: [0, 0, 0],
+    derived_measurements: { chest_cm: 98, waist_cm: 80, hip_cm: 100 },
+  };
+  assert.equal(isPatternCogBodyOutput(bodyOutput), true);
+  assert.throws(
+    () => parsePatternPredictionOutput(bodyOutput),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, describePatternCogMismatch());
+      return true;
+    },
+  );
+
+  const persistSource = readFileSync(
+    path.join(process.cwd(), 'lib/catalog/persist-garment.ts'),
+    'utf8',
+  );
+  assert.match(persistSource, /throw rewritePatternCogError\(error\)/);
+  assert.doesNotMatch(
+    persistSource,
+    /catch \(error\) \{\s*return \{ meshes: \[\], approximateFit: true \}/,
+  );
 });

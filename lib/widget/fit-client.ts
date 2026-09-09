@@ -7,8 +7,8 @@ import {
 
 export interface DualUploadTargets {
   jobId: string;
-  front: { uploadUrl: string; filePath: string };
-  side: { uploadUrl: string; filePath: string };
+  front: { filePath: string };
+  side: { filePath: string };
 }
 
 export interface AnnyFitDispatchInput {
@@ -35,13 +35,14 @@ function authHeaders(embedToken: string | null, json = false): HeadersInit {
 async function readErrorCode(response: Response): Promise<string> {
   try {
     const payload: unknown = await response.json();
-    if (
-      typeof payload === 'object'
-      && payload !== null
-      && 'code' in payload
-      && typeof payload.code === 'string'
-    ) {
-      return payload.code;
+    if (typeof payload === 'object' && payload !== null) {
+      const record = payload as { code?: unknown; message?: unknown };
+      if (typeof record.message === 'string' && record.message.trim().length > 0) {
+        return record.message.trim();
+      }
+      if (typeof record.code === 'string' && record.code.length > 0) {
+        return record.code;
+      }
     }
   } catch {
     // Fall through to status text.
@@ -50,17 +51,38 @@ async function readErrorCode(response: Response): Promise<string> {
   return response.statusText || `HTTP_${response.status}`;
 }
 
-export async function mintDualWebpUploadUrls(
+export async function uploadDualHeadlessWebps(
   embedToken: string | null,
+  frontBlob: Blob,
+  sideBlob: Blob,
 ): Promise<DualUploadTargets> {
-  const response = await fetch('/api/v1/biometrics/upload-url', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: authHeaders(embedToken),
-  });
+  const form = new FormData();
+  form.append('front', new File([frontBlob], 'front.webp', { type: 'image/webp' }));
+  form.append('side', new File([sideBlob], 'side.webp', { type: 'image/webp' }));
+
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 45_000);
+
+  let response: Response;
+  try {
+    response = await fetch('/api/v1/biometrics/upload', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: authHeaders(embedToken),
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Biometric upload timed out. Check the network and try again.');
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
-    throw new Error(`Unable to mint upload URLs (${await readErrorCode(response)}).`);
+    throw new Error(`Biometric upload failed (${await readErrorCode(response)}).`);
   }
 
   const payload: unknown = await response.json();
@@ -69,41 +91,24 @@ export async function mintDualWebpUploadUrls(
     || payload === null
     || typeof Reflect.get(payload, 'job_id') !== 'string'
   ) {
-    throw new Error('Upload URL response was invalid.');
+    throw new Error('Upload response was invalid.');
   }
 
   const record = payload as {
     job_id: string;
-    front?: { upload_url?: string; file_path?: string };
-    side?: { upload_url?: string; file_path?: string };
+    front?: { file_path?: string };
+    side?: { file_path?: string };
   };
 
-  if (
-    !record.front?.upload_url
-    || !record.front.file_path
-    || !record.side?.upload_url
-    || !record.side.file_path
-  ) {
-    throw new Error('Upload URL response was incomplete.');
+  if (!record.front?.file_path || !record.side?.file_path) {
+    throw new Error('Upload response was incomplete.');
   }
 
   return {
     jobId: record.job_id,
-    front: { uploadUrl: record.front.upload_url, filePath: record.front.file_path },
-    side: { uploadUrl: record.side.upload_url, filePath: record.side.file_path },
+    front: { filePath: record.front.file_path },
+    side: { filePath: record.side.file_path },
   };
-}
-
-export async function putWebpToSignedUrl(uploadUrl: string, blob: Blob): Promise<void> {
-  const response = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'image/webp' },
-    body: blob,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Biometric upload failed (${response.status}).`);
-  }
 }
 
 export async function dispatchAnnyFitJob(
@@ -199,11 +204,7 @@ export async function uploadDualWebpAndDispatch(
     weightKg?: number;
   },
 ): Promise<{ jobId: string }> {
-  const targets = await mintDualWebpUploadUrls(embedToken);
-  await Promise.all([
-    putWebpToSignedUrl(targets.front.uploadUrl, input.frontBlob),
-    putWebpToSignedUrl(targets.side.uploadUrl, input.sideBlob),
-  ]);
+  const targets = await uploadDualHeadlessWebps(embedToken, input.frontBlob, input.sideBlob);
 
   const dispatch = await dispatchAnnyFitJob(embedToken, {
     frontImagePath: targets.front.filePath,

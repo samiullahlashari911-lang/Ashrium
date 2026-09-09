@@ -652,33 +652,79 @@ export function parsePatternPredictionOutput(output: unknown): PatternIngestResu
   }
 
   const statusRaw = unwrapped.status;
-  if (typeof statusRaw !== 'string' || !PATTERN_INGEST_STATUSES.includes(statusRaw as PatternIngestStatus)) {
-    throw new Error('Pattern Cog output.status is missing or invalid.');
-  }
-  const status = statusRaw as PatternIngestStatus;
-  const reason =
-    typeof unwrapped.unsupported_reason === 'string' && unwrapped.unsupported_reason.trim().length > 0
-      ? unwrapped.unsupported_reason.trim()
-      : null;
+  if (typeof statusRaw === 'string' && PATTERN_INGEST_STATUSES.includes(statusRaw as PatternIngestStatus)) {
+    const status = statusRaw as PatternIngestStatus;
+    const reason =
+      typeof unwrapped.unsupported_reason === 'string' && unwrapped.unsupported_reason.trim().length > 0
+        ? unwrapped.unsupported_reason.trim()
+        : null;
 
-  if (status !== 'ok') {
-    return { status, unsupportedReason: reason, meshes: [] };
-  }
-
-  if (!Array.isArray(unwrapped.meshes) || unwrapped.meshes.length === 0) {
-    throw new Error('Pattern Cog status=ok requires a non-empty meshes array.');
-  }
-
-  const meshes: RestLengthMesh[] = [];
-  for (const entry of unwrapped.meshes) {
-    const mesh = readRestLengthMesh(entry);
-    if (!mesh) {
-      throw new Error('Pattern Cog mesh is not a valid ashrium.rest_length.v1 panel.');
+    if (status !== 'ok') {
+      return { status, unsupportedReason: reason, meshes: [] };
     }
-    meshes.push(mesh);
+
+    if (!Array.isArray(unwrapped.meshes) || unwrapped.meshes.length === 0) {
+      throw new Error('Pattern Cog status=ok requires a non-empty meshes array.');
+    }
+
+    const meshes: RestLengthMesh[] = [];
+    for (const entry of unwrapped.meshes) {
+      const mesh = readRestLengthMesh(entry);
+      if (!mesh) {
+        throw new Error('Pattern Cog mesh is not a valid ashrium.rest_length.v1 panel.');
+      }
+      meshes.push(mesh);
+    }
+
+    return { status: 'ok', unsupportedReason: null, meshes };
   }
 
-  return { status: 'ok', unsupportedReason: null, meshes };
+  if (isPatternCogBodyOutput(unwrapped)) {
+    throw new Error(describePatternCogMismatch());
+  }
+
+  throw new Error('Pattern Cog output.status is missing or invalid.');
+}
+
+export function describePatternCogMismatch(): string {
+  return [
+    'The active Replicate deployment does not support Cog task=pattern (GarmentCode ingest).',
+    'A task=pattern request was treated as task=body and required front_image/side_image.',
+    'Push the current cog/ tree, then point REPLICATE_DEPLOYMENT and REPLICATE_HMR_MODEL_VERSION at that release.',
+    'There is no mock, Laplacian, or fixture fallback.',
+  ].join(' ');
+}
+
+export function isPatternCogBodyImageMismatch(errorText: string): boolean {
+  const text = errorText.toLowerCase();
+  const mentionsFront = text.includes('front_image');
+  const mentionsSide = text.includes('side_image');
+  const mentionsRequired = text.includes('required') || text.includes('field required');
+  const bodyTaskRequiresImages = text.includes('task=body') && (mentionsFront || mentionsSide);
+  return bodyTaskRequiresImages || ((mentionsFront || mentionsSide) && mentionsRequired);
+}
+
+export function isPatternCogBodyOutput(output: unknown): boolean {
+  const unwrapped = unwrapPredictionOutput(output);
+  if (!isRecord(unwrapped)) {
+    return false;
+  }
+
+  const topology = unwrapped.topology_version;
+  if (topology === MHR_TOPOLOGY_VERSION || topology === ANNY_TOPOLOGY_VERSION) {
+    return true;
+  }
+
+  return 'phenotype' in unwrapped || 'shape' in unwrapped || 'derived_measurements' in unwrapped;
+}
+
+export function rewritePatternCogError(error: unknown): Error {
+  const text = error instanceof Error ? error.message : String(error);
+  if (text === describePatternCogMismatch() || isPatternCogBodyImageMismatch(text)) {
+    return new Error(describePatternCogMismatch());
+  }
+
+  return error instanceof Error ? error : new Error(text);
 }
 
 function buildBodyPredictionInput(input: RunAnnyFitInput): Record<string, unknown> {
@@ -1012,24 +1058,32 @@ export async function runPatternPrediction(input: RunPatternInput): Promise<Patt
     throw new Error('task=pattern requires at least one size with published girths.');
   }
 
-  const prediction = await requestReplicatePrediction(
-    { input: buildPatternPredictionInput(input) },
-    { preferWaitSeconds: 60 },
-  );
+  try {
+    const prediction = await requestReplicatePrediction(
+      { input: buildPatternPredictionInput(input) },
+      { preferWaitSeconds: 60 },
+    );
 
-  if (typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
-    throw new Error('Replicate pattern dispatch returned an invalid response.');
+    if (typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
+      throw new Error('Replicate pattern dispatch returned an invalid response.');
+    }
+
+    const completed = isTerminalReplicatePredictionStatus(prediction.status)
+      ? prediction
+      : await waitForReplicatePrediction(prediction.id, { timeoutMs: 180_000 });
+
+    if (completed.status !== 'succeeded') {
+      throw new Error(completed.error ?? `Replicate pattern ${completed.status}.`);
+    }
+
+    if (isPatternCogBodyOutput(completed.output)) {
+      throw new Error(describePatternCogMismatch());
+    }
+
+    return parsePatternPredictionOutput(completed.output);
+  } catch (error) {
+    throw rewritePatternCogError(error);
   }
-
-  const completed = isTerminalReplicatePredictionStatus(prediction.status)
-    ? prediction
-    : await waitForReplicatePrediction(prediction.id, { timeoutMs: 180_000 });
-
-  if (completed.status !== 'succeeded') {
-    throw new Error(completed.error ?? `Replicate pattern ${completed.status}.`);
-  }
-
-  return parsePatternPredictionOutput(completed.output);
 }
 
 export async function confirmAnnyFitCogVersion(): Promise<AnnyFitCogVersionConfirmation> {

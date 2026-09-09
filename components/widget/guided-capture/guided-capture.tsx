@@ -41,6 +41,7 @@ export function GuidedCapture({
   const [sideGate, setSideGate] = useState<PoseGateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [waitSeconds, setWaitSeconds] = useState(0);
 
   const handleFrontCaptured = useCallback((blob: Blob, gate: PoseGateStatus) => {
     setFrontBlob(blob);
@@ -75,6 +76,20 @@ export function GuidedCapture({
     },
     [embedToken, frontBlob, intake],
   );
+
+  useEffect(() => {
+    if (step !== 'uploading' && step !== 'inferring') {
+      setWaitSeconds(0);
+      return;
+    }
+
+    const started = Date.now();
+    const intervalId = window.setInterval(() => {
+      setWaitSeconds(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [step]);
 
   useEffect(() => {
     if (step !== 'inferring' || !jobId || !intake) {
@@ -122,6 +137,7 @@ export function GuidedCapture({
     setSideGate(null);
     setError(null);
     setJobId(null);
+    setWaitSeconds(0);
   };
 
   if (step === 'intake') {
@@ -142,7 +158,7 @@ export function GuidedCapture({
       <CaptureViewport
         view={view}
         allowGallery={allowGallery}
-        stepLabel={step === 'front' ? 'Step 5 of 6' : 'Step 6 of 6'}
+        flowStep={step}
         onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
         onBack={() => {
           if (step === 'side') {
@@ -170,8 +186,9 @@ export function GuidedCapture({
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
             ? 'Photos are deleted as soon as inference finishes.'
-            : 'The live GPU starts when both photos are submitted. This can take a few minutes on a cold start. Keep this window open — photos are deleted as soon as inference finishes.'}
+            : 'The A100 starts when both photos are submitted. A cold boot of SAM 2 + SAM 3D Body + MHR often takes about a minute. Keep this window open — photos are deleted as soon as inference finishes.'}
         </p>
+        <p className="font-mono text-xs text-obsidian-subtle">{waitSeconds}s elapsed</p>
       </div>
     );
   }

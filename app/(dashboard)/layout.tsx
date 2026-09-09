@@ -22,7 +22,7 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
   }
 
   return (
-    <ThemeShell intensity="subtle">
+    <ThemeShell intensity="subtle" surface="dashboard">
       <DashboardNavigation />
       {children}
     </ThemeShell>

@@ -2,16 +2,20 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 
+import { CaptureFlowMeter } from '@/components/widget/guided-capture/capture-flow-meter';
 import { SilhouetteOverlay } from '@/components/widget/guided-capture/silhouette-overlay';
 import {
   detectStillLandmarks,
   usePoseLandmarker,
 } from '@/components/widget/guided-capture/use-pose-landmarker';
+import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
+import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
 import { encodeImageFileToWebp, encodeVideoFrameToWebp } from '@/lib/widget/webp-encode';
 import type { CaptureView, PoseGateStatus } from '@/types/hmr';
 
 const ALIGNED_HOLD_MS = 1200;
+const POSE_DETECT_INTERVAL_MS = 66;
 
 interface CaptureViewportProps {
   view: CaptureView;
@@ -19,7 +23,7 @@ interface CaptureViewportProps {
   onBack: () => void;
   allowGallery?: boolean;
   requireConfirm?: boolean;
-  stepLabel: string;
+  flowStep: Extract<CaptureFlowStep, 'front' | 'side'>;
 }
 
 type CaptureSource = 'live' | 'gallery';
@@ -40,16 +44,22 @@ export function CaptureViewport({
   onBack,
   allowGallery = false,
   requireConfirm = false,
-  stepLabel,
+  flowStep,
 }: CaptureViewportProps): React.JSX.Element {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const alignedSinceRef = useRef<number | null>(null);
   const capturingRef = useRef(false);
   const lastVideoTimeRef = useRef(-1);
+  const lastDetectAtRef = useRef(0);
+  const lastGateRef = useRef<PoseGateStatus>('not_detected');
+  const lastHoldBucketRef = useRef(-1);
   const sourceRef = useRef<CaptureSource>('live');
+  const viewportActiveRef = useRef(false);
   const { landmarkerRef, ready, error: poseError } = usePoseLandmarker();
+  const [viewportActive, setViewportActive] = useState(false);
   const [source, setSource] = useState<CaptureSource>('live');
   const [gate, setGate] = useState<PoseGateStatus>('not_detected');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -60,11 +70,37 @@ export function CaptureViewport({
   const [pending, setPending] = useState<PendingCapture | null>(null);
 
   sourceRef.current = source;
+  viewportActiveRef.current = viewportActive;
+
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (!element) {
+      return;
+    }
+    return subscribeViewportActivity(element, setViewportActive);
+  }, []);
+
+  useEffect(() => {
+    if (!viewportActive) {
+      alignedSinceRef.current = null;
+      setHoldProgress(0);
+      videoRef.current?.pause();
+      return;
+    }
+
+    const video = videoRef.current;
+    if (source === 'live' && !pending && video?.srcObject) {
+      void video.play();
+    }
+  }, [pending, source, viewportActive]);
 
   useEffect(() => {
     capturingRef.current = false;
     alignedSinceRef.current = null;
     lastVideoTimeRef.current = -1;
+    lastDetectAtRef.current = 0;
+    lastGateRef.current = 'not_detected';
+    lastHoldBucketRef.current = -1;
     setHoldProgress(0);
     setPending((current) => {
       if (current) {
@@ -100,7 +136,7 @@ export function CaptureViewport({
           audio: false,
           video: {
             facingMode: { ideal: 'user' },
-            width: { ideal: 1280 },
+            width: { ideal: 960 },
             height: { ideal: 720 },
           },
         });
@@ -114,7 +150,9 @@ export function CaptureViewport({
         const video = videoRef.current;
         if (video) {
           video.srcObject = stream;
-          await video.play();
+          if (viewportActiveRef.current) {
+            await video.play();
+          }
         }
       } catch {
         if (!cancelled) {
@@ -137,7 +175,12 @@ export function CaptureViewport({
 
     const tick = (): void => {
       frameId = requestAnimationFrame(tick);
-      if (sourceRef.current !== 'live' || pending || capturingRef.current) {
+      if (
+        !viewportActiveRef.current
+        || sourceRef.current !== 'live'
+        || pending
+        || capturingRef.current
+      ) {
         return;
       }
 
@@ -151,28 +194,45 @@ export function CaptureViewport({
         return;
       }
 
-      lastVideoTimeRef.current = video.currentTime;
-      let pose: PoseLandmarkSample[] | undefined;
-      try {
-        const result = landmarker.detectForVideo(video, performance.now());
-        pose = result.landmarks[0] as PoseLandmarkSample[] | undefined;
-      } catch {
-        setGate('not_detected');
+      const now = performance.now();
+      if (now - lastDetectAtRef.current < POSE_DETECT_INTERVAL_MS) {
         return;
       }
 
-      const nextGate = pose ? evaluatePoseGate(pose, view) : 'not_detected';
-      setGate(nextGate);
+      lastVideoTimeRef.current = video.currentTime;
+      lastDetectAtRef.current = now;
+
+      let pose: PoseLandmarkSample[] | undefined;
+      try {
+        const result = landmarker.detectForVideo(video, now);
+        pose = result.landmarks[0] as PoseLandmarkSample[] | undefined;
+      } catch {
+        if (lastGateRef.current !== 'not_detected') {
+          lastGateRef.current = 'not_detected';
+          setGate('not_detected');
+        }
+        return;
+      }
+
+      const nextGate = pose ? evaluatePoseGate(pose, view, lastGateRef.current) : 'not_detected';
+      if (nextGate !== lastGateRef.current) {
+        lastGateRef.current = nextGate;
+        setGate(nextGate);
+      }
 
       if (nextGate === 'aligned' && pose) {
-        const now = performance.now();
         if (alignedSinceRef.current === null) {
           alignedSinceRef.current = now;
           setEncodeError(null);
         }
 
         const elapsed = now - alignedSinceRef.current;
-        setHoldProgress(Math.min(1, elapsed / ALIGNED_HOLD_MS));
+        const progress = Math.min(1, elapsed / ALIGNED_HOLD_MS);
+        const holdBucket = Math.floor(progress * 10);
+        if (holdBucket !== lastHoldBucketRef.current) {
+          lastHoldBucketRef.current = holdBucket;
+          setHoldProgress(progress);
+        }
 
         if (elapsed >= ALIGNED_HOLD_MS) {
           capturingRef.current = true;
@@ -205,22 +265,25 @@ export function CaptureViewport({
         }
       } else {
         alignedSinceRef.current = null;
-        setHoldProgress(0);
+        if (lastHoldBucketRef.current !== 0) {
+          lastHoldBucketRef.current = 0;
+          setHoldProgress(0);
+        }
       }
     };
 
-    if (ready && !pending) {
+    if (ready && !pending && viewportActive) {
       frameId = requestAnimationFrame(tick);
     }
 
     return () => cancelAnimationFrame(frameId);
-  }, [landmarkerRef, onCaptured, pending, ready, requireConfirm, view]);
+  }, [landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
 
   const title = view === 'front' ? 'Front, A-pose' : 'Side profile';
   const hint =
     view === 'front'
-      ? 'Stand in the outline with your arms slightly open. We crop your head on-device before upload.'
-      : 'Turn 90° and raise both wrists to your shoulders. We crop your head on-device before upload.';
+      ? 'Fit your body inside the outline, arms slightly open. Hold still — we capture automatically.'
+      : 'Turn sideways, match the outline, and lift your wrists to the shoulder rings. Hold still to capture.';
 
   const chooseLive = (): void => {
     if (pending) {
@@ -304,22 +367,25 @@ export function CaptureViewport({
   };
 
   return (
-    <div className="flex h-[100dvh] max-h-[100dvh] flex-col bg-obsidian-canvas text-obsidian-ink">
-      <header className="flex items-start justify-between gap-3 px-5 pt-5">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
-            {stepLabel}
-          </p>
-          <h1 className="mt-1 text-xl font-semibold">{title}</h1>
-          <p className="mt-1 text-sm text-obsidian-muted">{hint}</p>
+    <div
+      ref={viewportRef}
+      className="flex h-[100dvh] max-h-[100dvh] flex-col bg-obsidian-canvas text-obsidian-ink"
+    >
+      <header className="flex flex-col gap-2 px-5 pt-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <CaptureFlowMeter step={flowStep} />
+          </div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="shrink-0 rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
+          >
+            Back
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
-        >
-          Back
-        </button>
+        <h1 className="text-xl font-semibold">{title}</h1>
+        <p className="text-sm text-obsidian-muted">{hint}</p>
       </header>
 
       <div className="relative mx-5 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-2xl bg-black">
@@ -341,7 +407,7 @@ export function CaptureViewport({
                 source === 'gallery' ? 'invisible' : '',
               ].join(' ')}
             />
-            <SilhouetteOverlay view={view} />
+            <SilhouetteOverlay view={view} gate={gate} />
           </>
         )}
         <div className="absolute left-3 top-3">

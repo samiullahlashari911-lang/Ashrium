@@ -38,6 +38,13 @@ export const CatalogSyncBar: FC<CatalogSyncBarProps> = ({ connected, shopDomain 
       );
       return;
     }
+    if (payload.code === 'SHOPIFY_SCOPE_DENIED') {
+      setMessage(
+        payload.message
+          ?? 'Shopify denied products access. Grant read_products on the custom app, then reconnect in Settings → Integrations.',
+      );
+      return;
+    }
     if (payload.code === 'SHOPIFY_AUTH_FAILED') {
       setMessage('Shopify rejected the stored Admin token. Update it in Settings → Integrations.');
       return;

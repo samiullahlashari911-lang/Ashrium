@@ -4,7 +4,11 @@ import { patternProductText, shouldDispatchPattern } from '@/lib/catalog/pattern
 import { evaluatePrintAlbedoUrl } from '@/lib/catalog/print-qa';
 import { writeRestLengthMesh } from '@/lib/catalog/rest-length-store';
 import { detectUnsupportedGeometry } from '@/lib/catalog/unsupported-geometry';
-import { runPatternPrediction } from '@/lib/ml/replicate';
+import {
+  runPatternPrediction,
+  rewritePatternCogError,
+  type PatternIngestResult,
+} from '@/lib/ml/replicate';
 import type { Database, GarmentCadProfileInsert, Json } from '@/types/database';
 import type { CatalogGarmentDraft, RestLengthMesh } from '@/types/garment';
 
@@ -30,17 +34,22 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
     return { meshes: [], approximateFit: true };
   }
 
-  const result = await runPatternPrediction({
-    category: draft.category,
-    productText: patternProductText(draft),
-    sizeVariants: draft.sizeVariants.map((variant) => ({
-      sizeCode: variant.sizeCode,
-      chestCm: variant.chestCm,
-      waistCm: variant.waistCm,
-      hipCm: variant.hipCm,
-      lengthCm: variant.lengthCm,
-    })),
-  });
+  let result: PatternIngestResult;
+  try {
+    result = await runPatternPrediction({
+      category: draft.category,
+      productText: patternProductText(draft),
+      sizeVariants: draft.sizeVariants.map((variant) => ({
+        sizeCode: variant.sizeCode,
+        chestCm: variant.chestCm,
+        waistCm: variant.waistCm,
+        hipCm: variant.hipCm,
+        lengthCm: variant.lengthCm,
+      })),
+    });
+  } catch (error) {
+    throw rewritePatternCogError(error);
+  }
 
   if (result.status !== 'ok' || result.meshes.length === 0) {
     return { meshes: [], approximateFit: true };
