@@ -27,8 +27,11 @@ test('Replicate biometric read URLs outlive an A100 cold start', () => {
   const hmr = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/route.ts'), 'utf8');
   assert.match(hmr, /BIOMETRIC_SIGNED_READ_SECONDS/);
   assert.doesNotMatch(hmr, /createSignedUrl\([^,]+,\s*60\s*\)/);
-  assert.match(hmr, /warmGpuForShopperSubmit\(\)\.catch/);
+  assert.match(hmr, /Promise\.race\(\[/);
+  assert.match(hmr, /warmAndWaitForShopperGpu/);
   assert.match(hmr, /const prediction = await dispatchAnnyFitPrediction/);
+  assert.match(hmr, /watchShopperGpuDeadline/);
+  assert.match(hmr, /await warmGpu/);
 });
 
 test('shopper capture posts WebPs through the embed-token upload route', () => {

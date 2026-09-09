@@ -1,5 +1,5 @@
 import { parseMhrParametricVector } from '@/lib/ml/replicate';
-import { GPU_HOLD_AFTER_BODY_MS } from '@/lib/ml/session-gpu';
+import { gpuHoldMsUntilDeadline } from '@/lib/ml/session-gpu';
 import { purgeBiometricJobImages } from '@/lib/server/biometrics-wipe';
 import {
   holdGpuForFitJob,
@@ -103,7 +103,13 @@ export async function applyHmrPredictionToFitJob(
         throw new HmrJobApplyError('Unable to save fit job output.', 'SAVE_FAILED');
       }
 
-      await holdGpuForFitJob(jobId, GPU_HOLD_AFTER_BODY_MS);
+      const holdMs = gpuHoldMsUntilDeadline(job.created_at);
+      if (holdMs > 0) {
+        await holdGpuForFitJob(jobId, holdMs);
+      } else {
+        await releaseGpuHoldForFitJob(jobId);
+        void sleepGpuIfNoActiveFitJobs();
+      }
       return { applied: true };
     } catch (error) {
       if (error instanceof HmrJobApplyError) {

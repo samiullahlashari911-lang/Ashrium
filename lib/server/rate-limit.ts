@@ -23,6 +23,7 @@ export const RATE_LIMITS = {
   widgetTokenIp: 60,
   uploadUrl: 20,
   hmrDispatch: 20,
+  hmrWarmup: 12,
   hmrStatus: 60,
   fitRecommend: 60,
   fitResolve: 20,

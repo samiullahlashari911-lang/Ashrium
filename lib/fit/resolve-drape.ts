@@ -17,7 +17,7 @@ import {
 } from '@/lib/graphics/meshopt-delta';
 import { garmentOriginY } from '@/lib/graphics/xpbd-cloth';
 import { runDrapePrediction } from '@/lib/ml/replicate';
-import { GPU_HOLD_DURING_DRAPE_MS } from '@/lib/ml/session-gpu';
+import { DRAPE_MIN_REMAINING_MS, gpuHoldMsUntilDeadline } from '@/lib/ml/session-gpu';
 import {
   holdGpuForFitJob,
   releaseGpuHoldForFitJob,
@@ -321,6 +321,7 @@ async function releaseGpuAfterDrape(jobId: string): Promise<void> {
 
 async function runNewtonDrape(options: {
   jobId: string;
+  createdAt: string;
   parametric: MhrParametricVector;
   restMesh: RestLengthMesh;
   mechanical: GarmentMechanicalProperties;
@@ -340,7 +341,7 @@ async function runNewtonDrape(options: {
   const body = buildHullCollisionField(lod3.positions, options.parametric.derived_measurements);
   const originY = garmentOriginY(body, options.category);
 
-  await holdGpuForFitJob(options.jobId, GPU_HOLD_DURING_DRAPE_MS);
+  await holdGpuForFitJob(options.jobId, gpuHoldMsUntilDeadline(options.createdAt));
 
   try {
     await warmGpuForShopperSubmit();
@@ -358,7 +359,7 @@ async function runNewtonDrape(options: {
       shearStiffness: options.mechanical.shearStiffness,
       areaDensity: options.mechanical.areaDensity,
       originY,
-    });
+    }, { timeoutMs: gpuHoldMsUntilDeadline(options.createdAt) });
   } finally {
     await releaseGpuAfterDrape(options.jobId);
   }
@@ -373,7 +374,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
   const allowNewton = input.allowXpbd ?? true;
   const { data: job, error: jobError } = await input.supabase
     .from('fit_jobs')
-    .select('id, status, height_cm, parametric_result')
+    .select('id, status, height_cm, parametric_result, created_at')
     .eq('id', input.jobId)
     .eq('tenant_id', input.tenantId)
     .maybeSingle();
@@ -433,7 +434,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
       return cached;
     }
 
-    if (!allowNewton) {
+    if (!allowNewton || gpuHoldMsUntilDeadline(job.created_at) < DRAPE_MIN_REMAINING_MS) {
       return unavailable(MHR_TOPOLOGY_VERSION);
     }
 
@@ -449,6 +450,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
     const category = readGarmentCategory(garment.category) ?? restMesh.category;
     const mesh = await runNewtonDrape({
       jobId: input.jobId,
+      createdAt: job.created_at,
       parametric: mhr,
       restMesh,
       mechanical: mechanicalFromProfile(garment),

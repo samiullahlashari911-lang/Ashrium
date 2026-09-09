@@ -1,3 +1,5 @@
+import { after } from 'next/server';
+
 import {
   parseBiometricJobImagePath,
   purgeBiometricJobImages,
@@ -9,7 +11,9 @@ import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
 import { dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
-import { sleepGpuIfNoActiveFitJobs, warmGpuForShopperSubmit } from '@/lib/server/session-gpu';
+import { GPU_COLD_START_WAIT_MS } from '@/lib/ml/session-gpu';
+import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
+import { sleepGpuIfNoActiveFitJobs, warmAndWaitForShopperGpu } from '@/lib/server/session-gpu';
 
 function getWebhookBaseUrl(): URL {
   const appBaseUrl = process.env.APP_BASE_URL?.trim();
@@ -27,6 +31,7 @@ function getWebhookBaseUrl(): URL {
 }
 
 export const runtime = 'nodejs';
+export const maxDuration = 130;
 
 export async function POST(request: Request): Promise<Response> {
   let payload: unknown;
@@ -69,6 +74,15 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const serviceClient = createServiceClient();
+  const warmGpu = Promise.race([
+    warmAndWaitForShopperGpu(GPU_COLD_START_WAIT_MS),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, GPU_COLD_START_WAIT_MS + 3_000);
+    }),
+  ]).catch(() => {
+    // Dispatch still runs; the Deployment can cold-start under the 2-minute cap.
+  });
+
   const [signedFront, signedSide] = await Promise.all([
     serviceClient.storage.from('biometrics').createSignedUrl(
       body.frontImagePath,
@@ -81,8 +95,12 @@ export async function POST(request: Request): Promise<Response> {
   ]);
 
   if (signedFront.error || !signedFront.data || signedSide.error || !signedSide.data) {
+    await warmGpu;
+    void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
   }
+
+  await warmGpu;
 
   const { data: job, error: createError } = await serviceClient
     .from('fit_jobs')
@@ -100,6 +118,7 @@ export async function POST(request: Request): Promise<Response> {
     .single();
 
   if (createError || !job) {
+    void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'JOB_CREATION_FAILED' }, { status: 500 });
   }
 
@@ -127,11 +146,11 @@ export async function POST(request: Request): Promise<Response> {
       .eq('id', job.id)
       .eq('tenant_id', tenantId);
 
+    void sleepGpuIfNoActiveFitJobs();
     return Response.json({ job_id: job.id, status: 'pending' }, { status: 500 });
   }
 
   try {
-    const warmPromise = warmGpuForShopperSubmit().catch(() => undefined);
     const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
     webhookUrl.searchParams.set('job_id', job.id);
     const prediction = await dispatchAnnyFitPrediction({
@@ -142,7 +161,6 @@ export async function POST(request: Request): Promise<Response> {
       weightKg: body.weightKg,
       webhookUrl: webhookUrl.toString(),
     });
-    await warmPromise;
 
     const { error: dispatchUpdateError } = await serviceClient
       .from('fit_jobs')
@@ -153,6 +171,10 @@ export async function POST(request: Request): Promise<Response> {
     if (dispatchUpdateError) {
       throw new Error('Unable to associate the Replicate prediction with the fit job.');
     }
+
+    after(() => {
+      void watchShopperGpuDeadline(job.id);
+    });
   } catch {
     const wasPurged = await purgeBiometricJobImages(
       body.frontImagePath,

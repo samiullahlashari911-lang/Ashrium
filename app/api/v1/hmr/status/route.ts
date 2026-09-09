@@ -1,4 +1,6 @@
 import { fetchReplicatePrediction } from '@/lib/ml/replicate';
+import { isShopperInferenceOverdue } from '@/lib/ml/session-gpu';
+import { abortFitJobIfOverdue } from '@/lib/server/abort-shopper-gpu';
 import { applyHmrPredictionToFitJob } from '@/lib/server/apply-hmr-prediction';
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
@@ -72,6 +74,26 @@ export async function GET(request: Request): Promise<Response> {
 
   if (!job) {
     return Response.json({ code: 'JOB_NOT_FOUND' }, { status: 404 });
+  }
+
+  if (
+    (job.status === 'processing' || job.status === 'pending')
+    && typeof job.created_at === 'string'
+    && isShopperInferenceOverdue(job.created_at)
+  ) {
+    const aborted = await abortFitJobIfOverdue(jobId);
+    if (aborted) {
+      const { data: timedOut } = await supabase
+        .from('fit_jobs')
+        .select(PUBLIC_JOB_COLUMNS)
+        .eq('id', jobId)
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+      if (timedOut) {
+        return Response.json({ job: publicJobPayload(timedOut) });
+      }
+    }
   }
 
   const predictionId = job.replicate_prediction_id;

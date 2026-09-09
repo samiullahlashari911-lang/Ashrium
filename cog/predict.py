@@ -22,8 +22,16 @@ from drape.newton_xpbd import drape_newton_xpbd
 from pattern.paths import garmentcode_root
 
 
-def _read_rgb(path: Path) -> np.ndarray:
+def _read_rgb(path: Path, max_side: int = 640) -> np.ndarray:
     image = Image.open(str(path)).convert("RGB")
+    width, height = image.size
+    longest = max(width, height)
+    if longest > max_side:
+        scale = max_side / float(longest)
+        image = image.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            Image.Resampling.BILINEAR,
+        )
     return np.asarray(image, dtype=np.uint8)
 
 
@@ -186,11 +194,9 @@ class Predictor(BasePredictor):
 
         front_mask, front_bbox = segment_person(self.sam2, front_rgb)
         side_mask, side_bbox = segment_person(self.sam2, side_rgb)
-        torch.cuda.empty_cache()
 
         front_init = initialize_view(self.estimator, front_rgb, front_mask, front_bbox)
         side_init = initialize_view(self.estimator, side_rgb, side_mask, side_bbox)
-        torch.cuda.empty_cache()
 
         result = fit_two_view_mhr(
             mhr=self.mhr,

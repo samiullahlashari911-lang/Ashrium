@@ -34,7 +34,7 @@ def segment_person(predictor, image_rgb: np.ndarray) -> tuple[np.ndarray, np.nda
         masks, scores, _ = predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
-            multimask_output=True,
+            multimask_output=False,
         )
 
     mask = _largest_reasonable_mask(np.asarray(masks), np.asarray(scores).reshape(-1))

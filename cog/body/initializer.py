@@ -120,13 +120,16 @@ def initialize_view(
     bbox: np.ndarray,
 ) -> dict[str, Any]:
     """Run official `process_one_image` on RGB, prompted with our SAM 2 silhouette."""
+    import torch
+
     height, width = image_rgb.shape[:2]
     mask_u8 = (np.asarray(mask).reshape(height, width) > 0).astype(np.uint8) * 255
-    outputs = estimator.process_one_image(
-        image_rgb,
-        bboxes=bbox.reshape(1, 4).astype(np.float32),
-        masks=mask_u8,
-    )
+    with torch.no_grad():
+        outputs = estimator.process_one_image(
+            image_rgb,
+            bboxes=bbox.reshape(1, 4).astype(np.float32),
+            masks=mask_u8,
+        )
     person = _pick_person(outputs, (width, height))
     required = (
         "shape_params",

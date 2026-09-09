@@ -1,6 +1,12 @@
 import { setReplicateSessionGpu } from '@/lib/ml/replicate';
-import { sessionGpuShouldSleep } from '@/lib/ml/session-gpu';
+import { GPU_COLD_START_WAIT_MS, sessionGpuShouldSleep } from '@/lib/ml/session-gpu';
 import { createServiceClient } from '@/lib/supabase/service';
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /**
  * Shopper submit path. Failure must not block dispatch — the prediction can
@@ -8,6 +14,24 @@ import { createServiceClient } from '@/lib/supabase/service';
  */
 export async function warmGpuForShopperSubmit(): Promise<void> {
   await setReplicateSessionGpu('warm');
+}
+
+/**
+ * PATCH min_instances=1. If this call actually scaled 0→1, wait so Cog
+ * setup() can finish before the first prediction is queued.
+ */
+export async function warmAndWaitForShopperGpu(maxWaitMs = GPU_COLD_START_WAIT_MS): Promise<void> {
+  const started = Date.now();
+  const result = await setReplicateSessionGpu('warm');
+  if (!result.minInstancesUpdated) {
+    return;
+  }
+
+  const budget = Math.max(0, Math.min(GPU_COLD_START_WAIT_MS, maxWaitMs));
+  const remaining = budget - (Date.now() - started);
+  if (remaining > 0) {
+    await sleep(remaining);
+  }
 }
 
 export async function holdGpuForFitJob(jobId: string, holdMs: number): Promise<void> {

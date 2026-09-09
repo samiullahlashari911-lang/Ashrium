@@ -141,14 +141,14 @@ block.
 - **Design tokens:** `lib/design-tokens.ts` (Obsidian — indigo canvas, glass
   panels, purple→magenta CTAs); do not introduce a new UI kit unless asked.
 
-Session GPU warm uses Deployment PATCH `min_instances=1` when a shopper
-submits both photos. The GPU stays warm through `task=body` **and**
-`task=drape` on that session (`gpu_hold_until` on `fit_jobs`). It sleeps
-(`min_instances=0`) when no fit job is pending or processing **and** no
-drape hold is still in the future. Do not sleep after HMR success — Newton
-would cold-start. Merchants cannot scale the Deployment.
-Operator/cron may POST `/api/v1/hmr/keepalive`. Do not add 24/7 Vercel
-cron keep-alive against the trial A100 credit.
+Session GPU warm uses Deployment PATCH `min_instances=1` when live capture
+starts (after consent) so Cog `setup()` overlaps photos. Body and optional
+drape then share a **2-minute wall clock from job start**. If the avatar is
+not ready, cancel the prediction, fail the job, and sleep (`min_instances=0`).
+If capture starts the GPU and no job is submitted, sleep after 3 minutes.
+Merchants cannot scale the Deployment. Operator/cron may POST
+`/api/v1/hmr/keepalive`. Do not add 24/7 Vercel cron keep-alive against the
+trial A100 credit.
 
 To retire (do not build new work against these):
 
@@ -225,8 +225,8 @@ Shopify Admin directly.
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
 | Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (faceless mannequin, undergarment, GarmentCode UVs), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
 | Cog (Python) | `cog/predict.py`, `cog/cog.yaml`, `cog/requirements.txt`, `cog/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, ISO girths), `cog/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `cog/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject). Never `NvidiaWarp-GarmentCode`. |
-| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/status/route.ts` (Replicate GET reconcile), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper submit warms), `app/api/v1/cron/ttl-sweep/route.ts`, `app/api/v1/webhooks/replicate/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Cog `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
-| ML | `lib/ml/replicate.ts` (Deployment fetch; parse MHR output; GET prediction; PATCH `min_instances`) |
+| ML | `lib/ml/replicate.ts` (Deployment fetch; parse MHR output; GET/cancel prediction; PATCH `min_instances`), `lib/ml/session-gpu.ts` (2-minute shopper GPU wall clock) |
+| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/warmup/route.ts` (embed-token capture warm), `app/api/v1/hmr/status/route.ts` (Replicate GET reconcile + 2-minute abort), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper capture/submit warms), `app/api/v1/cron/ttl-sweep/route.ts`, `app/api/v1/webhooks/replicate/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/abort-shopper-gpu.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Cog `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
 | Merchant UI | `app/page.tsx`, `app/privacy/page.tsx`, `lib/privacy/consent-copy.ts`, `lib/privacy/illinois-bipa.ts` (BIPA geofence ship flag; off until counsel), `app/(dashboard)/dashboard-navigation.tsx`, `app/(dashboard)/onboarding/page.tsx`, `app/(dashboard)/onboarding/onboarding-wizard.tsx`, `app/(dashboard)/settings/page.tsx`, `app/(dashboard)/settings/integrations/shopify-form.tsx`, `components/settings/domain-allowlist-form.tsx`, `components/settings/telemetry-secret-form.tsx`, `components/dashboard/empty-state.tsx`, `components/dashboard/catalog-sync-bar.tsx`, `components/dashboard/replicate-runtime-banner.tsx`, `lib/onboarding.ts`, `lib/server/tenant-settings.ts` |
 | Theme | `lib/design-tokens.ts`, `components/theme/atmosphere-backdrop.tsx` |
 | Auth / access | `app/(auth)/sign-in/auth-form.tsx`, `lib/supabase/merchant-access.ts`, `lib/server/provision-merchant.ts`, `lib/server/operator-secret.ts`, `scripts/invite-merchant.mjs` |
@@ -268,12 +268,12 @@ patterns to replicate, not copy pixel-for-pixel:
   the product texture. Legend sits at the edge, not overlapping the model.
   Strain is not a verdict.
 - **GPU session chrome (sandbox):** shopper/sandbox path uses a Replicate
-  Deployment. The A100 warms (`min_instances=1`) only when a shopper
-  submits both verified photos on `POST /api/v1/hmr`. It stays warm until
-  Newton drape on that session finishes (or the `gpu_hold_until` window
-  lapses). It sleeps (`min_instances=0`) when no fit job is pending or
-  processing **and** no drape hold is active. Do not sleep between
-  `task=body` and `task=drape`.
+  Deployment. The A100 warms (`min_instances=1`) when live capture starts
+  after consent, so Cog setup overlaps the photos. Submit then dispatches
+  to a warm GPU. Body + optional drape share a **2-minute wall clock from
+  job start**. If the avatar is not ready, cancel the prediction, fail the
+  job, wipe photos, and PATCH `min_instances=0`. Do not leave the GPU billed
+  past 120s after submit. Abandoned capture sleeps the GPU after 3 minutes.
   Merchants cannot Warm/Sleep the GPU. Manual scale is operator-only
   (`ASHRIUM_OPERATOR_SECRET` or `CRON_SECRET` on
   `POST /api/v1/hmr/keepalive`). Do **not** run 24/7 Vercel cron keep-alive.
@@ -436,11 +436,10 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   If HuggingFace access to SAM 3D Body weights is not granted, stop — do
   not stub the initializer.
 - **Session GPU, not 24/7 cron.** Shopper path uses the Deployment.
-  `min_instances=1` after a complete shopper submit; stay warm through
-  Newton drape; `0` when no body job is pending/processing **and** no
-  drape hold is active. Merchants cannot Warm/Sleep. Operator/cron
-  may scale via keepalive. Do not keep-alive with dummy predictions
-  against the ~$5 A100 credit.
+  `min_instances=1` when live capture starts; hard stop at **120s after
+  job start** (cancel prediction, fail the job, `min_instances=0`).
+  Merchants cannot Warm/Sleep. Operator/cron may scale via keepalive. Do
+  not keep-alive with dummy predictions against the ~$5 A100 credit.
 - **Ask before changing existing UI** that isn't part of the current task's
   file map.
 - **Ask before renaming or dropping a database column/table** that other

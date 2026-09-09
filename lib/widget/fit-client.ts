@@ -111,6 +111,18 @@ export async function uploadDualHeadlessWebps(
   };
 }
 
+export async function warmShopperGpu(embedToken: string | null): Promise<void> {
+  try {
+    await fetch('/api/v1/hmr/warmup', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: authHeaders(embedToken, true),
+    });
+  } catch {
+    // Submit still warms; capture continues without blocking the camera.
+  }
+}
+
 export async function dispatchAnnyFitJob(
   embedToken: string | null,
   input: AnnyFitDispatchInput,

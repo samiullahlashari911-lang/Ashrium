@@ -822,6 +822,30 @@ export async function fetchReplicatePrediction(
   };
 }
 
+export async function cancelReplicatePrediction(predictionId: string): Promise<void> {
+  const response = await fetch(
+    `https://api.replicate.com/v1/predictions/${encodeURIComponent(predictionId)}/cancel`,
+    {
+      method: 'POST',
+      headers: replicateAuthHeaders(),
+    },
+  );
+
+  if (
+    response.ok
+    || response.status === 404
+    || response.status === 409
+    || response.status === 422
+  ) {
+    return;
+  }
+
+  const errorBody = await response.text();
+  throw new Error(
+    `Replicate prediction cancel failed (${response.status}): ${errorBody || response.statusText}`,
+  );
+}
+
 async function fetchReplicateDeployment(
   deployment: ReplicateDeploymentRef,
 ): Promise<ReplicateDeploymentStatus> {
@@ -1026,13 +1050,19 @@ export async function waitForReplicatePrediction(
   return latest;
 }
 
-export async function runDrapePrediction(input: RunDrapeInput): Promise<SimDrapeMesh> {
+export async function runDrapePrediction(
+  input: RunDrapeInput,
+  options?: { timeoutMs?: number },
+): Promise<SimDrapeMesh> {
   requireReplicateDeploymentRef();
   getAnnyFitModelVersion();
 
+  const timeoutMs = options?.timeoutMs ?? 50_000;
+  const preferWaitSeconds = Math.max(1, Math.min(60, Math.floor(timeoutMs / 1000)));
+
   const prediction = await requestReplicatePrediction(
     { input: buildDrapePredictionInput(input) },
-    { preferWaitSeconds: 60 },
+    { preferWaitSeconds },
   );
 
   if (typeof prediction.id !== 'string' || typeof prediction.status !== 'string') {
@@ -1041,7 +1071,7 @@ export async function runDrapePrediction(input: RunDrapeInput): Promise<SimDrape
 
   const completed = isTerminalReplicatePredictionStatus(prediction.status)
     ? prediction
-    : await waitForReplicatePrediction(prediction.id);
+    : await waitForReplicatePrediction(prediction.id, { timeoutMs });
 
   if (completed.status !== 'succeeded') {
     throw new Error(completed.error ?? `Replicate drape ${completed.status}.`);

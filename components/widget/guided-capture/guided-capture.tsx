@@ -4,8 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { CaptureIntake, type CaptureIntakeValues } from '@/components/widget/guided-capture/capture-intake';
 import { CaptureViewport } from '@/components/widget/guided-capture/capture-viewport';
+import {
+  SHOPPER_GPU_TIMEOUT_MESSAGE,
+  SHOPPER_INFERENCE_DEADLINE_MS,
+} from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
-import { uploadDualWebpAndDispatch } from '@/lib/widget/fit-client';
+import { uploadDualWebpAndDispatch, warmShopperGpu } from '@/lib/widget/fit-client';
 import type {
   FitParametricVector,
   CaptureSession,
@@ -78,6 +82,14 @@ export function GuidedCapture({
   );
 
   useEffect(() => {
+    if (step !== 'front' && step !== 'side') {
+      return;
+    }
+
+    void warmShopperGpu(embedToken);
+  }, [embedToken, step]);
+
+  useEffect(() => {
     if (step !== 'uploading' && step !== 'inferring') {
       setWaitSeconds(0);
       return;
@@ -128,6 +140,19 @@ export function GuidedCapture({
       },
     );
   }, [embedToken, frontGate, intake, jobId, onComplete, sideGate, step, tenantId]);
+
+  useEffect(() => {
+    if (step !== 'inferring') {
+      return;
+    }
+
+    if (waitSeconds < Math.ceil(SHOPPER_INFERENCE_DEADLINE_MS / 1000)) {
+      return;
+    }
+
+    setError(SHOPPER_GPU_TIMEOUT_MESSAGE);
+    setStep('error');
+  }, [step, waitSeconds]);
 
   const reset = (): void => {
     setStep('intake');
@@ -186,16 +211,20 @@ export function GuidedCapture({
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
             ? 'Photos are deleted as soon as inference finishes.'
-            : 'The A100 starts when both photos are submitted. A cold boot of SAM 2 + SAM 3D Body + MHR often takes about a minute. Keep this window open — photos are deleted as soon as inference finishes.'}
+            : 'The GPU started while you were taking photos so the body fit can finish in 2 minutes. We stop it if the avatar is not ready by then.'}
         </p>
-        <p className="font-mono text-xs text-obsidian-subtle">{waitSeconds}s elapsed</p>
+        <p className="font-mono text-xs text-obsidian-subtle">
+          {step === 'inferring'
+            ? `${waitSeconds}s elapsed · ${Math.max(0, 120 - waitSeconds)}s remaining`
+            : `${waitSeconds}s elapsed`}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 px-6 text-center text-obsidian-ink">
-      <h1 className="text-2xl font-semibold">We could not build your avatar</h1>
+      <h1 className="text-2xl font-semibold">Sorry — we could not finish in time</h1>
       <p className="max-w-sm text-sm text-rose-300">{error ?? 'Something went wrong.'}</p>
       <button
         type="button"

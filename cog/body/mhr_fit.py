@@ -24,8 +24,10 @@ KEYPOINT_LOSS_WEIGHT = 1.0
 SILHOUETTE_LOSS_WEIGHT = 0.05
 IDENTITY_REG_WEIGHT = 0.01
 HEIGHT_LOSS_WEIGHT = 25.0
-FIT_STEPS = 60
-FIT_LR = 0.04
+FIT_STEPS = 20
+FIT_LR = 0.05
+EARLY_STOP_AFTER = 8
+EARLY_STOP_KEYPOINT = 5.0
 
 
 def _as_1d(value: Any, length: int | None = None) -> np.ndarray:
@@ -224,10 +226,11 @@ def fit_two_view_mhr(
         loss.backward()
         optimizer.step()
 
+        if _step + 1 >= EARLY_STOP_AFTER and float(keypoint_loss.detach()) < EARLY_STOP_KEYPOINT:
+            break
+
         with torch.no_grad():
             # Hard height constraint: rescale skeleton so canonical stature matches stated height.
-            identity = _pad_identity(body20.unsqueeze(0), hands5.unsqueeze(0))
-            _, canon_skel = _forward_mhr(mhr, identity, canonical_model_params(scale.unsqueeze(0)), face)
             current = _maybe_to_cm(skeleton_height_cm(canon_skel)).clamp(min=1.0)
             scale.mul_((target_height / current).reshape(-1)[0])
 
