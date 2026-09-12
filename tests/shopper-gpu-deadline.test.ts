@@ -82,6 +82,8 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(abort, /latest.status !== 'pending'/);
   assert.match(abort, /functionGuardMs/);
   assert.match(capture, /SHOPPER_AVATAR_WAIT_MS/);
+  assert.match(capture, /Keep this screen open/);
+  assert.doesNotMatch(capture, /120 - waitSeconds/);
   assert.match(capture, /warmShopperGpu/);
   assert.match(capture, /key=\{step\}/);
   assert.match(client, /\/api\/v1\/hmr\/warmup/);

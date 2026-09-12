@@ -303,11 +303,11 @@ export function GuidedCapture({
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
             ? uploadCopy
-            : 'The GPU started while you were taking photos so the body fit can finish in 2 minutes. We stop it if the avatar is not ready by then.'}
+            : 'Keep this screen open. The fitting GPU may still be starting, then it builds your 3D avatar from the two photos.'}
         </p>
         <p className="font-mono text-xs text-obsidian-subtle">
           {step === 'inferring'
-            ? `${waitSeconds}s elapsed · ${Math.max(0, 120 - waitSeconds)}s remaining`
+            ? `${waitSeconds}s elapsed · ${Math.max(0, Math.ceil(SHOPPER_AVATAR_WAIT_MS / 1000) - waitSeconds)}s remaining`
             : `${waitSeconds}s elapsed`}
         </p>
       </div>
