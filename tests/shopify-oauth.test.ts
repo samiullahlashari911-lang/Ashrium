@@ -8,7 +8,10 @@ import {
   getShopifyOAuthRedirectUri,
   normalizeShopifyShopDomain,
   parseShopifyOAuthState,
+  resolveShopifyOAuthAppRedirect,
   shopifyAccessTokenNeedsRefresh,
+  shopifyShopIdentityHosts,
+  shopifyShopIsAuthorizedForIdentity,
   verifyShopifyCallbackHmac,
 } from '@/lib/server/shopify-oauth';
 
@@ -170,4 +173,35 @@ test('callback validation maps Shopify OAuth errors to redirect messages', () =>
     buildShopifyOAuthRedirectUrl('/settings/integrations', 'error', query.get('error_description') ?? 'denied'),
     '/settings/integrations?shopify=error&message=Merchant+declined',
   );
+});
+
+test('OAuth app redirects are absolute so Response.redirect does not 500', () => {
+  const redirect = resolveShopifyOAuthAppRedirect(
+    'https://www.ashrium.org/api/v1/shopify/oauth/start?shop=legendary1122.myshopify.com',
+    '/settings/integrations',
+    'error',
+    'Sign in with an active merchant account before connecting Shopify.',
+  );
+
+  assert.equal(redirect.origin, 'https://www.ashrium.org');
+  assert.equal(redirect.pathname, '/settings/integrations');
+  assert.equal(redirect.searchParams.get('shopify'), 'error');
+  const redirected = Response.redirect(redirect, 302);
+  assert.equal(redirected.status, 302);
+  assert.equal(redirected.headers.get('location'), redirect.toString());
+});
+
+test('Legendary storefront hostname is an alias of the permanent myshopify domain', () => {
+  const identity = {
+    myshopifyDomain: '2sdyw6-ki.myshopify.com',
+    primaryDomainUrl: 'https://legendary1122.myshopify.com',
+  };
+
+  assert.equal(shopifyShopIsAuthorizedForIdentity('legendary1122.myshopify.com', identity), true);
+  assert.equal(shopifyShopIsAuthorizedForIdentity('2sdyw6-ki.myshopify.com', identity), true);
+  assert.equal(shopifyShopIsAuthorizedForIdentity('other-shop.myshopify.com', identity), false);
+  assert.deepEqual(shopifyShopIdentityHosts(identity).sort(), [
+    '2sdyw6-ki.myshopify.com',
+    'legendary1122.myshopify.com',
+  ]);
 });

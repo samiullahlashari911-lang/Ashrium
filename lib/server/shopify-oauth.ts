@@ -204,6 +204,49 @@ export function buildShopifyAuthorizeUrl(shopDomain: string, state: string): str
   return `https://${shopDomain}/admin/oauth/authorize?${params.toString()}`;
 }
 
+export function shopifyShopIdentityHosts(identity: {
+  myshopifyDomain: string;
+  primaryDomainUrl?: string | null;
+}): string[] {
+  const hosts = new Set<string>();
+  const myshopifyDomain = identity.myshopifyDomain.trim().toLowerCase();
+  if (SHOP_DOMAIN_PATTERN.test(myshopifyDomain)) {
+    hosts.add(myshopifyDomain);
+  }
+
+  if (identity.primaryDomainUrl) {
+    try {
+      const hostname = new URL(identity.primaryDomainUrl).hostname.trim().toLowerCase();
+      if (hostname) {
+        hosts.add(hostname);
+      }
+    } catch {
+      // Ignore malformed primary-domain URLs from Shopify.
+    }
+  }
+
+  return [...hosts];
+}
+
+export function shopifyShopIsAuthorizedForIdentity(
+  shopDomain: string,
+  identity: {
+    myshopifyDomain: string;
+    primaryDomainUrl?: string | null;
+  },
+): boolean {
+  return shopifyShopIdentityHosts(identity).includes(shopDomain);
+}
+
+export function resolveShopifyOAuthAppRedirect(
+  requestUrl: string,
+  returnTo: string,
+  outcome: 'connected' | 'error',
+  message?: string,
+): URL {
+  return new URL(buildShopifyOAuthRedirectUrl(returnTo, outcome, message), requestUrl);
+}
+
 export function verifyShopifyCallbackHmac(
   query: URLSearchParams,
   clientSecret: string,
@@ -358,6 +401,7 @@ export async function completeShopifyOAuthConnection(input: {
   tenantId: string;
   shopDomain: string;
   code: string;
+  requestedShopDomain?: string;
 }): Promise<{ shopDomain: string }> {
   const { verifyShopifyAdminCredentials } = await import('@/lib/catalog/shopify-admin');
   const tokens = await exchangeShopifyOAuthCode(input.shopDomain, input.code);
@@ -366,8 +410,13 @@ export async function completeShopifyOAuthConnection(input: {
     adminToken: tokens.accessToken,
   });
 
-  if (identity.myshopifyDomain !== input.shopDomain) {
+  if (!shopifyShopIsAuthorizedForIdentity(input.shopDomain, identity)) {
     throw new Error(`Shopify authorized ${identity.myshopifyDomain}, not ${input.shopDomain}.`);
+  }
+
+  const requestedShopDomain = input.requestedShopDomain ?? input.shopDomain;
+  if (!shopifyShopIsAuthorizedForIdentity(requestedShopDomain, identity)) {
+    throw new Error(`Shopify authorized ${identity.myshopifyDomain}, not ${requestedShopDomain}.`);
   }
 
   const grantedScopes = tokens.scope
@@ -380,22 +429,23 @@ export async function completeShopifyOAuthConnection(input: {
 
   await saveShopifyOAuthTokens({
     tenantId: input.tenantId,
-    shopDomain: input.shopDomain,
+    shopDomain: identity.myshopifyDomain,
     tokens,
   });
 
   const { mergeTenantStorefrontOrigins, shopIdentityStorefrontOrigins } = await import(
     '@/lib/server/storefront-allowlist'
   );
-  await mergeTenantStorefrontOrigins(
-    input.tenantId,
-    shopIdentityStorefrontOrigins({
+  await mergeTenantStorefrontOrigins(input.tenantId, [
+    ...shopIdentityStorefrontOrigins({
       myshopifyDomain: identity.myshopifyDomain,
       primaryDomainUrl: identity.primaryDomainUrl,
     }),
-  );
+    `https://${input.shopDomain}`,
+    `https://${requestedShopDomain}`,
+  ]);
 
-  return { shopDomain: input.shopDomain };
+  return { shopDomain: identity.myshopifyDomain };
 }
 
 export function buildShopifyOAuthRedirectUrl(

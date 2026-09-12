@@ -4,6 +4,7 @@ import {
   refreshShopifyAccessToken,
   saveShopifyOAuthTokens,
   shopifyAccessTokenNeedsRefresh,
+  shopifyShopIsAuthorizedForIdentity,
 } from '@/lib/server/shopify-oauth';
 import {
   assertShopifyReadProductsAccess,
@@ -207,7 +208,7 @@ export async function saveMerchantShopifyCredentials(
   let identity: Awaited<ReturnType<typeof verifyShopifyAdminCredentials>>;
   try {
     identity = await verifyShopifyAdminCredentials({ shopDomain, adminToken });
-    if (identity.myshopifyDomain !== shopDomain) {
+    if (!shopifyShopIsAuthorizedForIdentity(shopDomain, identity)) {
       return {
         success: false,
         message: `Token belongs to ${identity.myshopifyDomain}, not ${shopDomain}.`,
@@ -233,7 +234,7 @@ export async function saveMerchantShopifyCredentials(
     {
       tenant_id: tenantId,
       provider: 'shopify',
-      shopify_shop_domain: shopDomain,
+      shopify_shop_domain: identity.myshopifyDomain,
       shopify_admin_token_ciphertext: encryptTenantSecret(adminToken),
       shopify_token_expires_at: null,
       shopify_refresh_token_ciphertext: null,
@@ -257,10 +258,13 @@ export async function saveMerchantShopifyCredentials(
     );
     await mergeTenantStorefrontOrigins(
       tenantId,
-      shopIdentityStorefrontOrigins({
-        myshopifyDomain: identity.myshopifyDomain,
-        primaryDomainUrl: identity.primaryDomainUrl,
-      }),
+      [
+        ...shopIdentityStorefrontOrigins({
+          myshopifyDomain: identity.myshopifyDomain,
+          primaryDomainUrl: identity.primaryDomainUrl,
+        }),
+        `https://${shopDomain}`,
+      ],
     );
   } catch {
     // Integration is saved; merchant can still add origins in Settings.
@@ -268,8 +272,8 @@ export async function saveMerchantShopifyCredentials(
 
   return {
     success: true,
-    message: `Connected to ${shopDomain}. Test one SKU on Garments — full catalog sync is optional.`,
-    shopDomain,
+    message: `Connected to ${identity.myshopifyDomain}. Test one SKU on Garments — full catalog sync is optional.`,
+    shopDomain: identity.myshopifyDomain,
   };
 }
 

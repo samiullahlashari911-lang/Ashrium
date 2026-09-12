@@ -1,9 +1,9 @@
 import {
-  buildShopifyOAuthRedirectUrl,
   completeShopifyOAuthConnection,
   getShopifyOAuthConfig,
   normalizeShopifyShopDomain,
   parseShopifyOAuthState,
+  resolveShopifyOAuthAppRedirect,
   verifyShopifyCallbackHmac,
 } from '@/lib/server/shopify-oauth';
 
@@ -23,20 +23,34 @@ function readOAuthErrorMessage(query: URLSearchParams): string | null {
   return 'Shopify authorization was denied or cancelled.';
 }
 
+function redirectToApp(
+  request: Request,
+  returnTo: string,
+  outcome: 'connected' | 'error',
+  message?: string,
+): Response {
+  return Response.redirect(
+    resolveShopifyOAuthAppRedirect(request.url, returnTo, outcome, message),
+    302,
+  );
+}
+
 export async function GET(request: Request): Promise<Response> {
   const query = new URL(request.url).searchParams;
   const fallbackReturnTo = '/settings/integrations';
   const oauthError = readOAuthErrorMessage(query);
   if (oauthError) {
-    return Response.redirect(buildShopifyOAuthRedirectUrl(fallbackReturnTo, 'error', oauthError), 302);
+    return redirectToApp(request, fallbackReturnTo, 'error', oauthError);
   }
 
   const stateParam = query.get('state') ?? '';
   const state = parseShopifyOAuthState(stateParam);
   if (!state) {
-    return Response.redirect(
-      buildShopifyOAuthRedirectUrl(fallbackReturnTo, 'error', 'Shopify OAuth state was invalid or expired.'),
-      302,
+    return redirectToApp(
+      request,
+      fallbackReturnTo,
+      'error',
+      'Shopify OAuth state was invalid or expired.',
     );
   }
 
@@ -44,54 +58,42 @@ export async function GET(request: Request): Promise<Response> {
   try {
     config = getShopifyOAuthConfig();
   } catch {
-    return Response.redirect(
-      buildShopifyOAuthRedirectUrl(
-        state.returnTo,
-        'error',
-        'Shopify OAuth is not configured on this deployment.',
-      ),
-      302,
+    return redirectToApp(
+      request,
+      state.returnTo,
+      'error',
+      'Shopify OAuth is not configured on this deployment.',
     );
   }
 
   if (!verifyShopifyCallbackHmac(query, config.clientSecret)) {
-    return Response.redirect(
-      buildShopifyOAuthRedirectUrl(state.returnTo, 'error', 'Shopify callback signature was invalid.'),
-      302,
-    );
+    return redirectToApp(request, state.returnTo, 'error', 'Shopify callback signature was invalid.');
   }
 
   const shopDomain = normalizeShopifyShopDomain(query.get('shop') ?? '');
   const code = query.get('code')?.trim() ?? '';
 
-  if (!shopDomain || shopDomain !== state.shopDomain) {
-    return Response.redirect(
-      buildShopifyOAuthRedirectUrl(state.returnTo, 'error', 'Shopify returned an unexpected shop domain.'),
-      302,
-    );
+  if (!shopDomain) {
+    return redirectToApp(request, state.returnTo, 'error', 'Shopify returned an unexpected shop domain.');
   }
 
   if (code.length === 0) {
-    return Response.redirect(
-      buildShopifyOAuthRedirectUrl(state.returnTo, 'error', 'Shopify did not return an authorization code.'),
-      302,
-    );
+    return redirectToApp(request, state.returnTo, 'error', 'Shopify did not return an authorization code.');
   }
 
   try {
     const result = await completeShopifyOAuthConnection({
       tenantId: state.tenantId,
       shopDomain,
+      requestedShopDomain: state.shopDomain,
       code,
     });
 
-    return Response.redirect(
-      buildShopifyOAuthRedirectUrl(
-        state.returnTo,
-        'connected',
-        `Connected to ${result.shopDomain}. Test one SKU on Garments — full catalog sync is optional.`,
-      ),
-      302,
+    return redirectToApp(
+      request,
+      state.returnTo,
+      'connected',
+      `Connected to ${result.shopDomain}. Test one SKU on Garments — full catalog sync is optional.`,
     );
   } catch (error) {
     const message =
@@ -99,6 +101,6 @@ export async function GET(request: Request): Promise<Response> {
         ? error.message
         : 'Shopify OAuth token exchange failed.';
 
-    return Response.redirect(buildShopifyOAuthRedirectUrl(state.returnTo, 'error', message), 302);
+    return redirectToApp(request, state.returnTo, 'error', message);
   }
 }
