@@ -19,6 +19,17 @@ import type {
 
 type CaptureStep = 'intake' | 'front' | 'side' | 'uploading' | 'inferring' | 'error';
 
+function captureErrorTitle(message: string | null): string {
+  if (
+    message
+    && /2 minutes|finish in time|canceled|could not finish/i.test(message)
+  ) {
+    return 'Sorry — we could not finish in time';
+  }
+
+  return 'Sorry — we could not build your avatar';
+}
+
 export interface GuidedCaptureResult {
   session: CaptureSession;
   parametric: FitParametricVector;
@@ -87,6 +98,11 @@ export function GuidedCapture({
     }
 
     void warmShopperGpu(embedToken);
+    const intervalId = window.setInterval(() => {
+      void warmShopperGpu(embedToken);
+    }, 45_000);
+
+    return () => window.clearInterval(intervalId);
   }, [embedToken, step]);
 
   useEffect(() => {
@@ -181,6 +197,7 @@ export function GuidedCapture({
     const view: CaptureView = step;
     return (
       <CaptureViewport
+        key={step}
         view={view}
         allowGallery={allowGallery}
         flowStep={step}
@@ -224,7 +241,7 @@ export function GuidedCapture({
 
   return (
     <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 px-6 text-center text-obsidian-ink">
-      <h1 className="text-2xl font-semibold">Sorry — we could not finish in time</h1>
+      <h1 className="text-2xl font-semibold">{captureErrorTitle(error)}</h1>
       <p className="max-w-sm text-sm text-rose-300">{error ?? 'Something went wrong.'}</p>
       <button
         type="button"

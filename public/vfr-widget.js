@@ -39,7 +39,7 @@
   frameUrl.searchParams.set('parent_origin', window.location.origin);
   if (sku) frameUrl.searchParams.set('sku', sku);
   if (allowGallery) frameUrl.searchParams.set('allow_gallery', '1');
-  frameUrl.searchParams.set('v', 'capture-ux-1');
+  frameUrl.searchParams.set('v', 'capture-ux-2');
 
   frame.className = 'vfr-frame';
   frame.title = 'Ashrium Virtual Fitting Room';

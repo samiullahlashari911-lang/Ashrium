@@ -111,6 +111,7 @@ export function CaptureViewport({
     setEncodeError(null);
     setGalleryError(null);
     setGate('not_detected');
+    setSource('live');
   }, [view]);
 
   useEffect(() => {
@@ -249,7 +250,7 @@ export function CaptureViewport({
                 return;
               }
 
-              capturingRef.current = false;
+              capturingRef.current = true;
               alignedSinceRef.current = null;
               setHoldProgress(0);
               onCaptured(blob, 'aligned');
@@ -283,7 +284,7 @@ export function CaptureViewport({
   const hint =
     view === 'front'
       ? 'Fit your body inside the outline, arms slightly open. Hold still — we capture automatically.'
-      : 'Turn sideways, match the outline, and lift your wrists to the shoulder rings. Hold still to capture.';
+      : 'Turn to your side, match the outline, and lift your wrists to the shoulder rings. Hold still to capture.';
 
   const chooseLive = (): void => {
     if (pending) {

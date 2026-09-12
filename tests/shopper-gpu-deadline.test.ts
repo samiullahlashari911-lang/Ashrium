@@ -25,6 +25,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const hmr = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/route.ts'), 'utf8');
   const warmup = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/warmup/route.ts'), 'utf8');
   const replicate = readFileSync(path.join(process.cwd(), 'lib/ml/replicate.ts'), 'utf8');
+  const sessionGpu = readFileSync(path.join(process.cwd(), 'lib/server/session-gpu.ts'), 'utf8');
   const abort = readFileSync(path.join(process.cwd(), 'lib/server/abort-shopper-gpu.ts'), 'utf8');
   const capture = readFileSync(
     path.join(process.cwd(), 'components/widget/guided-capture/guided-capture.tsx'),
@@ -45,11 +46,16 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(warmup, /watchWarmGpuIdleTimeout/);
   assert.match(warmup, /warmGpuForShopperSubmit/);
   assert.match(replicate, /cancelReplicatePrediction/);
+  assert.match(replicate, /body\.version = versionId|version: versionId/);
+  assert.match(sessionGpu, /SHOPPER_INFERENCE_DEADLINE_MS/);
+  assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
+  assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
   assert.match(abort, /cancelReplicatePrediction/);
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
   assert.match(abort, /latest.status !== 'pending'/);
   assert.match(capture, /SHOPPER_INFERENCE_DEADLINE_MS/);
   assert.match(capture, /warmShopperGpu/);
+  assert.match(capture, /key=\{step\}/);
   assert.match(client, /\/api\/v1\/hmr\/warmup/);
   assert.match(applyHmr, /purgeBiometricJobImages/);
   assert.match(applyHmr, /isTerminalReplicateStatus/);

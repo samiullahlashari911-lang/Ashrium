@@ -57,7 +57,6 @@ export async function abortShopperFitJob(job: AbortableFitJob): Promise<boolean>
       status: 'failed',
       front_image_path: null,
       side_image_path: null,
-      gpu_hold_until: null,
       error_message: wasPurged
         ? SHOPPER_GPU_TIMEOUT_MESSAGE
         : `${SHOPPER_GPU_TIMEOUT_MESSAGE} Biometric photos could not be purged.`,
@@ -179,6 +178,11 @@ export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
  */
 export async function watchWarmGpuIdleTimeout(): Promise<void> {
   await sleep(SHOPPER_GPU_WARMUP_IDLE_MS);
+  try {
+    await abortOverdueShopperFitJobs();
+  } catch {
+    // Stale jobs must not keep the idle watcher from sleeping the GPU.
+  }
   try {
     await sleepGpuIfNoActiveFitJobs();
   } catch {

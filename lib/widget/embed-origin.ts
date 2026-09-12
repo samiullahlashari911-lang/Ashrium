@@ -6,7 +6,7 @@
  */
 
 /** Bump when `public/vfr-widget.js` changes so hosts skip a stale cache. */
-export const VFR_WIDGET_SCRIPT_VERSION = 'no-sandbox-capture-ux-1';
+export const VFR_WIDGET_SCRIPT_VERSION = 'no-sandbox-capture-ux-2';
 
 export const VFR_WIDGET_SCRIPT_SRC = `/vfr-widget.js?v=${VFR_WIDGET_SCRIPT_VERSION}`;
 export function isWidgetEmbedParentAuthorized(input: {

@@ -15,9 +15,11 @@ export const DRAPE_MIN_REMAINING_MS = 20 * 1000;
 
 /**
  * Extra wait after scaling 0→1 so Cog `setup()` can finish before dispatch.
- * Skipped when min_instances is already 1 (capture warmup).
+ * When min_instances is already 1, submit still waits a short settle so a
+ * capture-warm GPU that is still pulling the image is not dispatched empty.
  */
-export const GPU_COLD_START_WAIT_MS = 40 * 1000;
+export const GPU_COLD_START_WAIT_MS = 70 * 1000;
+export const GPU_WARM_SETTLE_WAIT_MS = 12 * 1000;
 
 /** If capture starts the GPU but no job is submitted, sleep after this. */
 export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;

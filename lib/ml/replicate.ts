@@ -870,8 +870,9 @@ async function fetchReplicateDeployment(
 }
 
 /**
- * Deployments can pin hardware and min_instances. Model versions cannot:
- * POST /v1/predictions has no `hardware` field (Replicate HTTP API).
+ * Deployments can pin hardware, min_instances, and the Cog version.
+ * Every PATCH must resend `version` — omitting it can roll the Deployment
+ * back to an older release when Warm/Sleep only sends min_instances.
  */
 export async function patchReplicateDeployment(options: {
   minInstances?: 0 | 1;
@@ -883,26 +884,34 @@ export async function patchReplicateDeployment(options: {
 }> {
   const deployment = requireReplicateDeploymentRef();
   const sku = getReplicateHardwareSku();
+  const versionId = parseAnnyFitModelVersionRef(getAnnyFitModelVersion()).versionId;
   const current = await fetchReplicateDeployment(deployment);
-  const body: Record<string, unknown> = {};
+  const needsHardware = options.pinHardware !== false && current.hardware !== sku;
+  const needsMinInstances =
+    options.minInstances !== undefined && current.minInstances !== options.minInstances;
+  const needsVersion = current.version?.toLowerCase() !== versionId;
+
+  if (!needsHardware && !needsMinInstances && !needsVersion) {
+    return { status: current, hardwareUpdated: false, minInstancesUpdated: false };
+  }
+
+  const body: Record<string, unknown> = {
+    version: versionId,
+  };
   let hardwareUpdated = false;
   let minInstancesUpdated = false;
 
-  if (options.pinHardware !== false && current.hardware !== sku) {
+  if (needsHardware) {
     body.hardware = sku;
     hardwareUpdated = true;
   }
 
-  if (options.minInstances !== undefined && current.minInstances !== options.minInstances) {
+  if (needsMinInstances && options.minInstances !== undefined) {
     body.min_instances = options.minInstances;
     minInstancesUpdated = true;
     if (options.minInstances === 1) {
       body.max_instances = Math.max(current.maxInstances ?? 0, 1);
     }
-  }
-
-  if (Object.keys(body).length === 0) {
-    return { status: current, hardwareUpdated: false, minInstancesUpdated: false };
   }
 
   const updateResponse = await fetch(deploymentUrl(deployment), {

@@ -1,5 +1,10 @@
 import { setReplicateSessionGpu } from '@/lib/ml/replicate';
-import { GPU_COLD_START_WAIT_MS, sessionGpuShouldSleep } from '@/lib/ml/session-gpu';
+import {
+  GPU_COLD_START_WAIT_MS,
+  GPU_WARM_SETTLE_WAIT_MS,
+  SHOPPER_INFERENCE_DEADLINE_MS,
+  sessionGpuShouldSleep,
+} from '@/lib/ml/session-gpu';
 import { createServiceClient } from '@/lib/supabase/service';
 
 function sleep(ms: number): Promise<void> {
@@ -23,11 +28,9 @@ export async function warmGpuForShopperSubmit(): Promise<void> {
 export async function warmAndWaitForShopperGpu(maxWaitMs = GPU_COLD_START_WAIT_MS): Promise<void> {
   const started = Date.now();
   const result = await setReplicateSessionGpu('warm');
-  if (!result.minInstancesUpdated) {
-    return;
-  }
-
-  const budget = Math.max(0, Math.min(GPU_COLD_START_WAIT_MS, maxWaitMs));
+  const budget = result.minInstancesUpdated
+    ? Math.max(0, Math.min(GPU_COLD_START_WAIT_MS, maxWaitMs))
+    : Math.max(0, Math.min(GPU_WARM_SETTLE_WAIT_MS, maxWaitMs));
   const remaining = budget - (Date.now() - started);
   if (remaining > 0) {
     await sleep(remaining);
@@ -58,10 +61,12 @@ export async function releaseGpuHoldForFitJob(jobId: string): Promise<void> {
  */
 export async function sleepGpuIfNoActiveFitJobs(): Promise<void> {
   const supabase = createServiceClient();
+  const cutoff = new Date(Date.now() - SHOPPER_INFERENCE_DEADLINE_MS).toISOString();
   const { count: activeBodyJobCount, error: activeError } = await supabase
     .from('fit_jobs')
     .select('id', { count: 'exact', head: true })
-    .in('status', ['pending', 'processing']);
+    .in('status', ['pending', 'processing'])
+    .gt('created_at', cutoff);
 
   if (activeError) {
     return;
