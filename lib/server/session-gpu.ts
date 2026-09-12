@@ -26,6 +26,15 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function isMissingGpuSessionTable(error: { message?: string; code?: string } | null | undefined): boolean {
+  const message = error?.message ?? '';
+  return (
+    error?.code === '42P01'
+    || error?.code === 'PGRST205'
+    || /shopper_gpu_sessions/i.test(message)
+  );
+}
+
 async function countActiveBodyJobs(): Promise<number> {
   const supabase = createServiceClient();
   const cutoff = new Date(Date.now() - SHOPPER_INFERENCE_DEADLINE_MS).toISOString();
@@ -151,10 +160,15 @@ export async function claimShopperGpuSession(
   );
 
   if (error) {
-    throw new Error(error.message);
+    if (!isMissingGpuSessionTable(error)) {
+      throw new Error(error.message);
+    }
   }
 
-  const scaled = await scaleShopperDeployment((await readShopperGpuOccupancy()).occupancy);
+  const occupancy = error && isMissingGpuSessionTable(error)
+    ? Math.max(1, (await readShopperGpuOccupancy()).occupancy)
+    : (await readShopperGpuOccupancy()).occupancy;
+  const scaled = await scaleShopperDeployment(occupancy);
   return {
     minInstancesUpdated: scaled.minInstancesUpdated || !refreshingLive,
     created: !refreshingLive,
