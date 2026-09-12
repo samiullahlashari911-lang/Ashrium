@@ -868,10 +868,33 @@ async function fetchReplicateDeployment(
   return readDeploymentStatus(await response.json(), deployment);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function deploymentMeetsRequestedScale(
+  status: ReplicateDeploymentStatus,
+  minInstances: number | undefined,
+  maxInstances: number | undefined,
+): boolean {
+  if (minInstances !== undefined && (status.minInstances ?? -1) < minInstances) {
+    return false;
+  }
+
+  if (maxInstances !== undefined && (status.maxInstances ?? -1) < maxInstances) {
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * Deployments can pin hardware, min_instances, and the Cog version.
  * Every PATCH must resend `version` — omitting it can roll the Deployment
  * back to an older release when Warm/Sleep only sends min_instances.
+ * Concurrent shopper warmups may 409; treat an already-scaled replica as success.
  */
 export async function patchReplicateDeployment(options: {
   minInstances?: number;
@@ -885,62 +908,85 @@ export async function patchReplicateDeployment(options: {
   const deployment = requireReplicateDeploymentRef();
   const sku = getReplicateHardwareSku();
   const versionId = parseAnnyFitModelVersionRef(getAnnyFitModelVersion()).versionId;
-  const current = await fetchReplicateDeployment(deployment);
-  const needsHardware = options.pinHardware !== false && current.hardware !== sku;
   const nextMinInstances = options.minInstances === undefined
     ? undefined
     : Math.max(0, Math.trunc(options.minInstances));
   const nextMaxInstances = options.maxInstances === undefined
     ? undefined
     : Math.max(nextMinInstances ?? 0, Math.trunc(options.maxInstances));
-  const needsMinInstances =
-    nextMinInstances !== undefined && current.minInstances !== nextMinInstances;
-  const needsMaxInstances =
-    nextMaxInstances !== undefined && current.maxInstances !== nextMaxInstances;
-  const needsVersion = current.version?.toLowerCase() !== versionId;
 
-  if (!needsHardware && !needsMinInstances && !needsMaxInstances && !needsVersion) {
-    return { status: current, hardwareUpdated: false, minInstancesUpdated: false };
+  let lastError = 'Replicate deployment PATCH failed.';
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await fetchReplicateDeployment(deployment);
+    const needsHardware = options.pinHardware !== false && current.hardware !== sku;
+    const needsMinInstances =
+      nextMinInstances !== undefined && current.minInstances !== nextMinInstances;
+    const needsMaxInstances =
+      nextMaxInstances !== undefined && current.maxInstances !== nextMaxInstances;
+    const needsVersion = current.version?.toLowerCase() !== versionId;
+
+    if (!needsHardware && !needsMinInstances && !needsMaxInstances && !needsVersion) {
+      return { status: current, hardwareUpdated: false, minInstancesUpdated: false };
+    }
+
+    const body: Record<string, unknown> = {
+      version: versionId,
+    };
+    let hardwareUpdated = false;
+    let minInstancesUpdated = false;
+
+    if (needsHardware) {
+      body.hardware = sku;
+      hardwareUpdated = true;
+    }
+
+    if (nextMaxInstances !== undefined && (needsMaxInstances || needsMinInstances)) {
+      body.max_instances = nextMaxInstances;
+    }
+
+    if (needsMinInstances && nextMinInstances !== undefined) {
+      body.min_instances = nextMinInstances;
+      minInstancesUpdated = true;
+    }
+
+    const updateResponse = await fetch(deploymentUrl(deployment), {
+      method: 'PATCH',
+      headers: replicateAuthHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    if (updateResponse.ok) {
+      return {
+        status: readDeploymentStatus(await updateResponse.json(), deployment),
+        hardwareUpdated,
+        minInstancesUpdated,
+      };
+    }
+
+    lastError = await updateResponse.text();
+    const conflict = updateResponse.status === 409
+      || updateResponse.status === 429
+      || updateResponse.status === 423;
+    const latest = await fetchReplicateDeployment(deployment).catch(() => current);
+    if (
+      conflict
+      && !needsHardware
+      && !needsVersion
+      && deploymentMeetsRequestedScale(latest, nextMinInstances, nextMaxInstances)
+    ) {
+      return { status: latest, hardwareUpdated: false, minInstancesUpdated: false };
+    }
+
+    if (!conflict || attempt === 3) {
+      throw new Error(
+        `Replicate deployment PATCH failed (${updateResponse.status}): ${lastError || updateResponse.statusText}`,
+      );
+    }
+
+    await sleep(200 * (attempt + 1));
   }
 
-  const body: Record<string, unknown> = {
-    version: versionId,
-  };
-  let hardwareUpdated = false;
-  let minInstancesUpdated = false;
-
-  if (needsHardware) {
-    body.hardware = sku;
-    hardwareUpdated = true;
-  }
-
-  if (nextMaxInstances !== undefined && (needsMaxInstances || needsMinInstances)) {
-    body.max_instances = nextMaxInstances;
-  }
-
-  if (needsMinInstances && nextMinInstances !== undefined) {
-    body.min_instances = nextMinInstances;
-    minInstancesUpdated = true;
-  }
-
-  const updateResponse = await fetch(deploymentUrl(deployment), {
-    method: 'PATCH',
-    headers: replicateAuthHeaders(),
-    body: JSON.stringify(body),
-  });
-
-  if (!updateResponse.ok) {
-    const errorBody = await updateResponse.text();
-    throw new Error(
-      `Replicate deployment PATCH failed (${updateResponse.status}): ${errorBody || updateResponse.statusText}`,
-    );
-  }
-
-  return {
-    status: readDeploymentStatus(await updateResponse.json(), deployment),
-    hardwareUpdated,
-    minInstancesUpdated,
-  };
+  throw new Error(lastError);
 }
 
 export async function pinReplicateDeploymentHardware(): Promise<{

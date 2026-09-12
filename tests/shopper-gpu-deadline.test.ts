@@ -48,6 +48,8 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(warmup, /FITTING_ROOM_AT_CAPACITY/);
   assert.match(replicate, /cancelReplicatePrediction/);
   assert.match(replicate, /body\.version = versionId|version: versionId/);
+  assert.match(replicate, /status === 409/);
+  assert.match(replicate, /deploymentMeetsRequestedScale/);
   assert.match(sessionGpu, /SHOPPER_INFERENCE_DEADLINE_MS/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);

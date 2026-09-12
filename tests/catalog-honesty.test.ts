@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { draftsFromShopifyProduct } from '@/lib/catalog/parse-product';
+import { storefrontHostsForCatalog } from '@/lib/catalog/fetch-product-page';
 import { scanSizeChartFromPage } from '@/lib/catalog/scan-product-page';
 import type { ShopifyProduct } from '@/lib/catalog/shopify-admin';
 
@@ -247,5 +248,14 @@ test('children and electronics products are not ingested', () => {
     ],
   };
   assert.equal(draftsFromShopifyProduct(lamp).length, 0);
+});
+
+test('catalog storefront hosts include the Admin shop and the primary domain', () => {
+  const hosts = storefrontHostsForCatalog('2sdyw6-ki.myshopify.com', [
+    'https://legendary1122.myshopify.com',
+    'https://2sdyw6-ki.myshopify.com',
+  ]);
+  assert.ok(hosts.includes('2sdyw6-ki.myshopify.com'));
+  assert.ok(hosts.includes('legendary1122.myshopify.com'));
 });
 

@@ -6,10 +6,15 @@ import { draftsFromShopifyProduct, shouldIngestShopifyProduct } from '@/lib/cata
 import {
   fetchShopifyCatalogProducts,
   fetchShopifyProductBySelector,
+  verifyShopifyAdminCredentials,
   type ShopifyCredentials,
   type ShopifyProduct,
 } from '@/lib/catalog/shopify-admin';
 import { parseShopifyProductSelector } from '@/lib/catalog/shopify-selector';
+import {
+  mergeTenantStorefrontOrigins,
+  shopIdentityStorefrontOrigins,
+} from '@/lib/server/storefront-allowlist';
 import { createServiceClient } from '@/lib/supabase/service';
 import type { CatalogGarmentDraft } from '@/types/garment';
 
@@ -56,9 +61,14 @@ async function persistShopifyProductDrafts(
   tenantId: string,
   credentials: ShopifyCredentials,
   pending: Array<{ product: ShopifyProduct; drafts: CatalogGarmentDraft[] }>,
+  extraOrigins: readonly string[],
 ): Promise<CatalogSyncResult> {
   await mapLimit(pending, STOREFRONT_FETCH_CONCURRENCY, async (item) => {
-    const corpus = await fetchStorefrontProductCorpus(credentials.shopDomain, item.product);
+    const corpus = await fetchStorefrontProductCorpus(
+      credentials.shopDomain,
+      item.product,
+      extraOrigins,
+    );
     if (corpus.length === 0) {
       return;
     }
@@ -104,6 +114,7 @@ async function ingestShopifyProducts(
   tenantId: string,
   credentials: ShopifyCredentials,
   products: readonly ShopifyProduct[],
+  extraOrigins: readonly string[],
 ): Promise<CatalogSyncResult> {
   const pending: Array<{ product: ShopifyProduct; drafts: CatalogGarmentDraft[] }> = products
     .filter(shouldIngestShopifyProduct)
@@ -113,16 +124,49 @@ async function ingestShopifyProducts(
     }));
 
   const skipped = products.length - pending.length;
-  const result = await persistShopifyProductDrafts(tenantId, credentials, pending);
+  const result = await persistShopifyProductDrafts(
+    tenantId,
+    credentials,
+    pending,
+    extraOrigins,
+  );
   return { ...result, skipped: result.skipped + skipped };
+}
+
+async function prepareCatalogStorefront(
+  tenantId: string,
+  credentials: ShopifyCredentials,
+): Promise<string[]> {
+  try {
+    const identity = await verifyShopifyAdminCredentials(credentials);
+    await mergeTenantStorefrontOrigins(
+      tenantId,
+      shopIdentityStorefrontOrigins({
+        myshopifyDomain: identity.myshopifyDomain,
+        primaryDomainUrl: identity.primaryDomainUrl,
+      }),
+    );
+  } catch {
+    // Charts can still ingest; merchant can add origins in Settings.
+  }
+
+  const supabase = createServiceClient();
+  const { data: tenant } = await supabase
+    .from('tenants')
+    .select('allowed_domains')
+    .eq('id', tenantId)
+    .maybeSingle();
+
+  return tenant?.allowed_domains ?? [];
 }
 
 export async function syncShopifyCatalog(
   tenantId: string,
   credentials: ShopifyCredentials,
 ): Promise<CatalogSyncResult> {
+  const extraOrigins = await prepareCatalogStorefront(tenantId, credentials);
   const products = await fetchShopifyCatalogProducts(credentials);
-  return ingestShopifyProducts(tenantId, credentials, products);
+  return ingestShopifyProducts(tenantId, credentials, products, extraOrigins);
 }
 
 export async function syncShopifyProduct(
@@ -140,5 +184,6 @@ export async function syncShopifyProduct(
     throw new Error('No matching Shopify product was found for that URL, ID, or SKU.');
   }
 
-  return ingestShopifyProducts(tenantId, credentials, [product]);
+  const extraOrigins = await prepareCatalogStorefront(tenantId, credentials);
+  return ingestShopifyProducts(tenantId, credentials, [product], extraOrigins);
 }

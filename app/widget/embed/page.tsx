@@ -8,6 +8,7 @@ import {
   toStorefrontGarment,
 } from '@/lib/supabase/garment-profiles';
 import { createServiceClient } from '@/lib/supabase/service';
+import { trustedStorefrontOrigins } from '@/lib/server/storefront-allowlist';
 import { verifyWidgetEmbedToken } from '@/lib/server/widget-embed';
 import { isWidgetEmbedParentAuthorized } from '@/lib/widget/embed-origin';
 import type { StorefrontGarment } from '@/types/garment';
@@ -29,15 +30,6 @@ function normalizeOrigin(value: string): string | null {
   } catch {
     return null;
   }
-}
-
-function merchantDomainOrigin(domain: string): string | null {
-  const trimmedDomain = domain.trim();
-  const withProtocol = /^https?:\/\//i.test(trimmedDomain)
-    ? trimmedDomain
-    : `https://${trimmedDomain}`;
-
-  return normalizeOrigin(withProtocol);
 }
 
 const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
@@ -115,12 +107,19 @@ export default async function WidgetEmbedPage({
     return renderEmbedError('Widget merchant configuration is unavailable.');
   }
 
-  const configuredOrigins = tenant.allowed_domains
-    .map(merchantDomainOrigin)
-    .filter((origin): origin is string => origin !== null);
-  const trustedOrigins = configuredOrigins.length > 0
-    ? configuredOrigins
-    : [merchantDomainOrigin(merchant.domain)].filter((origin): origin is string => origin !== null);
+  const { data: integration } = await serviceClient
+    .from('tenant_integrations')
+    .select('shopify_shop_domain')
+    .eq('tenant_id', claims.tenantId)
+    .eq('provider', 'shopify')
+    .eq('is_active', true)
+    .maybeSingle();
+
+  const trustedOrigins = trustedStorefrontOrigins({
+    allowedDomains: tenant.allowed_domains,
+    merchantDomain: merchant.domain,
+    shopifyShopDomain: integration?.shopify_shop_domain,
+  });
   const isDevelopment = process.env.NODE_ENV === 'development';
   const requestHost = requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host');
   const appOrigin = requestHost ? normalizeOrigin(`https://${requestHost}`) : null;

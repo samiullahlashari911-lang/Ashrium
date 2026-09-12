@@ -1,4 +1,8 @@
-import { mergeStorefrontOrigins, merchantDomainFromOrigins } from '@/lib/onboarding';
+import {
+  mergeStorefrontOrigins,
+  merchantDomainFromOrigins,
+  parseStorefrontOriginList,
+} from '@/lib/onboarding';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export function shopIdentityStorefrontOrigins(input: {
@@ -11,6 +15,31 @@ export function shopIdentityStorefrontOrigins(input: {
   }
 
   return mergeStorefrontOrigins([], raw);
+}
+
+export function configuredEnvStorefrontOrigins(): string[] {
+  return parseStorefrontOriginList(
+    (process.env.ASHRIUM_ALLOWED_ORIGINS ?? '').split(','),
+  ).origins;
+}
+
+export function trustedStorefrontOrigins(input: {
+  allowedDomains?: readonly string[] | null;
+  merchantDomain?: string | null;
+  shopifyShopDomain?: string | null;
+  extraOrigins?: readonly string[] | null;
+}): string[] {
+  const shopHost = input.shopifyShopDomain
+    ?.replace(/^https?:\/\//i, '')
+    .split('/')[0]
+    ?.toLowerCase();
+
+  return mergeStorefrontOrigins([], [
+    ...(input.allowedDomains ?? []),
+    input.merchantDomain ?? '',
+    shopHost ? `https://${shopHost}` : '',
+    ...(input.extraOrigins ?? []),
+  ]);
 }
 
 export async function mergeTenantStorefrontOrigins(
@@ -44,4 +73,65 @@ export async function mergeTenantStorefrontOrigins(
   }
 
   await supabase.from('merchants').update({ domain: merchantDomain }).eq('id', tenantId);
+}
+
+export async function findActiveTenantIdForStorefrontOrigin(
+  origin: string,
+): Promise<string | null> {
+  const supabase = createServiceClient();
+  const { data: allowlisted } = await supabase
+    .from('tenants')
+    .select('id')
+    .eq('status', 'active')
+    .contains('allowed_domains', [origin])
+    .limit(1);
+
+  const allowlistedId = allowlisted?.[0]?.id;
+  if (allowlistedId) {
+    return allowlistedId;
+  }
+
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+
+  const { data: integration } = await supabase
+    .from('tenant_integrations')
+    .select('tenant_id')
+    .eq('provider', 'shopify')
+    .eq('is_active', true)
+    .eq('shopify_shop_domain', hostname)
+    .limit(1);
+
+  const integrationTenantId = integration?.[0]?.tenant_id;
+  if (integrationTenantId) {
+    const { data: tenant } = await supabase
+      .from('tenants')
+      .select('id')
+      .eq('id', integrationTenantId)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (tenant?.id) {
+      return tenant.id;
+    }
+  }
+
+  if (!configuredEnvStorefrontOrigins().includes(origin)) {
+    return null;
+  }
+
+  const { data: activeTenants } = await supabase
+    .from('tenants')
+    .select('id')
+    .eq('status', 'active')
+    .limit(2);
+
+  if (!activeTenants || activeTenants.length !== 1) {
+    return null;
+  }
+
+  return activeTenants[0]?.id ?? null;
 }

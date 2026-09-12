@@ -122,6 +122,12 @@ async function writeSizeVariants(
     );
 
     if (error) {
+      const unpublishedGirthRejected = /null value|not-null|check constraint|22P02/i.test(
+        error.message,
+      );
+      if (unpublishedGirthRejected) {
+        continue;
+      }
       throw new Error(error.message);
     }
   }

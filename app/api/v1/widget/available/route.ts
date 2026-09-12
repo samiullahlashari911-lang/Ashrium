@@ -1,6 +1,7 @@
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { normalizeOrigin, readClientIp } from '@/lib/server/request-origin';
+import { findActiveTenantIdForStorefrontOrigin } from '@/lib/server/storefront-allowlist';
 import { resolveWidgetGarment } from '@/lib/supabase/garment-profiles';
 import { createServiceClient } from '@/lib/supabase/service';
 
@@ -30,17 +31,13 @@ export async function POST(request: Request): Promise<Response> {
     return jsonWithCors({ available: false, code: 'UNAUTHORIZED_DOMAIN' }, 403);
   }
 
-  const serviceClient = createServiceClient();
-  const { data: tenant, error } = await serviceClient
-    .from('tenants')
-    .select('id')
-    .eq('status', 'active')
-    .contains('allowed_domains', [origin])
-    .maybeSingle();
-
-  if (error || !tenant) {
+  const tenantId = await findActiveTenantIdForStorefrontOrigin(origin);
+  if (!tenantId) {
     return jsonWithCors({ available: false, code: 'UNAUTHORIZED_DOMAIN' }, 403);
   }
+
+  const serviceClient = createServiceClient();
+  const tenant = { id: tenantId };
 
   const clientIp = readClientIp(request);
   const limit = await consumeRateLimit(

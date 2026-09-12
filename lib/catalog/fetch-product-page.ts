@@ -3,12 +3,47 @@ import type { ShopifyProduct } from '@/lib/catalog/shopify-admin';
 const FETCH_TIMEOUT_MS = 12_000;
 const HTML_BYTE_CAP = 1_500_000;
 
+function shopHostname(shopDomain: string): string {
+  return shopDomain.replace(/^https?:\/\//i, '').split('/')[0]?.toLowerCase() ?? '';
+}
+
+export function storefrontHostsForCatalog(
+  shopDomain: string,
+  extraOrigins: readonly string[] = [],
+): string[] {
+  const hosts = new Set<string>();
+  const shopHost = shopHostname(shopDomain);
+  if (shopHost) {
+    hosts.add(shopHost);
+  }
+
+  for (const origin of extraOrigins) {
+    const trimmed = origin.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    try {
+      const hostname = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`)
+        .hostname
+        .toLowerCase();
+      if (hostname) {
+        hosts.add(hostname);
+      }
+    } catch {
+      // Skip malformed allowlist rows.
+    }
+  }
+
+  return [...hosts];
+}
+
 export function storefrontProductUrl(shopDomain: string, product: ShopifyProduct): string {
   if (product.onlineStoreUrl.startsWith('https://')) {
     return product.onlineStoreUrl;
   }
 
-  const host = shopDomain.replace(/^https?:\/\//i, '').split('/')[0]?.toLowerCase() ?? '';
+  const host = shopHostname(shopDomain);
   if (!host || !product.handle) {
     return '';
   }
@@ -17,7 +52,7 @@ export function storefrontProductUrl(shopDomain: string, product: ShopifyProduct
 }
 
 export function storefrontProductJsUrl(shopDomain: string, product: ShopifyProduct): string {
-  const host = shopDomain.replace(/^https?:\/\//i, '').split('/')[0]?.toLowerCase() ?? '';
+  const host = shopHostname(shopDomain);
   if (!host || !product.handle) {
     return '';
   }
@@ -79,10 +114,28 @@ export async function fetchStorefrontProductJsHtml(url: string): Promise<string>
 export async function fetchStorefrontProductCorpus(
   shopDomain: string,
   product: ShopifyProduct,
+  extraOrigins: readonly string[] = [],
 ): Promise<string> {
-  const [html, jsHtml] = await Promise.all([
-    fetchStorefrontProductHtml(storefrontProductUrl(shopDomain, product)),
-    fetchStorefrontProductJsHtml(storefrontProductJsUrl(shopDomain, product)),
+  const htmlUrls = new Set<string>();
+  const jsUrls = new Set<string>();
+  const canonicalHtml = storefrontProductUrl(shopDomain, product);
+  if (canonicalHtml) {
+    htmlUrls.add(canonicalHtml);
+  }
+
+  for (const host of storefrontHostsForCatalog(shopDomain, extraOrigins)) {
+    if (!product.handle) {
+      continue;
+    }
+
+    htmlUrls.add(`https://${host}/products/${encodeURIComponent(product.handle)}`);
+    jsUrls.add(`https://${host}/products/${encodeURIComponent(product.handle)}.js`);
+  }
+
+  const [htmlChunks, jsChunks] = await Promise.all([
+    Promise.all([...htmlUrls].map((url) => fetchStorefrontProductHtml(url))),
+    Promise.all([...jsUrls].map((url) => fetchStorefrontProductJsHtml(url))),
   ]);
-  return [jsHtml, html].filter((chunk) => chunk.length > 0).join('\n');
+
+  return [...jsChunks, ...htmlChunks].filter((chunk) => chunk.length > 0).join('\n');
 }
