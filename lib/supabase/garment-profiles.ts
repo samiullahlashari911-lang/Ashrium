@@ -172,6 +172,57 @@ export async function fetchGarmentBySkuWithVariants(
   return { garment, variants: variants ?? [] };
 }
 
+export async function resolveWidgetGarment(
+  supabase: SupabaseClient<Database, 'public'>,
+  tenantId: string,
+  input: { handle?: string; sku?: string },
+): Promise<{ garment: GarmentCadProfileRow; variants: GarmentSizeVariantRow[] } | null> {
+  const handle = input.handle?.trim().toLowerCase();
+  const sku = input.sku?.trim();
+
+  if (sku) {
+    const bySku = await fetchGarmentBySkuWithVariants(supabase, tenantId, sku);
+    if (bySku) {
+      return bySku;
+    }
+  }
+
+  if (!handle) {
+    return null;
+  }
+
+  const profiles = await fetchTenantGarmentProfiles(supabase, tenantId);
+  const matches = profiles.filter((profile) => {
+    const skuValue = profile.sku.trim().toLowerCase();
+    return skuValue === handle || skuValue.startsWith(`${handle}-`);
+  });
+  if (matches.length === 0) {
+    return null;
+  }
+
+  const withVariants = await Promise.all(
+    matches.map(async (garment) => {
+      const { data } = await supabase
+        .from('garment_size_variants')
+        .select()
+        .eq('tenant_id', tenantId)
+        .eq('garment_id', garment.id);
+      return { garment, variants: data ?? [] };
+    }),
+  );
+
+  if (sku) {
+    const withExternal = withVariants.find((entry) =>
+      entry.variants.some((variant) => variant.external_sku === sku),
+    );
+    if (withExternal) {
+      return withExternal;
+    }
+  }
+
+  return withVariants[0] ?? null;
+}
+
 export async function fetchTenantGarmentsWithVariants(
   supabase: SupabaseClient<Database, 'public'>,
   tenantId: string,
@@ -196,10 +247,10 @@ export function toStorefrontSizeVariant(row: GarmentSizeVariantRow): StorefrontS
   return {
     id: row.id,
     sizeCode: row.size_code,
-    chestCm: row.chest_cm,
-    waistCm: row.waist_cm,
-    hipCm: row.hip_cm,
-    lengthCm: row.length_cm,
+    chestCm: row.chest_cm ?? 0,
+    waistCm: row.waist_cm ?? 0,
+    hipCm: row.hip_cm ?? 0,
+    lengthCm: row.length_cm ?? 0,
   };
 }
 

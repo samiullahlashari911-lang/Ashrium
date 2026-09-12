@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
+import { configureBiometricsBucketCors } from '@/lib/server/biometrics-cors';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
@@ -27,14 +28,16 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
   }
 
+  void configureBiometricsBucketCors();
+
   const jobId = randomUUID();
   const frontPath = `${tenantId}/${jobId}/front.webp`;
   const sidePath = `${tenantId}/${jobId}/side.webp`;
   const serviceClient = createServiceClient();
 
   const [frontUpload, sideUpload] = await Promise.all([
-    serviceClient.storage.from('biometrics').createSignedUploadUrl(frontPath),
-    serviceClient.storage.from('biometrics').createSignedUploadUrl(sidePath),
+    serviceClient.storage.from('biometrics').createSignedUploadUrl(frontPath, { upsert: true }),
+    serviceClient.storage.from('biometrics').createSignedUploadUrl(sidePath, { upsert: true }),
   ]);
 
   if (frontUpload.error || !frontUpload.data || sideUpload.error || !sideUpload.data) {

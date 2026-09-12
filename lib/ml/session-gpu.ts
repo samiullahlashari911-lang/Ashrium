@@ -24,6 +24,25 @@ export const GPU_WARM_SETTLE_WAIT_MS = 12 * 1000;
 /** If capture starts the GPU but no job is submitted, sleep after this. */
 export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;
 
+/** Concurrent gpu-a100-large replicas. Operator env ASHRIUM_GPU_MAX_INSTANCES. */
+export const DEFAULT_SHOPPER_GPU_MAX_INSTANCES = 3;
+export const SHOPPER_GPU_MAX_INSTANCES_CEILING = 8;
+
+export const FITTING_ROOM_AT_CAPACITY_MESSAGE =
+  'The fitting room is at capacity. Please try again in a minute.';
+
+export function readShopperGpuMaxInstances(raw = process.env.ASHRIUM_GPU_MAX_INSTANCES): number {
+  const parsed = Number.parseInt(raw?.trim() ?? '', 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SHOPPER_GPU_MAX_INSTANCES;
+  }
+
+  return Math.min(
+    SHOPPER_GPU_MAX_INSTANCES_CEILING,
+    Math.max(1, Math.trunc(parsed)),
+  );
+}
+
 /** Replicate Nvidia A100 80GB list price used in operator copy. */
 export const REPLICATE_A100_USD_PER_SEC = 0.0014;
 
@@ -52,6 +71,18 @@ export function gpuHoldMsUntilDeadline(createdAt: string, now = Date.now()): num
 export function sessionGpuShouldSleep(input: {
   activeBodyJobCount: number;
   activeDrapeHoldCount: number;
+  warmupLeaseCount?: number;
 }): boolean {
-  return input.activeBodyJobCount <= 0 && input.activeDrapeHoldCount <= 0;
+  return (
+    input.activeBodyJobCount <= 0
+    && input.activeDrapeHoldCount <= 0
+    && (input.warmupLeaseCount ?? 0) <= 0
+  );
+}
+
+export function shopperGpuOccupancy(input: {
+  activeBodyJobCount: number;
+  warmupLeaseCount: number;
+}): number {
+  return Math.max(0, input.activeBodyJobCount) + Math.max(0, input.warmupLeaseCount);
 }

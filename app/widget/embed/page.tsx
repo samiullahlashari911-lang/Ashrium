@@ -4,6 +4,7 @@ import { StorefrontViewport } from '@/components/widget/StorefrontViewport';
 import {
   fetchTenantGarmentProfiles,
   fetchTenantSizeVariants,
+  resolveWidgetGarment,
   toStorefrontGarment,
 } from '@/lib/supabase/garment-profiles';
 import { createServiceClient } from '@/lib/supabase/service';
@@ -15,6 +16,7 @@ interface WidgetEmbedPageProps {
   searchParams: Promise<{
     parent_origin?: string;
     sku?: string;
+    handle?: string;
     token?: string;
     allow_gallery?: string;
   }>;
@@ -141,27 +143,44 @@ export default async function WidgetEmbedPage({
     fetchTenantGarmentProfiles(serviceClient, claims.tenantId),
     fetchTenantSizeVariants(serviceClient, claims.tenantId),
   ]);
-  const scopedGarments = claims.sku
-    ? allGarments.filter((garment) => garment.sku === claims.sku)
-    : allGarments;
+  const requestedHandle = params.handle?.trim();
+  const requestedSku = claims.sku ?? params.sku?.trim();
+  const resolved = requestedHandle || requestedSku
+    ? await resolveWidgetGarment(serviceClient, claims.tenantId, {
+      handle: requestedHandle,
+      sku: requestedSku,
+    })
+    : null;
+
+  if ((requestedHandle || requestedSku) && !resolved) {
+    return renderEmbedError('Try On is not available for this item.');
+  }
+
+  const scopedGarments = resolved
+    ? [resolved.garment]
+    : claims.sku
+      ? allGarments.filter((garment) => garment.sku === claims.sku)
+      : allGarments;
   const configuredGarments = scopedGarments.map((garment) =>
     toStorefrontGarment(
       garment,
-      allVariants.filter((variant) => variant.garment_id === garment.id),
+      resolved
+        ? resolved.variants
+        : allVariants.filter((variant) => variant.garment_id === garment.id),
     ),
   );
   const garments = configuredGarments.length > 0
     ? configuredGarments
-    : isDevelopment && !claims.sku
+    : isDevelopment && !claims.sku && !requestedHandle && !requestedSku
       ? DEVELOPMENT_SANDBOX_GARMENTS
       : [];
-  const requestedSku = claims.sku ?? params.sku?.trim();
-  const initialSku = requestedSku && garments.some((garment) => garment.sku === requestedSku)
-    ? requestedSku
-    : garments[0]?.sku;
+  const initialSku = resolved?.garment.sku
+    ?? (requestedSku && garments.some((garment) => garment.sku === requestedSku)
+      ? requestedSku
+      : garments[0]?.sku);
 
   if (!initialSku) {
-    return renderEmbedError('No CAD garment profile is available for this widget.');
+    return renderEmbedError('Try On is not available for this item.');
   }
 
   return (

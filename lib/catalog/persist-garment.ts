@@ -1,3 +1,5 @@
+import { after } from 'next/server';
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { patternProductText, shouldDispatchPattern } from '@/lib/catalog/pattern-ingest';
@@ -18,6 +20,16 @@ function compositionJson(draft: CatalogGarmentDraft): Json | null {
   }
 
   return { ...draft.composition };
+}
+
+function scheduleFollowUp(work: () => Promise<void>): void {
+  try {
+    after(() => {
+      void work();
+    });
+  } catch {
+    // Charts are already saved; GarmentCode can retry on the next sync.
+  }
 }
 
 async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
@@ -41,10 +53,10 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
       productText: patternProductText(draft),
       sizeVariants: draft.sizeVariants.map((variant) => ({
         sizeCode: variant.sizeCode,
-        chestCm: variant.chestCm,
-        waistCm: variant.waistCm,
-        hipCm: variant.hipCm,
-        lengthCm: variant.lengthCm,
+        chestCm: variant.chestCm ?? 0,
+        waistCm: variant.waistCm ?? 0,
+        hipCm: variant.hipCm ?? 0,
+        lengthCm: variant.lengthCm ?? 0,
       })),
     });
   } catch (error) {
@@ -64,15 +76,122 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
   return { meshes: result.meshes, approximateFit: draft.approximateFit };
 }
 
+async function writeSizeVariants(
+  supabase: SupabaseClient<Database, 'public'>,
+  tenantId: string,
+  garmentId: string,
+  draft: CatalogGarmentDraft,
+  restPaths: Map<string, string>,
+): Promise<void> {
+  const { data: existingVariants, error: existingError } = await supabase
+    .from('garment_size_variants')
+    .select('id, size_code')
+    .eq('tenant_id', tenantId)
+    .eq('garment_id', garmentId);
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const keepCodes = new Set(draft.sizeVariants.map((variant) => variant.sizeCode));
+  const extraIds = (existingVariants ?? [])
+    .filter((row) => !keepCodes.has(row.size_code))
+    .map((row) => row.id);
+
+  if (extraIds.length > 0) {
+    const { error } = await supabase.from('garment_size_variants').delete().in('id', extraIds);
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  for (const variant of draft.sizeVariants) {
+    const { error } = await supabase.from('garment_size_variants').upsert(
+      {
+        tenant_id: tenantId,
+        garment_id: garmentId,
+        size_code: variant.sizeCode,
+        chest_cm: variant.chestCm,
+        waist_cm: variant.waistCm,
+        hip_cm: variant.hipCm,
+        length_cm: variant.lengthCm,
+        rest_length_path: restPaths.get(variant.sizeCode) ?? null,
+        external_sku: variant.externalSku,
+      },
+      { onConflict: 'garment_id,size_code' },
+    );
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+}
+
+async function attachGarmentCodePattern(
+  supabase: SupabaseClient<Database, 'public'>,
+  tenantId: string,
+  garmentId: string,
+  draft: CatalogGarmentDraft,
+): Promise<void> {
+  const graded = await gradeWithGarmentCode(draft);
+  const restPaths = new Map<string, string>();
+  for (const mesh of graded.meshes) {
+    const path = await writeRestLengthMesh(tenantId, garmentId, mesh);
+    restPaths.set(mesh.sizeCode, path);
+  }
+
+  if (restPaths.size === 0 && !graded.approximateFit) {
+    return;
+  }
+
+  if (graded.approximateFit) {
+    await supabase
+      .from('garment_cad_profiles')
+      .update({ approximate_fit: true })
+      .eq('id', garmentId)
+      .eq('tenant_id', tenantId);
+  }
+
+  for (const variant of draft.sizeVariants) {
+    const path = restPaths.get(variant.sizeCode);
+    if (!path) {
+      continue;
+    }
+
+    await supabase
+      .from('garment_size_variants')
+      .update({ rest_length_path: path })
+      .eq('tenant_id', tenantId)
+      .eq('garment_id', garmentId)
+      .eq('size_code', variant.sizeCode);
+  }
+}
+
 export async function persistCatalogGarment(
   supabase: SupabaseClient<Database, 'public'>,
   tenantId: string,
   draft: CatalogGarmentDraft,
   profileId?: string,
 ): Promise<{ garmentId: string; created: boolean }> {
-  const graded = await gradeWithGarmentCode(draft);
+  if (!profileId) {
+    const { data: existing } = await supabase
+      .from('garment_cad_profiles')
+      .select('id, mode')
+      .eq('tenant_id', tenantId)
+      .eq('sku', draft.sku)
+      .maybeSingle();
+
+    if (
+      existing
+      && (existing.mode === 'A' || existing.mode === 'B')
+      && draft.mode === 'C'
+    ) {
+      return { garmentId: existing.id, created: false };
+    }
+  }
+
   const printQa = await evaluatePrintAlbedoUrl(draft.cadPatternUrl);
-  const approximateFit = draft.approximateFit || graded.approximateFit || !printQa.passed;
+  const approximateFit = draft.approximateFit || !printQa.passed;
 
   const profilePayload: GarmentCadProfileInsert = {
     tenant_id: tenantId,
@@ -132,53 +251,21 @@ export async function persistCatalogGarment(
     throw new Error('Unable to resolve garment profile id.');
   }
 
-  const restPaths = new Map<string, string>();
-  for (const mesh of graded.meshes) {
-    const path = await writeRestLengthMesh(tenantId, garmentId, mesh);
-    restPaths.set(mesh.sizeCode, path);
-  }
+  await writeSizeVariants(supabase, tenantId, garmentId, draft, new Map());
 
-  const { data: existingVariants, error: existingError } = await supabase
-    .from('garment_size_variants')
-    .select('id, size_code')
-    .eq('tenant_id', tenantId)
-    .eq('garment_id', garmentId);
-
-  if (existingError) {
-    throw new Error(existingError.message);
-  }
-
-  const keepCodes = new Set(draft.sizeVariants.map((variant) => variant.sizeCode));
-  const extraIds = (existingVariants ?? [])
-    .filter((row) => !keepCodes.has(row.size_code))
-    .map((row) => row.id);
-
-  if (extraIds.length > 0) {
-    const { error } = await supabase.from('garment_size_variants').delete().in('id', extraIds);
-    if (error) {
-      throw new Error(error.message);
-    }
-  }
-
-  for (const variant of draft.sizeVariants) {
-    const { error } = await supabase.from('garment_size_variants').upsert(
-      {
-        tenant_id: tenantId,
-        garment_id: garmentId,
-        size_code: variant.sizeCode,
-        chest_cm: variant.chestCm,
-        waist_cm: variant.waistCm,
-        hip_cm: variant.hipCm,
-        length_cm: variant.lengthCm,
-        rest_length_path: restPaths.get(variant.sizeCode) ?? null,
-        external_sku: variant.externalSku,
-      },
-      { onConflict: 'garment_id,size_code' },
-    );
-
-    if (error) {
-      throw new Error(error.message);
-    }
+  if (shouldDispatchPattern(draft)) {
+    const id = garmentId;
+    scheduleFollowUp(async () => {
+      try {
+        await attachGarmentCodePattern(supabase, tenantId, id, draft);
+      } catch {
+        await supabase
+          .from('garment_cad_profiles')
+          .update({ approximate_fit: true })
+          .eq('id', id)
+          .eq('tenant_id', tenantId);
+      }
+    });
   }
 
   return { garmentId, created };

@@ -182,7 +182,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const iframeUrl = `${requestUrl.origin}/widget/vfr?${new URLSearchParams({
     token,
-    v: 'capture-ux-2',
+    v: 'launcher-1',
   }).toString()}`;
   const script = buildWidgetScript({ iframeUrl });
 

@@ -136,8 +136,8 @@ export function findMhrHullMesh(root: THREE.Object3D): THREE.Mesh | null {
 }
 
 /**
- * Writes Cog `vertex_positions` onto the shipped MHR hull. Does not height-scale
- * a dummy mesh. Missing vertices leave the official rest-pose LOD 1 in place.
+ * Writes Cog `vertex_positions` onto the shipped MHR hull. Missing vertices are
+ * an error — never show the rest-pose dummy as if it were this shopper.
  */
 export function applyMhrVertexPositions(
   root: THREE.Object3D,
@@ -155,7 +155,7 @@ export function applyMhrVertexPositions(
   }
 
   if (!vector.vertex_positions) {
-    return;
+    throw new Error('MHR vertex_positions are required. Refusing a rest-pose hull.');
   }
 
   const position = mesh.geometry.getAttribute('position');

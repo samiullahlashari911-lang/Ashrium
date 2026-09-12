@@ -62,6 +62,20 @@ test('pattern dispatch skips unsupported styles and empty charts', () => {
   assert.equal(shouldDispatchPattern(teeDraft()), true);
   assert.equal(shouldDispatchPattern(teeDraft({ name: 'Pullover Hoodie', category: 'outerwear' })), false);
   assert.equal(shouldDispatchPattern(teeDraft({ sizeVariants: [] })), false);
+  assert.equal(
+    shouldDispatchPattern(teeDraft({
+      sizeVariants: [{
+        sizeCode: 'M',
+        chestCm: 104,
+        waistCm: null,
+        hipCm: null,
+        lengthCm: 70,
+        externalSku: null,
+        measurementsFromSource: true,
+      }],
+    })),
+    false,
+  );
 });
 
 test('parsePatternPredictionOutput accepts GarmentCode rest-length meshes and rejects bad status', () => {

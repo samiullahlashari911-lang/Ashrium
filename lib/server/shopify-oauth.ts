@@ -384,6 +384,17 @@ export async function completeShopifyOAuthConnection(input: {
     tokens,
   });
 
+  const { mergeTenantStorefrontOrigins, shopIdentityStorefrontOrigins } = await import(
+    '@/lib/server/storefront-allowlist'
+  );
+  await mergeTenantStorefrontOrigins(
+    input.tenantId,
+    shopIdentityStorefrontOrigins({
+      myshopifyDomain: identity.myshopifyDomain,
+      primaryDomainUrl: identity.primaryDomainUrl,
+    }),
+  );
+
   return { shopDomain: input.shopDomain };
 }
 

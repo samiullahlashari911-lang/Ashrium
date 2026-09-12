@@ -17,7 +17,10 @@ export interface AnnyFitDispatchInput {
   heightCm: number;
   sex: CaptureSex;
   weightKg?: number;
+  gpuSessionKey?: string;
 }
+
+export type DualUploadProgress = 'urls' | 'front' | 'side' | 'proxy' | 'dispatch';
 
 function authHeaders(embedToken: string | null, json = false): HeadersInit {
   const headers: Record<string, string> = {};
@@ -51,7 +54,73 @@ async function readErrorCode(response: Response): Promise<string> {
   return response.statusText || `HTTP_${response.status}`;
 }
 
-export async function uploadDualHeadlessWebps(
+async function putWebpToSignedUrl(signedUrl: string, blob: Blob): Promise<void> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 60_000);
+  try {
+    const response = await fetch(signedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/webp' },
+      body: blob,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Signed PUT failed (${response.status}).`);
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Biometric upload timed out. Check the network and try again.');
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
+async function mintSignedUploadTargets(
+  embedToken: string | null,
+): Promise<{
+  jobId: string;
+  front: { filePath: string; uploadUrl: string };
+  side: { filePath: string; uploadUrl: string };
+} | null> {
+  const response = await fetch('/api/v1/biometrics/upload-url', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: authHeaders(embedToken, true),
+  });
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload: unknown = await response.json();
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+
+  const record = payload as {
+    job_id?: unknown;
+    front?: { upload_url?: unknown; file_path?: unknown };
+    side?: { upload_url?: unknown; file_path?: unknown };
+  };
+  if (
+    typeof record.job_id !== 'string'
+    || typeof record.front?.upload_url !== 'string'
+    || typeof record.front.file_path !== 'string'
+    || typeof record.side?.upload_url !== 'string'
+    || typeof record.side.file_path !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    jobId: record.job_id,
+    front: { filePath: record.front.file_path, uploadUrl: record.front.upload_url },
+    side: { filePath: record.side.file_path, uploadUrl: record.side.upload_url },
+  };
+}
+
+async function uploadDualHeadlessWebpsViaProxy(
   embedToken: string | null,
   frontBlob: Blob,
   sideBlob: Blob,
@@ -61,7 +130,7 @@ export async function uploadDualHeadlessWebps(
   form.append('side', new File([sideBlob], 'side.webp', { type: 'image/webp' }));
 
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), 45_000);
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 60_000);
 
   let response: Response;
   try {
@@ -111,15 +180,47 @@ export async function uploadDualHeadlessWebps(
   };
 }
 
-export async function warmShopperGpu(embedToken: string | null): Promise<void> {
-  try {
-    await fetch('/api/v1/hmr/warmup', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: authHeaders(embedToken, true),
-    });
-  } catch {
-    // Submit still warms; capture continues without blocking the camera.
+export async function uploadDualHeadlessWebps(
+  embedToken: string | null,
+  frontBlob: Blob,
+  sideBlob: Blob,
+  onProgress?: (stage: DualUploadProgress) => void,
+): Promise<DualUploadTargets> {
+  onProgress?.('urls');
+  const signed = await mintSignedUploadTargets(embedToken);
+  if (signed) {
+    try {
+      onProgress?.('front');
+      await Promise.all([
+        putWebpToSignedUrl(signed.front.uploadUrl, frontBlob),
+        putWebpToSignedUrl(signed.side.uploadUrl, sideBlob),
+      ]);
+      return {
+        jobId: signed.jobId,
+        front: { filePath: signed.front.filePath },
+        side: { filePath: signed.side.filePath },
+      };
+    } catch {
+      // CORS or network on the bucket — fall through to the Vercel proxy.
+    }
+  }
+
+  onProgress?.('proxy');
+  return uploadDualHeadlessWebpsViaProxy(embedToken, frontBlob, sideBlob);
+}
+
+export async function warmShopperGpu(
+  embedToken: string | null,
+  sessionKey: string,
+): Promise<void> {
+  const response = await fetch('/api/v1/hmr/warmup', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: authHeaders(embedToken, true),
+    body: JSON.stringify({ sessionKey }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorCode(response));
   }
 }
 
@@ -214,16 +315,25 @@ export async function uploadDualWebpAndDispatch(
     heightCm: number;
     sex: CaptureSex;
     weightKg?: number;
+    gpuSessionKey?: string;
+    onProgress?: (stage: DualUploadProgress) => void;
   },
 ): Promise<{ jobId: string }> {
-  const targets = await uploadDualHeadlessWebps(embedToken, input.frontBlob, input.sideBlob);
+  const targets = await uploadDualHeadlessWebps(
+    embedToken,
+    input.frontBlob,
+    input.sideBlob,
+    input.onProgress,
+  );
 
+  input.onProgress?.('dispatch');
   const dispatch = await dispatchAnnyFitJob(embedToken, {
     frontImagePath: targets.front.filePath,
     sideImagePath: targets.side.filePath,
     heightCm: input.heightCm,
     sex: input.sex,
     weightKg: input.weightKg,
+    gpuSessionKey: input.gpuSessionKey,
   });
 
   return { jobId: dispatch.jobId };

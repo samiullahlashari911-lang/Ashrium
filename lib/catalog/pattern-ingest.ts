@@ -13,6 +13,21 @@ export function shouldDispatchPattern(draft: CatalogGarmentDraft): boolean {
     return false;
   }
 
+  const allGirthsPublished = draft.sizeVariants.every(
+    (variant) =>
+      typeof variant.chestCm === 'number'
+      && variant.chestCm > 0
+      && typeof variant.waistCm === 'number'
+      && variant.waistCm > 0
+      && typeof variant.hipCm === 'number'
+      && variant.hipCm > 0
+      && typeof variant.lengthCm === 'number'
+      && variant.lengthCm > 0,
+  );
+  if (!allGirthsPublished) {
+    return false;
+  }
+
   const reason = detectUnsupportedGeometry({
     category: draft.category,
     title: draft.name,

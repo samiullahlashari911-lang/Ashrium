@@ -17,7 +17,9 @@ import {
   GPU_HOLD_DURING_DRAPE_MS,
   REPLICATE_A100_USD_PER_SEC,
   SESSION_GPU_SAFETY_TIMEOUT_MS,
+  readShopperGpuMaxInstances,
   sessionGpuShouldSleep,
+  shopperGpuOccupancy,
 } from '@/lib/ml/session-gpu';
 import {
   MHR_BODY_IDENTITY_DIM,
@@ -38,6 +40,14 @@ test('session GPU stays warm through body and drape, then sleeps', () => {
   assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 1, activeDrapeHoldCount: 0 }), false);
   assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 1 }), false);
   assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 0 }), true);
+  assert.equal(
+    sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 0, warmupLeaseCount: 1 }),
+    false,
+  );
+  assert.equal(shopperGpuOccupancy({ activeBodyJobCount: 1, warmupLeaseCount: 1 }), 2);
+  assert.equal(readShopperGpuMaxInstances(''), 3);
+  assert.equal(readShopperGpuMaxInstances('3'), 3);
+  assert.equal(readShopperGpuMaxInstances('12'), 8);
 });
 
 test('A100 80GB sku is gpu-a100-large and is the default hardware pin', () => {
@@ -123,6 +133,7 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
   const jointRotations = Array.from({ length: MHR_JOINT_QUAT_DIM }, (_, index) => (
     index % 4 === 3 ? 1 : 0
   ));
+  const vertices = Array.from({ length: MHR_VERTEX_COUNT * 3 }, () => 0);
   const parsed = parseMhrParametricVector({
     topology_version: MHR_TOPOLOGY_VERSION,
     shape: Array.from({ length: MHR_BODY_IDENTITY_DIM }, (_, index) => index * 0.01),
@@ -133,6 +144,7 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
     stated_weight_kg: 72,
     height_residual_cm: 0.4,
     clothing_residual: 0.12,
+    vertex_positions: vertices,
     fit_diagnostics: {
       iteration_count: 8,
       native_joint_rmse_cm: 1.15,
@@ -156,6 +168,7 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
   assert.equal(parsed.joint_rotations.length, MHR_JOINT_QUAT_DIM);
   assert.equal(parsed.derived_measurements.chest_cm, 98.4);
   assert.equal(parsed.stated_weight_kg, 72);
+  assert.equal(parsed.vertex_positions?.length, MHR_VERTEX_COUNT * 3);
   assert.equal(parsed.fit_diagnostics?.iteration_count, 8);
   assert.equal(parsed.fit_diagnostics?.native_joint_rmse_cm, 1.15);
   assert.equal(parsed.fit_diagnostics?.height_residual_cm, 0.4);
@@ -174,6 +187,7 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
     skeleton: Array.from({ length: MHR_SKELETON_DIM }, () => 1),
     pose: Array.from({ length: MHR_MODEL_PARAM_DIM }, () => 0),
     derived_measurements: { chest_cm: 90, waist_cm: 70, hip_cm: 95 },
+    vertex_positions: vertices,
     fit_diagnostics: 'not-an-object',
   });
   assert.equal(withoutDiagnostics.fit_diagnostics, undefined);
@@ -184,6 +198,7 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
     skeleton: Array.from({ length: MHR_SKELETON_DIM }, () => 1),
     pose: Array.from({ length: MHR_MODEL_PARAM_DIM }, () => 0),
     derived_measurements: { chest_cm: 90, waist_cm: 70, hip_cm: 95 },
+    vertex_positions: vertices,
     fit_diagnostics: {
       iteration_count: 5,
       mask: 'secret',
@@ -218,5 +233,13 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
     joint_rotations: jointRotations,
     derived_measurements: { chest_cm: 90, waist_cm: 70, hip_cm: 95 },
     vertex_positions: [0, 172, 0],
+  }));
+
+  assert.throws(() => parseMhrParametricVector({
+    topology_version: MHR_TOPOLOGY_VERSION,
+    shape: Array.from({ length: MHR_BODY_IDENTITY_DIM }, () => 0),
+    skeleton: Array.from({ length: MHR_SKELETON_DIM }, () => 1),
+    pose: Array.from({ length: MHR_MODEL_PARAM_DIM }, () => 0),
+    derived_measurements: { chest_cm: 90, waist_cm: 70, hip_cm: 95 },
   }));
 });

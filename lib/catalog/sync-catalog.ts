@@ -1,9 +1,8 @@
 import {
-  fetchStorefrontProductHtml,
-  storefrontProductUrl,
+  fetchStorefrontProductCorpus,
 } from '@/lib/catalog/fetch-product-page';
 import { persistCatalogGarment } from '@/lib/catalog/persist-garment';
-import { draftsFromShopifyProduct } from '@/lib/catalog/parse-product';
+import { draftsFromShopifyProduct, shouldIngestShopifyProduct } from '@/lib/catalog/parse-product';
 import {
   fetchShopifyCatalogProducts,
   fetchShopifyProductBySelector,
@@ -53,29 +52,19 @@ async function mapLimit<T>(
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => run()));
 }
 
-function needsStorefrontScan(drafts: readonly CatalogGarmentDraft[]): boolean {
-  return drafts.some((draft) => draft.mode === 'C');
-}
-
 async function persistShopifyProductDrafts(
   tenantId: string,
   credentials: ShopifyCredentials,
   pending: Array<{ product: ShopifyProduct; drafts: CatalogGarmentDraft[] }>,
 ): Promise<CatalogSyncResult> {
-  await mapLimit(
-    pending.filter((item) => needsStorefrontScan(item.drafts)),
-    STOREFRONT_FETCH_CONCURRENCY,
-    async (item) => {
-      const html = await fetchStorefrontProductHtml(
-        storefrontProductUrl(credentials.shopDomain, item.product),
-      );
-      if (html.length === 0) {
-        return;
-      }
+  await mapLimit(pending, STOREFRONT_FETCH_CONCURRENCY, async (item) => {
+    const corpus = await fetchStorefrontProductCorpus(credentials.shopDomain, item.product);
+    if (corpus.length === 0) {
+      return;
+    }
 
-      item.drafts = draftsFromShopifyProduct(item.product, html);
-    },
-  );
+    item.drafts = draftsFromShopifyProduct(item.product, corpus);
+  });
 
   const supabase = createServiceClient();
   const result: CatalogSyncResult = {
@@ -116,14 +105,16 @@ async function ingestShopifyProducts(
   credentials: ShopifyCredentials,
   products: readonly ShopifyProduct[],
 ): Promise<CatalogSyncResult> {
-  const pending: Array<{ product: ShopifyProduct; drafts: CatalogGarmentDraft[] }> = products.map(
-    (product) => ({
+  const pending: Array<{ product: ShopifyProduct; drafts: CatalogGarmentDraft[] }> = products
+    .filter(shouldIngestShopifyProduct)
+    .map((product) => ({
       product,
       drafts: draftsFromShopifyProduct(product),
-    }),
-  );
+    }));
 
-  return persistShopifyProductDrafts(tenantId, credentials, pending);
+  const skipped = products.length - pending.length;
+  const result = await persistShopifyProductDrafts(tenantId, credentials, pending);
+  return { ...result, skipped: result.skipped + skipped };
 }
 
 export async function syncShopifyCatalog(

@@ -23,14 +23,18 @@ function stripHtml(html: string): string {
   );
 }
 
-function parseNumberToken(raw: string): number | null {
-  const match = raw.replace(',', '.').match(/-?\d+(?:\.\d+)?/);
-  if (!match) {
+function parsePublishedGirth(raw: string): number | null {
+  const matches = [...raw.matchAll(/(\d+(?:\.\d+)?)/g)].map((match) => Number(match[1]));
+  const finite = matches.filter((value) => Number.isFinite(value));
+  if (finite.length === 0) {
     return null;
   }
 
-  const value = Number(match[0]);
-  return Number.isFinite(value) ? value : null;
+  if (finite.length >= 2 && /[-–]/.test(raw)) {
+    return finite[finite.length - 1] ?? null;
+  }
+
+  return finite[0] ?? null;
 }
 
 function toCentimetres(value: number, unitHint: 'cm' | 'in' | null): number {
@@ -46,7 +50,7 @@ function detectUnit(text: string): 'cm' | 'in' | null {
     return 'cm';
   }
 
-  if (/\b(in|inch|inches|")\b/i.test(text)) {
+  if (/\b(in|inch|inches|")\b/i.test(text) || /measurements\s+by\s+inches/i.test(text)) {
     return 'in';
   }
 
@@ -160,7 +164,7 @@ function parseHtmlTables(
           continue;
         }
 
-        const value = parseNumberToken(raw);
+        const value = parsePublishedGirth(raw);
         if (value === null) {
           continue;
         }
@@ -244,6 +248,48 @@ function parseLabeledGirthRows(
   return chart;
 }
 
+function parseSizeColonGirths(
+  text: string,
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
+  const chart = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
+  const lineRe =
+    /\b(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL)\b\s*:\s*([^\n]+)/gi;
+  let match = lineRe.exec(text);
+  while (match) {
+    const sizeCode = normalizeSizeCode(match[1]);
+    const rest = match[2];
+    const unit = detectUnit(rest) ?? detectUnit(text);
+    const partial: Partial<Pick<CatalogSizeVariantInput, GirthKey>> = {};
+    const girthRe = /(chest|bust|waist|hip|hips|length|inseam)\s*(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?/gi;
+    let girth = girthRe.exec(rest);
+    while (girth) {
+      const label = girth[1].toLowerCase();
+      const key: GirthKey =
+        label === 'waist'
+          ? 'waistCm'
+          : label === 'hip' || label === 'hips'
+            ? 'hipCm'
+            : label === 'length' || label === 'inseam'
+              ? 'lengthCm'
+              : 'chestCm';
+      const upper = girth[3] ? Number(girth[3]) : Number(girth[2]);
+      if (Number.isFinite(upper)) {
+        partial[key] = toCentimetres(upper, unit);
+      }
+      girth = girthRe.exec(rest);
+    }
+
+    const complete = completeMeasurements(partial);
+    if (complete) {
+      chart.set(sizeCode, complete);
+    }
+
+    match = lineRe.exec(text);
+  }
+
+  return chart;
+}
+
 function mergeCharts(
   ...charts: Array<Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>>
 ): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
@@ -261,7 +307,12 @@ export function scanSizeChartFromPage(
   htmlOrText: string,
 ): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
   const text = stripHtml(htmlOrText);
-  return mergeCharts(parseHtmlTables(htmlOrText), parseTripletLines(text), parseLabeledGirthRows(text));
+  return mergeCharts(
+    parseHtmlTables(htmlOrText),
+    parseTripletLines(text),
+    parseLabeledGirthRows(text),
+    parseSizeColonGirths(text),
+  );
 }
 
 export function parseCompositionText(

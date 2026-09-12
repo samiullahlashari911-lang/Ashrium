@@ -39,17 +39,20 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const cogYaml = readFileSync(path.join(process.cwd(), 'cog/cog.yaml'), 'utf8');
   const applyHmr = readFileSync(path.join(process.cwd(), 'lib/server/apply-hmr-prediction.ts'), 'utf8');
 
-  assert.match(hmr, /warmAndWaitForShopperGpu/);
-  assert.match(hmr, /await warmGpu/);
+  assert.match(hmr, /convertWarmupLeaseToJob/);
+  assert.match(hmr, /settleWarmReplicaIfNeeded/);
   assert.match(hmr, /watchShopperGpuDeadline/);
   assert.match(hmr, /maxDuration = 130/);
   assert.match(warmup, /watchWarmGpuIdleTimeout/);
-  assert.match(warmup, /warmGpuForShopperSubmit/);
+  assert.match(warmup, /claimShopperGpuSession/);
+  assert.match(warmup, /FITTING_ROOM_AT_CAPACITY/);
   assert.match(replicate, /cancelReplicatePrediction/);
   assert.match(replicate, /body\.version = versionId|version: versionId/);
   assert.match(sessionGpu, /SHOPPER_INFERENCE_DEADLINE_MS/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
+  assert.match(sessionGpu, /shopper_gpu_sessions/);
+  assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
   assert.match(abort, /cancelReplicatePrediction/);
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
   assert.match(abort, /latest.status !== 'pending'/);

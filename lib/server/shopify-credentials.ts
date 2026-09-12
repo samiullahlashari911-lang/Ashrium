@@ -204,8 +204,9 @@ export async function saveMerchantShopifyCredentials(
     };
   }
 
+  let identity: Awaited<ReturnType<typeof verifyShopifyAdminCredentials>>;
   try {
-    const identity = await verifyShopifyAdminCredentials({ shopDomain, adminToken });
+    identity = await verifyShopifyAdminCredentials({ shopDomain, adminToken });
     if (identity.myshopifyDomain !== shopDomain) {
       return {
         success: false,
@@ -248,6 +249,21 @@ export async function saveMerchantShopifyCredentials(
       message: 'Unable to save the Shopify integration.',
       shopDomain,
     };
+  }
+
+  try {
+    const { mergeTenantStorefrontOrigins, shopIdentityStorefrontOrigins } = await import(
+      '@/lib/server/storefront-allowlist'
+    );
+    await mergeTenantStorefrontOrigins(
+      tenantId,
+      shopIdentityStorefrontOrigins({
+        myshopifyDomain: identity.myshopifyDomain,
+        primaryDomainUrl: identity.primaryDomainUrl,
+      }),
+    );
+  } catch {
+    // Integration is saved; merchant can still add origins in Settings.
   }
 
   return {

@@ -23,7 +23,7 @@ const gallerySource = readFileSync(
 test('embedded widget iframe does not set sandbox, so Chrome cannot block consent Next', () => {
   assert.doesNotMatch(widgetSource, /\.sandbox\s*=/);
   assert.doesNotMatch(widgetSource, /setAttribute\('sandbox'/);
-  assert.match(widgetSource, /frame\.src = frameUrl/);
+  assert.match(widgetSource, /frame\.src = buildFrameUrl/);
 });
 
 test('consent Next stays gated until both 16+ and privacy are checked', () => {
@@ -68,5 +68,5 @@ test('intake and gallery do not use a <form> that Chrome can block in an iframe'
 test('sandbox host cache-busts vfr-widget.js when the embed script changes', () => {
   assert.match(VFR_WIDGET_SCRIPT_SRC, /^\/vfr-widget\.js\?v=/);
   assert.match(VFR_WIDGET_SCRIPT_SRC, /no-sandbox/);
-  assert.match(widgetSource, /capture-ux-2/);
+  assert.match(widgetSource, /launcher-1/);
 });

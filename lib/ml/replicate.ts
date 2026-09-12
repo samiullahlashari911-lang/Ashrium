@@ -1,3 +1,4 @@
+import { readShopperGpuMaxInstances } from '@/lib/ml/session-gpu';
 import {
   ANNY_PHENOTYPE_DIM,
   ANNY_PHENOTYPE_LABELS,
@@ -558,15 +559,13 @@ export function parseMhrParametricVector(
   const vertices = flattenNumberArray(
     readFirstPresent(unwrapped, ['vertex_positions', 'vertices', 'vertex_buffer']),
   );
-  if (vertices) {
-    if (vertices.length !== MHR_VERTEX_COUNT * 3) {
-      throw new Error(
-        `MHR vertex_positions must contain ${MHR_VERTEX_COUNT * 3} values (LOD 1 xyz)`,
-      );
-    }
-
-    result.vertex_positions = vertices;
+  if (!vertices || vertices.length !== MHR_VERTEX_COUNT * 3) {
+    throw new Error(
+      `MHR vertex_positions must contain ${MHR_VERTEX_COUNT * 3} values (LOD 1 xyz)`,
+    );
   }
+
+  result.vertex_positions = vertices;
 
   if (typeof unwrapped.vertex_storage_url === 'string' && unwrapped.vertex_storage_url.length > 0) {
     result.vertex_storage_url = unwrapped.vertex_storage_url;
@@ -875,7 +874,8 @@ async function fetchReplicateDeployment(
  * back to an older release when Warm/Sleep only sends min_instances.
  */
 export async function patchReplicateDeployment(options: {
-  minInstances?: 0 | 1;
+  minInstances?: number;
+  maxInstances?: number;
   pinHardware?: boolean;
 }): Promise<{
   status: ReplicateDeploymentStatus;
@@ -887,11 +887,19 @@ export async function patchReplicateDeployment(options: {
   const versionId = parseAnnyFitModelVersionRef(getAnnyFitModelVersion()).versionId;
   const current = await fetchReplicateDeployment(deployment);
   const needsHardware = options.pinHardware !== false && current.hardware !== sku;
+  const nextMinInstances = options.minInstances === undefined
+    ? undefined
+    : Math.max(0, Math.trunc(options.minInstances));
+  const nextMaxInstances = options.maxInstances === undefined
+    ? undefined
+    : Math.max(nextMinInstances ?? 0, Math.trunc(options.maxInstances));
   const needsMinInstances =
-    options.minInstances !== undefined && current.minInstances !== options.minInstances;
+    nextMinInstances !== undefined && current.minInstances !== nextMinInstances;
+  const needsMaxInstances =
+    nextMaxInstances !== undefined && current.maxInstances !== nextMaxInstances;
   const needsVersion = current.version?.toLowerCase() !== versionId;
 
-  if (!needsHardware && !needsMinInstances && !needsVersion) {
+  if (!needsHardware && !needsMinInstances && !needsMaxInstances && !needsVersion) {
     return { status: current, hardwareUpdated: false, minInstancesUpdated: false };
   }
 
@@ -906,12 +914,13 @@ export async function patchReplicateDeployment(options: {
     hardwareUpdated = true;
   }
 
-  if (needsMinInstances && options.minInstances !== undefined) {
-    body.min_instances = options.minInstances;
+  if (nextMaxInstances !== undefined && (needsMaxInstances || needsMinInstances)) {
+    body.max_instances = nextMaxInstances;
+  }
+
+  if (needsMinInstances && nextMinInstances !== undefined) {
+    body.min_instances = nextMinInstances;
     minInstancesUpdated = true;
-    if (options.minInstances === 1) {
-      body.max_instances = Math.max(current.maxInstances ?? 0, 1);
-    }
   }
 
   const updateResponse = await fetch(deploymentUrl(deployment), {
@@ -1199,8 +1208,10 @@ export async function readReplicateSessionGpu(): Promise<SessionGpuResult> {
 export async function setReplicateSessionGpu(action: 'warm' | 'sleep'): Promise<SessionGpuResult> {
   const confirmation = await confirmAnnyFitCogVersion();
   const hardware = getReplicateHardwarePin();
+  const cap = readShopperGpuMaxInstances();
   const patched = await patchReplicateDeployment({
     minInstances: action === 'warm' ? 1 : 0,
+    maxInstances: cap,
     pinHardware: true,
   });
 

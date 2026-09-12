@@ -10,6 +10,7 @@ export interface AnnyFitDispatchRequest {
   heightCm: number;
   sex: CaptureSex;
   weightKg?: number;
+  gpuSessionKey?: string;
 }
 
 const CAPTURE_SEXES: ReadonlySet<CaptureSex> = new Set(['female', 'male', 'unspecified']);
@@ -46,12 +47,18 @@ export function parseAnnyFitDispatchRequest(value: unknown): AnnyFitDispatchRequ
     return null;
   }
 
+  const gpuSessionKey =
+    typeof value.gpuSessionKey === 'string' && value.gpuSessionKey.trim().length >= 8
+      ? value.gpuSessionKey.trim()
+      : undefined;
+
   return {
     frontImagePath: value.frontImagePath,
     sideImagePath: value.sideImagePath,
     heightCm: value.heightCm,
     sex: value.sex,
     ...(value.weightKg === undefined ? {} : { weightKg: value.weightKg }),
+    ...(gpuSessionKey ? { gpuSessionKey } : {}),
   };
 }
 

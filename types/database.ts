@@ -151,10 +151,10 @@ export type GarmentSizeVariantRow = {
   tenant_id: string;
   garment_id: string;
   size_code: string;
-  chest_cm: number;
-  waist_cm: number;
-  hip_cm: number;
-  length_cm: number;
+  chest_cm: number | null;
+  waist_cm: number | null;
+  hip_cm: number | null;
+  length_cm: number | null;
   rest_length_path: string | null;
   external_sku: string | null;
   created_at: string;
@@ -165,10 +165,10 @@ export type GarmentSizeVariantInsert = {
   tenant_id: string;
   garment_id: string;
   size_code: string;
-  chest_cm: number;
-  waist_cm: number;
-  hip_cm: number;
-  length_cm: number;
+  chest_cm?: number | null;
+  waist_cm?: number | null;
+  hip_cm?: number | null;
+  length_cm?: number | null;
   rest_length_path?: string | null;
   external_sku?: string | null;
   created_at?: string;
@@ -179,10 +179,10 @@ export type GarmentSizeVariantUpdate = {
   tenant_id?: string;
   garment_id?: string;
   size_code?: string;
-  chest_cm?: number;
-  waist_cm?: number;
-  hip_cm?: number;
-  length_cm?: number;
+  chest_cm?: number | null;
+  waist_cm?: number | null;
+  hip_cm?: number | null;
+  length_cm?: number | null;
   rest_length_path?: string | null;
   external_sku?: string | null;
   created_at?: string;
@@ -411,6 +411,30 @@ export type FitJobUpdate = {
   updated_at?: string;
 };
 
+export type ShopperGpuSessionRow = {
+  id: string;
+  tenant_id: string;
+  session_key: string;
+  expires_at: string;
+  created_at: string;
+};
+
+export type ShopperGpuSessionInsert = {
+  id?: string;
+  tenant_id: string;
+  session_key: string;
+  expires_at: string;
+  created_at?: string;
+};
+
+export type ShopperGpuSessionUpdate = {
+  id?: string;
+  tenant_id?: string;
+  session_key?: string;
+  expires_at?: string;
+  created_at?: string;
+};
+
 export type StoreTelemetryRow = {
   id: string;
   tenant_id: string;
@@ -549,6 +573,12 @@ export interface Database {
         Row: FitJobRow;
         Insert: FitJobInsert;
         Update: FitJobUpdate;
+        Relationships: [];
+      };
+      shopper_gpu_sessions: {
+        Row: ShopperGpuSessionRow;
+        Insert: ShopperGpuSessionInsert;
+        Update: ShopperGpuSessionUpdate;
         Relationships: [];
       };
       store_telemetry: {

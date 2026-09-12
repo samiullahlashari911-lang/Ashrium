@@ -181,10 +181,10 @@ export function formatComposition(composition: GarmentFiberComposition | null): 
 
 export interface CatalogSizeVariantInput {
   sizeCode: string;
-  chestCm: number;
-  waistCm: number;
-  hipCm: number;
-  lengthCm: number;
+  chestCm: number | null;
+  waistCm: number | null;
+  hipCm: number | null;
+  lengthCm: number | null;
   externalSku: string | null;
   measurementsFromSource: boolean;
 }

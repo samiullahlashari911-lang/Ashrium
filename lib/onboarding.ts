@@ -99,6 +99,13 @@ export function parseStorefrontOriginList(rawInputs: readonly string[]): {
   return { invalid, origins };
 }
 
+export function mergeStorefrontOrigins(
+  existing: readonly string[],
+  incoming: readonly string[],
+): string[] {
+  return parseStorefrontOriginList([...existing, ...incoming]).origins.slice(0, MAX_ALLOWED_DOMAINS);
+}
+
 export function merchantDomainFromOrigins(origins: readonly string[]): string | null {
   for (const origin of origins) {
     try {

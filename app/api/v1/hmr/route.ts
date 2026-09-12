@@ -11,9 +11,16 @@ import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
 import { dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
-import { GPU_COLD_START_WAIT_MS } from '@/lib/ml/session-gpu';
+import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
 import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
-import { sleepGpuIfNoActiveFitJobs, warmAndWaitForShopperGpu } from '@/lib/server/session-gpu';
+import {
+  convertWarmupLeaseToJob,
+  FittingRoomAtCapacityError,
+  readShopperGpuOccupancy,
+  scaleShopperGpuToOccupancy,
+  settleWarmReplicaIfNeeded,
+  sleepGpuIfNoActiveFitJobs,
+} from '@/lib/server/session-gpu';
 
 function getWebhookBaseUrl(): URL {
   const appBaseUrl = process.env.APP_BASE_URL?.trim();
@@ -73,16 +80,18 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
   }
 
-  const serviceClient = createServiceClient();
-  const warmGpu = Promise.race([
-    warmAndWaitForShopperGpu(GPU_COLD_START_WAIT_MS),
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, GPU_COLD_START_WAIT_MS + 3_000);
-    }),
-  ]).catch(() => {
-    // Dispatch still runs; the Deployment can cold-start under the 2-minute cap.
-  });
+  const convertedLease = await convertWarmupLeaseToJob(tenantId, body.gpuSessionKey);
+  if (!convertedLease) {
+    const occupancy = await readShopperGpuOccupancy();
+    if (occupancy.occupancy >= occupancy.cap) {
+      return Response.json(
+        { code: 'FITTING_ROOM_AT_CAPACITY', message: FITTING_ROOM_AT_CAPACITY_MESSAGE },
+        { status: 409 },
+      );
+    }
+  }
 
+  const serviceClient = createServiceClient();
   const [signedFront, signedSide] = await Promise.all([
     serviceClient.storage.from('biometrics').createSignedUrl(
       body.frontImagePath,
@@ -95,12 +104,9 @@ export async function POST(request: Request): Promise<Response> {
   ]);
 
   if (signedFront.error || !signedFront.data || signedSide.error || !signedSide.data) {
-    await warmGpu;
     void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
   }
-
-  await warmGpu;
 
   const { data: job, error: createError } = await serviceClient
     .from('fit_jobs')
@@ -120,6 +126,19 @@ export async function POST(request: Request): Promise<Response> {
   if (createError || !job) {
     void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'JOB_CREATION_FAILED' }, { status: 500 });
+  }
+
+  try {
+    await scaleShopperGpuToOccupancy();
+    await settleWarmReplicaIfNeeded(convertedLease);
+  } catch (error) {
+    if (error instanceof FittingRoomAtCapacityError) {
+      await serviceClient.from('fit_jobs').delete().eq('id', job.id);
+      return Response.json(
+        { code: 'FITTING_ROOM_AT_CAPACITY', message: FITTING_ROOM_AT_CAPACITY_MESSAGE },
+        { status: 409 },
+      );
+    }
   }
 
   const { error: processingError } = await serviceClient

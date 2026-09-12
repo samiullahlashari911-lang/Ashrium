@@ -21,8 +21,8 @@ import { DRAPE_MIN_REMAINING_MS, gpuHoldMsUntilDeadline } from '@/lib/ml/session
 import {
   holdGpuForFitJob,
   releaseGpuHoldForFitJob,
+  scaleShopperGpuToOccupancy,
   sleepGpuIfNoActiveFitJobs,
-  warmGpuForShopperSubmit,
 } from '@/lib/server/session-gpu';
 import { toStorefrontGarment } from '@/lib/supabase/garment-profiles';
 import type { Database } from '@/types/database';
@@ -344,7 +344,7 @@ async function runNewtonDrape(options: {
   await holdGpuForFitJob(options.jobId, gpuHoldMsUntilDeadline(options.createdAt));
 
   try {
-    await warmGpuForShopperSubmit();
+    await scaleShopperGpuToOccupancy();
   } catch {
     // Prediction can still cold-start on the Deployment.
   }

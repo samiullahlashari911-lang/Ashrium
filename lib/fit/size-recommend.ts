@@ -90,7 +90,14 @@ function variantFits(
   needed: Record<GirthKey, number>,
   category: GarmentCategory | null,
 ): boolean {
-  return primaryGirths(category).every((key) => variant[key] + 1e-6 >= needed[key]);
+  return primaryGirths(category).every((key) => {
+    const published = variant[key];
+    if (!published || published <= 0) {
+      return true;
+    }
+
+    return published + 1e-6 >= needed[key];
+  });
 }
 
 function toRecommendation(

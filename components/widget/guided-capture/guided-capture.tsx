@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { CaptureIntake, type CaptureIntakeValues } from '@/components/widget/guided-capture/capture-intake';
 import { CaptureViewport } from '@/components/widget/guided-capture/capture-viewport';
@@ -9,7 +9,11 @@ import {
   SHOPPER_INFERENCE_DEADLINE_MS,
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
-import { uploadDualWebpAndDispatch, warmShopperGpu } from '@/lib/widget/fit-client';
+import {
+  uploadDualWebpAndDispatch,
+  warmShopperGpu,
+  type DualUploadProgress,
+} from '@/lib/widget/fit-client';
 import type {
   FitParametricVector,
   CaptureSession,
@@ -57,6 +61,13 @@ export function GuidedCapture({
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [waitSeconds, setWaitSeconds] = useState(0);
+  const [uploadStage, setUploadStage] = useState<DualUploadProgress | null>(null);
+  const [warmupError, setWarmupError] = useState<string | null>(null);
+  const gpuSessionKeyRef = useRef(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `gpu-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  );
 
   const handleFrontCaptured = useCallback((blob: Blob, gate: PoseGateStatus) => {
     setFrontBlob(blob);
@@ -79,6 +90,8 @@ export function GuidedCapture({
         heightCm: intake.heightCm,
         sex: intake.sex,
         weightKg: intake.weightKg ?? undefined,
+        gpuSessionKey: gpuSessionKeyRef.current,
+        onProgress: setUploadStage,
       })
         .then((dispatch) => {
           setJobId(dispatch.jobId);
@@ -93,16 +106,42 @@ export function GuidedCapture({
   );
 
   useEffect(() => {
-    if (step !== 'front' && step !== 'side') {
+    if (step === 'uploading' || step === 'inferring' || step === 'error') {
       return;
     }
 
-    void warmShopperGpu(embedToken);
+    let cancelled = false;
+    const run = async (attempt: number): Promise<void> => {
+      try {
+        await warmShopperGpu(embedToken, gpuSessionKeyRef.current);
+        if (!cancelled) {
+          setWarmupError(null);
+        }
+      } catch (caught: unknown) {
+        if (cancelled) {
+          return;
+        }
+        if (attempt < 1) {
+          await run(attempt + 1);
+          return;
+        }
+        setWarmupError(
+          caught instanceof Error
+            ? caught.message
+            : 'The fitting GPU could not start. You can still take photos — we will retry on submit.',
+        );
+      }
+    };
+
+    void run(0);
     const intervalId = window.setInterval(() => {
-      void warmShopperGpu(embedToken);
+      void run(0);
     }, 45_000);
 
-    return () => window.clearInterval(intervalId);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [embedToken, step]);
 
   useEffect(() => {
@@ -179,44 +218,80 @@ export function GuidedCapture({
     setError(null);
     setJobId(null);
     setWaitSeconds(0);
+    setUploadStage(null);
+    setWarmupError(null);
   };
+
+  const warmupBanner = warmupError ? (
+    <div className="mx-4 mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-left">
+      <p className="text-sm text-amber-100">{warmupError}</p>
+      <button
+        type="button"
+        className="mt-2 text-xs font-semibold uppercase tracking-wide text-amber-200 underline"
+        onClick={() => {
+          setWarmupError(null);
+          void warmShopperGpu(embedToken, gpuSessionKeyRef.current).catch((caught: unknown) => {
+            setWarmupError(
+              caught instanceof Error ? caught.message : 'The fitting GPU could not start.',
+            );
+          });
+        }}
+      >
+        Retry GPU warmup
+      </button>
+    </div>
+  ) : null;
 
   if (step === 'intake') {
     return (
-      <CaptureIntake
-        submitLabel="Next"
-        onSubmit={(values) => {
-          setIntake(values);
-          setStep('front');
-        }}
-      />
+      <div>
+        {warmupBanner}
+        <CaptureIntake
+          submitLabel="Next"
+          onSubmit={(values) => {
+            setIntake(values);
+            setStep('front');
+          }}
+        />
+      </div>
     );
   }
 
   if ((step === 'front' || step === 'side') && intake) {
     const view: CaptureView = step;
     return (
-      <CaptureViewport
-        key={step}
-        view={view}
-        allowGallery={allowGallery}
-        flowStep={step}
-        onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
-        onBack={() => {
-          if (step === 'side') {
-            setFrontBlob(null);
-            setFrontGate(null);
-            setStep('front');
-            return;
-          }
+      <div>
+        {warmupBanner}
+        <CaptureViewport
+          key={step}
+          view={view}
+          allowGallery={allowGallery}
+          flowStep={step}
+          onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
+          onBack={() => {
+            if (step === 'side') {
+              setFrontBlob(null);
+              setFrontGate(null);
+              setStep('front');
+              return;
+            }
 
-          setStep('intake');
-        }}
-      />
+            setStep('intake');
+          }}
+        />
+      </div>
     );
   }
 
   if (step === 'uploading' || step === 'inferring') {
+    const uploadCopy =
+      uploadStage === 'front' || uploadStage === 'side'
+        ? 'Uploading front and side photos…'
+        : uploadStage === 'proxy'
+          ? 'Uploading photos via the server…'
+          : uploadStage === 'dispatch'
+            ? 'Starting live body inference…'
+            : 'Preparing a secure upload…';
     return (
       <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center text-obsidian-ink">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
@@ -227,7 +302,7 @@ export function GuidedCapture({
         </h1>
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
-            ? 'Photos are deleted as soon as inference finishes.'
+            ? uploadCopy
             : 'The GPU started while you were taking photos so the body fit can finish in 2 minutes. We stop it if the avatar is not ready by then.'}
         </p>
         <p className="font-mono text-xs text-obsidian-subtle">

@@ -124,7 +124,13 @@ export interface ShopifyCredentials {
   adminToken: string;
 }
 
-const SHOP_IDENTITY_QUERY = `query ShopIdentity { shop { name myshopifyDomain } }`;
+const SHOP_IDENTITY_QUERY = `query ShopIdentity {
+  shop {
+    name
+    myshopifyDomain
+    primaryDomain { url }
+  }
+}`;
 
 const READ_PRODUCTS_PROBE_QUERY = `query ReadProductsCapability {
   products(first: 1) {
@@ -346,7 +352,7 @@ async function shopifyGraphql(
 
 export async function verifyShopifyAdminCredentials(
   credentials: ShopifyCredentials,
-): Promise<{ shopName: string; myshopifyDomain: string }> {
+): Promise<{ shopName: string; myshopifyDomain: string; primaryDomainUrl: string | null }> {
   const data = await shopifyGraphql(credentials, SHOP_IDENTITY_QUERY);
   if (!isRecord(data) || !isRecord(data.shop)) {
     throw new ShopifyAdminError('Shopify Admin shop identity was empty.', 502);
@@ -358,7 +364,15 @@ export async function verifyShopifyAdminCredentials(
     throw new ShopifyAdminError('Shopify Admin shop identity was incomplete.', 502);
   }
 
-  return { shopName, myshopifyDomain };
+  const primaryDomainUrl = isRecord(data.shop.primaryDomain)
+    ? readString(data.shop.primaryDomain.url)
+    : '';
+
+  return {
+    shopName,
+    myshopifyDomain,
+    primaryDomainUrl: primaryDomainUrl.length > 0 ? primaryDomainUrl : null,
+  };
 }
 
 export async function assertShopifyReadProductsAccess(

@@ -157,7 +157,11 @@ export function CaptureViewport({
         }
       } catch {
         if (!cancelled) {
-          setCameraError('Camera access is required to take a photo now. You can import from the gallery instead.');
+          setCameraError(
+            allowGallery
+              ? 'Camera access is required to take a photo now. You can import from the gallery instead.'
+              : 'Camera access is required. Allow the camera and try again.',
+          );
         }
       }
     };
@@ -169,7 +173,7 @@ export function CaptureViewport({
       stopStream(streamRef.current);
       streamRef.current = null;
     };
-  }, [pending, source]);
+  }, [allowGallery, pending, source]);
 
   useEffect(() => {
     let frameId = 0;

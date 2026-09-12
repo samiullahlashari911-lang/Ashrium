@@ -72,8 +72,7 @@ export function StorefrontSandbox({
   const initialSku = garments[0]?.sku ?? '';
   const [selectedSku, setSelectedSku] = useState(initialSku);
   const [recommendedSize, setRecommendedSize] = useState<string | null>(null);
-  const [widgetReady, setWidgetReady] = useState(false);
-  const [widgetHostVisible, setWidgetHostVisible] = useState(false);
+  const [showLog, setShowLog] = useState(false);
   const [events, setEvents] = useState<EventLogEntry[]>([]);
 
   const selectedGarment = garments.find((garment) => garment.sku === selectedSku)
@@ -101,35 +100,9 @@ export function StorefrontSandbox({
   );
 
   useEffect(() => {
-    const mount = scriptMountRef.current;
-    if (!mount || !initialSku) {
-      return;
-    }
-
-    const rect = mount.getBoundingClientRect();
-    if (rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight) {
-      setWidgetHostVisible(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting && entry.intersectionRatio > 0)) {
-          setWidgetHostVisible(true);
-          observer.disconnect();
-        }
-      },
-      { root: null, rootMargin: '80px 0px', threshold: 0 },
-    );
-    observer.observe(mount);
-
-    return () => observer.disconnect();
-  }, [initialSku]);
-
-  useEffect(() => {
     const sandboxWindow = window as SandboxWindow;
     const mount = scriptMountRef.current;
-    if (!mount || !initialSku || !widgetHostVisible) {
+    if (!mount || !selectedSku) {
       return;
     }
 
@@ -137,8 +110,10 @@ export function StorefrontSandbox({
     script.src = VFR_WIDGET_SCRIPT_SRC;
     script.async = true;
     script.dataset.embedToken = token;
-    script.dataset.sku = initialSku;
+    script.dataset.sku = selectedSku;
+    script.dataset.handle = selectedSku;
     script.dataset.allowGallery = 'true';
+    script.dataset.launcher = 'true';
     mount.appendChild(script);
 
     const onWidgetMessage = (event: MessageEvent<unknown>): void => {
@@ -147,10 +122,6 @@ export function StorefrontSandbox({
       }
 
       addEvent('WIDGET_TO_HOST', event.data.type, event.data.payload);
-
-      if (event.data.type === 'VFR_WIDGET_READY') {
-        setWidgetReady(true);
-      }
 
       if (event.data.type === 'VFR_SIZE_RECOMMENDED' && typeof event.data.payload.size === 'string') {
         setRecommendedSize(event.data.payload.size);
@@ -162,35 +133,22 @@ export function StorefrontSandbox({
     return () => {
       window.removeEventListener('message', onWidgetMessage);
       document.getElementById('vfr-widget-root')?.remove();
+      document.getElementById('ashrium-vfr-try-on')?.remove();
+      document.getElementById('ashrium-vfr-overlay')?.remove();
       script.remove();
       delete sandboxWindow.AshriumVfrWidget;
       delete sandboxWindow.__ASHRIUM_VFR_WIDGET__;
     };
-  }, [addEvent, initialSku, token, widgetHostVisible]);
-
-  useEffect(() => {
-    if (!widgetReady || !selectedSku) {
-      return;
-    }
-
-    const controller = (window as SandboxWindow).AshriumVfrWidget;
-    if (!controller) {
-      return;
-    }
-
-    const payload = { sku: selectedSku };
-    controller.setGarment(selectedSku);
-    addEvent('HOST_TO_WIDGET', 'VFR_SET_GARMENT', payload);
-  }, [addEvent, selectedSku, widgetReady]);
+  }, [addEvent, selectedSku, token]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-6">
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-obsidian-accent-muted">Storefront integration harness</p>
-        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Ashrium Outfitters</h1>
+        <p className="text-sm font-medium text-obsidian-accent-muted">Legendary store mock</p>
+        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Product page</h1>
         <p className="mt-2 text-sm text-obsidian-muted">
-          Try On uses SKUs ingested on Garments. Submit both photos to warm the A100;
-          it sleeps when no job is active. Gallery upload is sandbox-only.
+          Switch garments, then tap Try On above Add to cart. Phone camera only on the live storefront;
+          gallery stays sandbox-only.
         </p>
       </header>
 
@@ -198,93 +156,92 @@ export function StorefrontSandbox({
 
       {garments.length === 0 ? (
         <EmptyState
-          title="Ingest one SKU before Try On"
-          description="Sandbox loads CAD garments from this tenant. Test one SKU on Garments first. Fake catalog SKUs are not a fitting path."
+          title="Ingest garments before Try On"
+          description="Sandbox lists CAD garments from this tenant. Sync the Legendary catalog on Garments first."
           action={{ href: '/dashboard/garments', label: 'Open Garments' }}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="obsidian-glass p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="font-mono text-xs text-obsidian-accent-muted">{selectedGarment?.sku}</p>
-                <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
-                  {selectedGarment?.name}
-                </h2>
-                {selectedGarment ? (
-                  <p className="mt-1 text-xs text-obsidian-muted">{ingestLabel(selectedGarment)}</p>
-                ) : null}
+        <section className="obsidian-glass overflow-hidden p-0">
+          <div className="border-b border-white/10 bg-obsidian-canvas/40 px-6 py-4">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-obsidian-subtle">
+              Garment
+              <select
+                className="mt-2 block w-full rounded-xl border border-white/10 bg-obsidian-canvas px-3 py-2 text-sm text-obsidian-ink"
+                value={selectedSku}
+                onChange={(event) => {
+                  setRecommendedSize(null);
+                  setSelectedSku(event.target.value);
+                }}
+              >
+                {garments.map((garment) => (
+                  <option key={garment.sku} value={garment.sku}>
+                    {garment.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid gap-8 px-6 py-8 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl bg-gradient-to-br from-[#1B1538] to-[#0B0B1E] text-sm text-obsidian-subtle">
+              Product photo
+            </div>
+            <div>
+              <p className="font-mono text-xs text-obsidian-accent-muted">{selectedGarment?.sku}</p>
+              <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
+                {selectedGarment?.name}
+              </h2>
+              {selectedGarment ? (
+                <p className="mt-1 text-xs text-obsidian-muted">{ingestLabel(selectedGarment)}</p>
+              ) : null}
+              <p className="mt-4 text-sm text-obsidian-muted">
+                Size charts come from the product page. Try On opens a camera overlay — not a gallery.
+              </p>
+              <div ref={scriptMountRef} className="mt-5" />
+              <button
+                type="button"
+                className="mt-2 w-full rounded-full border border-white/15 px-4 py-3 text-sm font-semibold text-obsidian-ink"
+              >
+                Add to cart
+              </button>
+              <div className="mt-4 flex items-center gap-3">
+                <span className="text-sm text-obsidian-muted">Recommended size</span>
+                <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
+                  {recommendedSize ?? 'Complete Try On first'}
+                </span>
               </div>
             </div>
-
-            <div className="mt-5 flex flex-wrap gap-2">
-              {garments.map((garment) => (
-                <button
-                  key={garment.sku}
-                  type="button"
-                  onClick={() => {
-                    setRecommendedSize(null);
-                    setSelectedSku(garment.sku);
-                  }}
-                  className={[
-                    'rounded-full border px-4 py-2 text-left text-sm transition',
-                    garment.sku === selectedSku
-                      ? 'border-obsidian-accent bg-obsidian-accent/20 text-obsidian-ink'
-                      : 'border-white/10 bg-obsidian-canvas/50 text-obsidian-muted hover:border-white/25',
-                  ].join(' ')}
-                >
-                  <span className="block">{garment.name}</span>
-                  <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-obsidian-subtle">
-                    {ingestLabel(garment)}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-6 rounded-xl border border-white/10 bg-obsidian-canvas/50 p-3">
-              <div ref={scriptMountRef} className="min-h-[640px]">
-                {widgetHostVisible ? null : (
-                  <p className="px-2 py-8 text-sm text-obsidian-subtle">
-                    Try On loads when this panel is on screen.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-5 flex items-center gap-3">
-              <span className="text-sm text-obsidian-muted">Recommended size</span>
-              <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
-                {recommendedSize ?? 'Complete Try On first'}
-              </span>
-            </div>
-          </section>
-
-          <aside className="obsidian-glass p-5">
-            <h2 className="text-lg font-semibold text-obsidian-ink">Event inspector</h2>
-            <p className="mt-1 text-sm text-obsidian-muted">Newest event first. Payloads are captured at the host boundary.</p>
-            <ol className="mt-4 flex max-h-[720px] flex-col gap-3 overflow-y-auto pr-1">
-              {events.length === 0 ? (
-                <li className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-obsidian-subtle">
-                  Waiting for widget traffic.
-                </li>
-              ) : (
-                events.map((event) => (
-                  <li key={event.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-mono text-xs text-obsidian-accent-muted">{event.direction}</span>
-                      <time className="text-xs text-obsidian-subtle">{event.timestamp}</time>
-                    </div>
-                    <p className="mt-2 text-sm font-semibold text-obsidian-ink">{event.type}</p>
-                    <pre className="mt-2 overflow-x-auto rounded bg-obsidian-canvas p-2 text-xs text-obsidian-muted">
-                      {JSON.stringify(event.payload, null, 2)}
-                    </pre>
-                  </li>
-                ))
-              )}
-            </ol>
-          </aside>
-        </div>
+          </div>
+        </section>
       )}
+
+      <details
+        className="obsidian-glass p-4 text-sm text-obsidian-muted"
+        open={showLog}
+        onToggle={(event) => setShowLog(event.currentTarget.open)}
+      >
+        <summary className="cursor-pointer font-semibold text-obsidian-ink">Developer log</summary>
+        <ol className="mt-4 flex max-h-[360px] flex-col gap-3 overflow-y-auto pr-1">
+          {events.length === 0 ? (
+            <li className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-obsidian-subtle">
+              Widget events appear here after Try On.
+            </li>
+          ) : (
+            events.map((event) => (
+              <li key={event.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-mono text-xs text-obsidian-accent-muted">{event.direction}</span>
+                  <time className="text-xs text-obsidian-subtle">{event.timestamp}</time>
+                </div>
+                <p className="mt-2 text-sm font-semibold text-obsidian-ink">{event.type}</p>
+                <pre className="mt-2 overflow-x-auto rounded bg-obsidian-canvas p-2 text-xs text-obsidian-muted">
+                  {JSON.stringify(event.payload, null, 2)}
+                </pre>
+              </li>
+            ))
+          )}
+        </ol>
+      </details>
     </main>
   );
 }

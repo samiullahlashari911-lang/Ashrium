@@ -27,18 +27,14 @@ test('WebGL and capture pause unless the element is on-screen and the document i
   );
 });
 
-test('debug garment previews default to a still mesh', () => {
-  assert.match(
+test('debug garment previews do not mount live PBD cloth', () => {
+  assert.doesNotMatch(
     readSource('components/dashboard/garments-workspace.tsx'),
-    /autoRotate:\s*false/,
+    /VFRCanvas/,
   );
   assert.match(
     readSource('app/(dashboard)/sandbox/sandbox-preview.tsx'),
     /autoRotate:\s*false/,
-  );
-  assert.doesNotMatch(
-    readSource('components/dashboard/garments-workspace.tsx'),
-    /autoRotate:\s*true/,
   );
   assert.doesNotMatch(
     readSource('app/(dashboard)/sandbox/sandbox-preview.tsx'),
@@ -63,13 +59,12 @@ test('canvases and capture subscribe to viewport activity before scheduling fram
   assert.match(readSource('lib/graphics/viewport-activity.ts'), /let isIntersecting = false/);
 });
 
-test('sandbox defers vfr-widget.js until the Try On panel intersects the viewport', () => {
+test('sandbox Try On uses a product-page launcher instead of a deferred iframe', () => {
   const sandbox = readSource('app/(dashboard)/sandbox/storefront-sandbox.tsx');
-  assert.match(sandbox, /IntersectionObserver/);
-  assert.match(sandbox, /widgetHostVisible/);
-  assert.match(sandbox, /getBoundingClientRect/);
-  assert.match(sandbox, /if \(!mount \|\| !initialSku \|\| !widgetHostVisible\)/);
-  assert.match(sandbox, /Try On loads when this panel is on screen/);
+  assert.match(sandbox, /dataset\.launcher/);
+  assert.match(sandbox, /Legendary store mock/);
+  assert.match(sandbox, /Developer log/);
+  assert.doesNotMatch(sandbox, /widgetHostVisible/);
 });
 
 test('dashboard glass and sticky nav do not use backdrop-filter', () => {

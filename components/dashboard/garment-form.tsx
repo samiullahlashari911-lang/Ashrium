@@ -36,10 +36,10 @@ export interface GarmentFormProps {
 function variantsToForm(variants: GarmentSizeVariantRow[]): GarmentSizeFormInput[] {
   return variants.map((variant) => ({
     sizeCode: variant.size_code,
-    chestCm: variant.chest_cm,
-    waistCm: variant.waist_cm,
-    hipCm: variant.hip_cm,
-    lengthCm: variant.length_cm,
+    chestCm: variant.chest_cm ?? 0,
+    waistCm: variant.waist_cm ?? 0,
+    hipCm: variant.hip_cm ?? 0,
+    lengthCm: variant.length_cm ?? 0,
     externalSku: variant.external_sku ?? '',
   }));
 }

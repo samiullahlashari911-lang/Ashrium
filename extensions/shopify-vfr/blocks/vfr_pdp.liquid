@@ -1,24 +1,18 @@
-{% if product %}
-  <div
-    id="ashrium-vfr-{{ block.id }}"
-    data-shop-domain="{{ shop.permanent_domain | escape }}"
-    data-sku="{{ product.selected_or_first_available_variant.sku | escape }}"
-    data-handle="{{ product.handle | escape }}"
-    {{ block.shopify_attributes }}
-  ></div>
-
+{% if template.name == 'product' and product %}
   <script>
     (function () {
-      var mount = document.getElementById('ashrium-vfr-{{ block.id }}');
+      if (document.getElementById('ashrium-vfr-app-embed')) return;
       var appOrigin = {{ block.settings.platform_url | json }};
-      var variants = {{ product.variants | json }};
-
-      if (!mount || !appOrigin) return;
+      if (!appOrigin) return;
       try {
         appOrigin = new URL(appOrigin).origin;
       } catch (error) {
         return;
       }
+
+      var sku = {{ product.selected_or_first_available_variant.sku | json }};
+      var handle = {{ product.handle | json }};
+      var variants = {{ product.variants | json }};
 
       function normalizeSize(value) {
         return String(value || '').trim().toLowerCase();
@@ -26,18 +20,15 @@
 
       function selectNativeVariant(size) {
         var normalizedSize = normalizeSize(size);
-        var match = variants.find(function (variant) {
+        var match = (variants || []).find(function (variant) {
           return Array.isArray(variant.options) && variant.options.some(function (option) {
             return normalizeSize(option) === normalizedSize;
           });
         });
-
         if (!match) return;
-
         document.querySelectorAll('form[action*="/cart/add"]').forEach(function (form) {
           var variantSelect = form.querySelector('select[name="id"]');
           var variantInput = form.querySelector('input[name="id"]');
-
           if (variantSelect) {
             variantSelect.value = String(match.id);
             variantSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -55,21 +46,45 @@
         }
       });
 
-      var script = document.createElement('script');
-      script.src = appOrigin + '/vfr-widget.js?v=no-sandbox-launcher-1';
-      script.async = true;
-      script.dataset.launcher = 'true';
-      script.dataset.sku = mount.dataset.sku || '';
-      script.dataset.handle = mount.dataset.handle || '';
-      mount.appendChild(script);
+      function inject() {
+        if (document.getElementById('ashrium-vfr-app-embed')) return;
+        var forms = document.querySelectorAll('form[action*="/cart/add"]');
+        var form = forms[0];
+        var mount = document.createElement('div');
+        mount.id = 'ashrium-vfr-app-embed';
+        if (form) {
+          var submit = form.querySelector('[type="submit"], button[name="add"]');
+          if (submit && submit.parentNode) {
+            submit.parentNode.insertBefore(mount, submit);
+          } else {
+            form.insertBefore(mount, form.firstChild);
+          }
+        } else {
+          document.body.appendChild(mount);
+        }
+
+        var script = document.createElement('script');
+        script.src = appOrigin + '/vfr-widget.js?v=no-sandbox-launcher-1';
+        script.async = true;
+        script.dataset.launcher = 'true';
+        script.dataset.sku = sku || '';
+        script.dataset.handle = handle || '';
+        mount.appendChild(script);
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', inject);
+      } else {
+        inject();
+      }
     })();
   </script>
 {% endif %}
 
 {% schema %}
 {
-  "name": "Virtual fitting room",
-  "target": "section",
+  "name": "Ashrium Try On",
+  "target": "body",
   "settings": [
     {
       "type": "url",

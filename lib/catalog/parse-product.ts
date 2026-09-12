@@ -244,12 +244,55 @@ function slugPart(value: string): string {
   return slug.slice(0, 48);
 }
 
-function hasCompleteMeasurements(
+function publishedGirth(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function isFullyPublished(
   measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
 ): measurements is Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'> {
   return [measurements.chestCm, measurements.waistCm, measurements.hipCm, measurements.lengthCm].every(
-    (value) => typeof value === 'number' && Number.isFinite(value) && value > 0,
+    publishedGirth,
   );
+}
+
+function isCategoryComplete(
+  category: GarmentCategory,
+  measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
+): boolean {
+  switch (category) {
+    case 'tee':
+    case 'outerwear':
+      return publishedGirth(measurements.chestCm) && publishedGirth(measurements.lengthCm);
+    case 'pant':
+      return (
+        publishedGirth(measurements.waistCm)
+        && publishedGirth(measurements.hipCm)
+        && publishedGirth(measurements.lengthCm)
+      );
+    case 'dress':
+      return publishedGirth(measurements.chestCm) && publishedGirth(measurements.lengthCm);
+    default:
+      return false;
+  }
+}
+
+const CHILDREN_PRODUCT_RE =
+  /\b(kids?|kid'?s|children'?s|child|infant|toddler|baby|babies|youth|boy'?s|girl'?s|boys|girls)\b/i;
+const NON_GARMENT_RE =
+  /\b(keyboard|mouse|lamp|speaker|headphone|earbud|charger|hdmi|usb|electronics?|gadget|toy|toys|puzzle|home\s*decor|furniture|pillow)\b/i;
+
+function productHaystack(product: ShopifyProduct): string {
+  return `${product.productType} ${product.tags.join(' ')} ${product.title} ${product.handle}`.toLowerCase();
+}
+
+export function shouldIngestShopifyProduct(product: ShopifyProduct): boolean {
+  const haystack = productHaystack(product);
+  if (CHILDREN_PRODUCT_RE.test(haystack) || NON_GARMENT_RE.test(haystack)) {
+    return false;
+  }
+
+  return inferCategory(product) !== 'other';
 }
 
 interface VariantMeasurements {
@@ -261,6 +304,7 @@ function measurementsForVariant(
   variant: ShopifyVariant,
   productChart: Map<string, Partial<CatalogSizeVariantInput>>,
   sizeCode: string,
+  category: GarmentCategory,
 ): VariantMeasurements {
   const fromVariant = {
     chestCm: parseNumber(metafieldValue(variant.metafields, ['chest_cm', 'chest', 'bust_cm', 'bust'])),
@@ -273,24 +317,28 @@ function measurementsForVariant(
   );
   const chart = productChart.get(sizeCode);
   const measurements = {
-    chestCm: fromVariant.chestCm ?? jsonMeasurements?.chestCm ?? chart?.chestCm,
-    waistCm: fromVariant.waistCm ?? jsonMeasurements?.waistCm ?? chart?.waistCm,
-    hipCm: fromVariant.hipCm ?? jsonMeasurements?.hipCm ?? chart?.hipCm,
-    lengthCm: fromVariant.lengthCm ?? jsonMeasurements?.lengthCm ?? chart?.lengthCm,
+    chestCm: fromVariant.chestCm ?? jsonMeasurements?.chestCm ?? chart?.chestCm ?? null,
+    waistCm: fromVariant.waistCm ?? jsonMeasurements?.waistCm ?? chart?.waistCm ?? null,
+    hipCm: fromVariant.hipCm ?? jsonMeasurements?.hipCm ?? chart?.hipCm ?? null,
+    lengthCm: fromVariant.lengthCm ?? jsonMeasurements?.lengthCm ?? chart?.lengthCm ?? null,
   };
+  const missing = !isFullyPublished(measurements);
 
-  if (!hasCompleteMeasurements(measurements)) {
+  if (!isCategoryComplete(category, measurements)) {
     return { input: null, hasMissingMeasurements: true };
   }
 
   return {
     input: {
       sizeCode,
-      ...measurements,
+      chestCm: measurements.chestCm,
+      waistCm: measurements.waistCm,
+      hipCm: measurements.hipCm,
+      lengthCm: measurements.lengthCm,
       externalSku: variant.sku.length > 0 ? variant.sku.slice(0, 128) : null,
       measurementsFromSource: true,
     },
-    hasMissingMeasurements: false,
+    hasMissingMeasurements: missing,
   };
 }
 
@@ -389,7 +437,7 @@ function draftForVariants(
   }
 
   const variantMeasurements = variants.map((variant) =>
-    measurementsForVariant(variant, sizeChart, variantSizeCode(variant)),
+    measurementsForVariant(variant, sizeChart, variantSizeCode(variant), category),
   );
   const sizesFromVariants = uniqueSizes(
     variantMeasurements.flatMap((measurement) => (measurement.input ? [measurement.input] : [])),
@@ -403,17 +451,23 @@ function draftForVariants(
       continue;
     }
 
-    if (!hasCompleteMeasurements(partial)) {
+    if (!isCategoryComplete(category, partial)) {
       hasMissingMeasurements = true;
       continue;
     }
 
     chartOnly.push({
       sizeCode,
-      ...partial,
+      chestCm: partial.chestCm ?? null,
+      waistCm: partial.waistCm ?? null,
+      hipCm: partial.hipCm ?? null,
+      lengthCm: partial.lengthCm ?? null,
       externalSku: null,
       measurementsFromSource: true,
     });
+    if (!isFullyPublished(partial)) {
+      hasMissingMeasurements = true;
+    }
   }
   const sizes = uniqueSizes([...sizesFromVariants, ...chartOnly]);
   const classified = classifyDraft(
@@ -455,7 +509,7 @@ export function draftsFromShopifyProduct(
   product: ShopifyProduct,
   storefrontHtml = '',
 ): CatalogGarmentDraft[] {
-  if (product.variants.length === 0) {
+  if (!shouldIngestShopifyProduct(product) || product.variants.length === 0) {
     return [];
   }
 
