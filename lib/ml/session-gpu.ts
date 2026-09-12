@@ -1,10 +1,25 @@
 /**
  * Shopper A100 budget. Body + optional drape must finish inside this wall
- * clock. After it lapses we cancel Replicate predictions, fail the job, and
- * PATCH min_instances=0 so idle GPU time cannot run past two minutes.
+ * clock **after Replicate starts running** (`started_at`). Cog `setup()` /
+ * queue time is a separate budget so a cold replica is not canceled at the
+ * exact moment `task=body` begins.
  */
 export const SHOPPER_INFERENCE_DEADLINE_MS = 2 * 60 * 1000;
 export const SESSION_GPU_SAFETY_TIMEOUT_MS = SHOPPER_INFERENCE_DEADLINE_MS;
+
+/** If capture starts the GPU but no job is submitted, sleep after this. */
+export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;
+
+/**
+ * Max time a prediction may stay queued/starting before we abort. Observed
+ * A100 Cog setup is ~120s; this matches capture warmup idle so a replica that
+ * never comes up cannot bill forever.
+ */
+export const SHOPPER_GPU_SETUP_BUDGET_MS = SHOPPER_GPU_WARMUP_IDLE_MS;
+
+/** Widget / occupancy lookback covering setup plus the inference wall. */
+export const SHOPPER_AVATAR_WAIT_MS =
+  SHOPPER_GPU_SETUP_BUDGET_MS + SHOPPER_INFERENCE_DEADLINE_MS;
 
 /** Upper bound for a drape hold — never past the shopper deadline. */
 export const GPU_HOLD_AFTER_BODY_MS = SHOPPER_INFERENCE_DEADLINE_MS;
@@ -20,9 +35,6 @@ export const DRAPE_MIN_REMAINING_MS = 20 * 1000;
  */
 export const GPU_COLD_START_WAIT_MS = 70 * 1000;
 export const GPU_WARM_SETTLE_WAIT_MS = 12 * 1000;
-
-/** If capture starts the GPU but no job is submitted, sleep after this. */
-export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;
 
 /** Concurrent gpu-a100-large replicas. Operator env ASHRIUM_GPU_MAX_INSTANCES. */
 export const DEFAULT_SHOPPER_GPU_MAX_INSTANCES = 3;
@@ -51,21 +63,41 @@ export const SHOPPER_GPU_TIMEOUT_MESSAGE =
 
 export type SessionGpuAction = 'warm' | 'sleep' | 'status';
 
-export function shopperInferenceDeadlineMs(createdAt: string): number {
-  const created = Date.parse(createdAt);
-  if (!Number.isFinite(created)) {
-    return Date.now() + SHOPPER_INFERENCE_DEADLINE_MS;
+export function shopperGpuActiveLookbackMs(): number {
+  return SHOPPER_AVATAR_WAIT_MS;
+}
+
+export function shopperInferenceDeadlineMs(
+  createdAt: string,
+  inferenceStartedAt?: string | null,
+): number {
+  const started = inferenceStartedAt ? Date.parse(inferenceStartedAt) : Number.NaN;
+  if (Number.isFinite(started)) {
+    return started + SHOPPER_INFERENCE_DEADLINE_MS;
   }
 
-  return created + SHOPPER_INFERENCE_DEADLINE_MS;
+  const created = Date.parse(createdAt);
+  if (!Number.isFinite(created)) {
+    return Date.now() + SHOPPER_GPU_SETUP_BUDGET_MS;
+  }
+
+  return created + SHOPPER_GPU_SETUP_BUDGET_MS;
 }
 
-export function isShopperInferenceOverdue(createdAt: string, now = Date.now()): boolean {
-  return now >= shopperInferenceDeadlineMs(createdAt);
+export function isShopperInferenceOverdue(
+  createdAt: string,
+  now = Date.now(),
+  inferenceStartedAt?: string | null,
+): boolean {
+  return now >= shopperInferenceDeadlineMs(createdAt, inferenceStartedAt);
 }
 
-export function gpuHoldMsUntilDeadline(createdAt: string, now = Date.now()): number {
-  return Math.max(0, shopperInferenceDeadlineMs(createdAt) - now);
+export function gpuHoldMsUntilDeadline(
+  createdAt: string,
+  now = Date.now(),
+  inferenceStartedAt?: string | null,
+): number {
+  return Math.max(0, shopperInferenceDeadlineMs(createdAt, inferenceStartedAt) - now);
 }
 
 export function sessionGpuShouldSleep(input: {

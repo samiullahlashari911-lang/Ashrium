@@ -1,5 +1,4 @@
 import { fetchReplicatePrediction } from '@/lib/ml/replicate';
-import { isShopperInferenceOverdue } from '@/lib/ml/session-gpu';
 import { abortFitJobIfOverdue } from '@/lib/server/abort-shopper-gpu';
 import { applyHmrPredictionToFitJob } from '@/lib/server/apply-hmr-prediction';
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
@@ -76,11 +75,22 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ code: 'JOB_NOT_FOUND' }, { status: 404 });
   }
 
-  if (
+  const predictionId = job.replicate_prediction_id;
+  const shouldReconcile =
     (job.status === 'processing' || job.status === 'pending')
-    && typeof job.created_at === 'string'
-    && isShopperInferenceOverdue(job.created_at)
-  ) {
+    && typeof predictionId === 'string'
+    && predictionId.length > 0;
+
+  if (shouldReconcile && predictionId) {
+    try {
+      const prediction = await fetchReplicatePrediction(predictionId);
+      await applyHmrPredictionToFitJob(jobId, prediction, job);
+    } catch {
+      // Webhook may still land. Fall through to the overdue check.
+    }
+  }
+
+  if (job.status === 'processing' || job.status === 'pending') {
     const aborted = await abortFitJobIfOverdue(jobId);
     if (aborted) {
       const { data: timedOut } = await supabase
@@ -96,30 +106,15 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
 
-  const predictionId = job.replicate_prediction_id;
-  const shouldReconcile =
-    (job.status === 'processing' || job.status === 'pending')
-    && typeof predictionId === 'string'
-    && predictionId.length > 0;
+  const { data: refreshed, error: refreshError } = await supabase
+    .from('fit_jobs')
+    .select(PUBLIC_JOB_COLUMNS)
+    .eq('id', jobId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
 
-  if (shouldReconcile && predictionId) {
-    try {
-      const prediction = await fetchReplicatePrediction(predictionId);
-      await applyHmrPredictionToFitJob(jobId, prediction, job);
-    } catch {
-      // Webhook may still land. Return the row we already have.
-    }
-
-    const { data: refreshed, error: refreshError } = await supabase
-      .from('fit_jobs')
-      .select(PUBLIC_JOB_COLUMNS)
-      .eq('id', jobId)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (!refreshError && refreshed) {
-      return Response.json({ job: publicJobPayload(refreshed) });
-    }
+  if (!refreshError && refreshed) {
+    return Response.json({ job: publicJobPayload(refreshed) });
   }
 
   return Response.json({ job: publicJobPayload(job) });

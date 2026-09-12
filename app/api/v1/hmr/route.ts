@@ -71,6 +71,9 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'FORBIDDEN' }, { status: 403 });
   }
 
+  const pathMismatch = sidePath.tenantId !== tenantId || sidePath.jobId !== frontPath.jobId;
+  const hmrStarted = Date.now();
+
   const rateLimit = await consumeRateLimit(
     `hmr:${tenantId}`,
     RATE_LIMITS.hmrDispatch,
@@ -104,6 +107,9 @@ export async function POST(request: Request): Promise<Response> {
   ]);
 
   if (signedFront.error || !signedFront.data || signedSide.error || !signedSide.data) {
+    // #region agent log
+    fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H2',location:'app/api/v1/hmr/route.ts:POST',message:'biometric signed read missing',data:{frontErr:Boolean(signedFront.error),sideErr:Boolean(signedSide.error)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
   }
@@ -180,6 +186,9 @@ export async function POST(request: Request): Promise<Response> {
       weightKg: body.weightKg,
       webhookUrl: webhookUrl.toString(),
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H1',location:'app/api/v1/hmr/route.ts:POST',message:'replicate dispatched',data:{jobId:job.id,predictionStatus:prediction.status,dispatchMs:Date.now()-hmrStarted,convertedLease,pathMismatch},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     const { error: dispatchUpdateError } = await serviceClient
       .from('fit_jobs')
@@ -194,7 +203,10 @@ export async function POST(request: Request): Promise<Response> {
     after(() => {
       void watchShopperGpuDeadline(job.id);
     });
-  } catch {
+  } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H1',location:'app/api/v1/hmr/route.ts:POST',message:'replicate dispatch failed',data:{jobId:job.id,error:(error instanceof Error ? error.message : 'unknown').slice(0,180),dispatchMs:Date.now()-hmrStarted},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const wasPurged = await purgeBiometricJobImages(
       body.frontImagePath,
       body.sideImagePath,

@@ -4,19 +4,39 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import {
+  SHOPPER_AVATAR_WAIT_MS,
+  SHOPPER_GPU_SETUP_BUDGET_MS,
   SHOPPER_GPU_TIMEOUT_MESSAGE,
   SHOPPER_INFERENCE_DEADLINE_MS,
   gpuHoldMsUntilDeadline,
   isShopperInferenceOverdue,
 } from '@/lib/ml/session-gpu';
 
-test('shopper GPU wall clock is two minutes', () => {
+test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(SHOPPER_INFERENCE_DEADLINE_MS, 120_000);
+  assert.equal(SHOPPER_GPU_SETUP_BUDGET_MS, 180_000);
+  assert.equal(SHOPPER_AVATAR_WAIT_MS, 300_000);
   const created = new Date('2026-01-01T00:00:00.000Z').toISOString();
-  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:01:59.000Z')), false);
-  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:02:00.000Z')), true);
-  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 30_000);
-  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:03:00.000Z')), 0);
+  const started = new Date('2026-01-01T00:02:00.000Z').toISOString();
+  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:02:00.000Z')), false);
+  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:03:00.000Z')), true);
+  assert.equal(
+    isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:03:59.000Z'), started),
+    false,
+  );
+  assert.equal(
+    isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:04:00.000Z'), started),
+    true,
+  );
+  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 90_000);
+  assert.equal(
+    gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:03:30.000Z'), started),
+    30_000,
+  );
+  assert.equal(
+    gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:04:00.000Z'), started),
+    0,
+  );
   assert.match(SHOPPER_GPU_TIMEOUT_MESSAGE, /Sorry/);
   assert.match(SHOPPER_GPU_TIMEOUT_MESSAGE, /2 minutes/);
 });
@@ -38,6 +58,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const cogTopology = readFileSync(path.join(process.cwd(), 'cog/body/topology.py'), 'utf8');
   const cogYaml = readFileSync(path.join(process.cwd(), 'cog/cog.yaml'), 'utf8');
   const applyHmr = readFileSync(path.join(process.cwd(), 'lib/server/apply-hmr-prediction.ts'), 'utf8');
+  const status = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/status/route.ts'), 'utf8');
 
   assert.match(hmr, /convertWarmupLeaseToJob/);
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
@@ -50,20 +71,29 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(replicate, /body\.version = versionId|version: versionId/);
   assert.match(replicate, /status === 409/);
   assert.match(replicate, /deploymentMeetsRequestedScale/);
-  assert.match(sessionGpu, /SHOPPER_INFERENCE_DEADLINE_MS/);
+  assert.match(sessionGpu, /shopperGpuActiveLookbackMs/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
   assert.match(sessionGpu, /shopper_gpu_sessions/);
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
   assert.match(abort, /cancelReplicatePrediction/);
+  assert.match(abort, /fetchReplicatePrediction/);
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
   assert.match(abort, /latest.status !== 'pending'/);
-  assert.match(capture, /SHOPPER_INFERENCE_DEADLINE_MS/);
+  assert.match(abort, /functionGuardMs/);
+  assert.match(capture, /SHOPPER_AVATAR_WAIT_MS/);
   assert.match(capture, /warmShopperGpu/);
   assert.match(capture, /key=\{step\}/);
   assert.match(client, /\/api\/v1\/hmr\/warmup/);
   assert.match(applyHmr, /purgeBiometricJobImages/);
   assert.match(applyHmr, /isTerminalReplicateStatus/);
+  assert.match(applyHmr, /prediction\.startedAt/);
+  assert.match(status, /fetchReplicatePrediction/);
+  assert.match(status, /abortFitJobIfOverdue/);
+  const statusGet = status.slice(status.indexOf('export async function GET'));
+  assert.ok(
+    statusGet.indexOf('fetchReplicatePrediction') < statusGet.indexOf('abortFitJobIfOverdue'),
+  );
   assert.match(cogFit, /FIT_STEPS = 20/);
   assert.match(cogFit, /MIN_FIT_STEPS = 4/);
   assert.match(cogFit, /PLATEAU_PATIENCE = 3/);

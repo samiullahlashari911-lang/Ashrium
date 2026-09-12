@@ -7,6 +7,7 @@ export interface ReplicateWebhookEvent {
   status: string;
   output: unknown;
   error: string | null;
+  startedAt: string | null;
 }
 
 function getWebhookSecret(): Buffer {
@@ -79,11 +80,13 @@ export function verifyReplicateWebhook(
       return null;
     }
 
+    const record = payload as unknown as Record<string, unknown>;
     return {
       id: payload.id,
       status: payload.status,
       output: payload.output,
       error: typeof payload.error === 'string' ? payload.error : null,
+      startedAt: typeof record.started_at === 'string' ? record.started_at : null,
     };
   } catch {
     return null;

@@ -4,9 +4,9 @@ import {
   GPU_COLD_START_WAIT_MS,
   GPU_WARM_SETTLE_WAIT_MS,
   SHOPPER_GPU_WARMUP_IDLE_MS,
-  SHOPPER_INFERENCE_DEADLINE_MS,
   readShopperGpuMaxInstances,
   sessionGpuShouldSleep,
+  shopperGpuActiveLookbackMs,
   shopperGpuOccupancy,
 } from '@/lib/ml/session-gpu';
 import { createServiceClient } from '@/lib/supabase/service';
@@ -37,7 +37,7 @@ function isMissingGpuSessionTable(error: { message?: string; code?: string } | n
 
 async function countActiveBodyJobs(): Promise<number> {
   const supabase = createServiceClient();
-  const cutoff = new Date(Date.now() - SHOPPER_INFERENCE_DEADLINE_MS).toISOString();
+  const cutoff = new Date(Date.now() - shopperGpuActiveLookbackMs()).toISOString();
   const { count, error } = await supabase
     .from('fit_jobs')
     .select('id', { count: 'exact', head: true })

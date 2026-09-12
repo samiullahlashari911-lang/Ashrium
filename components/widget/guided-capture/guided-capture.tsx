@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CaptureIntake, type CaptureIntakeValues } from '@/components/widget/guided-capture/capture-intake';
 import { CaptureViewport } from '@/components/widget/guided-capture/capture-viewport';
 import {
+  SHOPPER_AVATAR_WAIT_MS,
   SHOPPER_GPU_TIMEOUT_MESSAGE,
-  SHOPPER_INFERENCE_DEADLINE_MS,
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import {
@@ -201,7 +201,7 @@ export function GuidedCapture({
       return;
     }
 
-    if (waitSeconds < Math.ceil(SHOPPER_INFERENCE_DEADLINE_MS / 1000)) {
+    if (waitSeconds < Math.ceil(SHOPPER_AVATAR_WAIT_MS / 1000)) {
       return;
     }
 

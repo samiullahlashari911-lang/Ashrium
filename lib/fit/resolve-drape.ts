@@ -319,9 +319,20 @@ async function releaseGpuAfterDrape(jobId: string): Promise<void> {
   void sleepGpuIfNoActiveFitJobs();
 }
 
+function remainingGpuHoldMs(createdAt: string, gpuHoldUntil: string | null | undefined): number {
+  if (typeof gpuHoldUntil === 'string' && gpuHoldUntil.length > 0) {
+    const until = Date.parse(gpuHoldUntil);
+    if (Number.isFinite(until)) {
+      return Math.max(0, until - Date.now());
+    }
+  }
+
+  return gpuHoldMsUntilDeadline(createdAt);
+}
+
 async function runNewtonDrape(options: {
   jobId: string;
-  createdAt: string;
+  remainingMs: number;
   parametric: MhrParametricVector;
   restMesh: RestLengthMesh;
   mechanical: GarmentMechanicalProperties;
@@ -341,7 +352,7 @@ async function runNewtonDrape(options: {
   const body = buildHullCollisionField(lod3.positions, options.parametric.derived_measurements);
   const originY = garmentOriginY(body, options.category);
 
-  await holdGpuForFitJob(options.jobId, gpuHoldMsUntilDeadline(options.createdAt));
+  await holdGpuForFitJob(options.jobId, options.remainingMs);
 
   try {
     await scaleShopperGpuToOccupancy();
@@ -359,7 +370,7 @@ async function runNewtonDrape(options: {
       shearStiffness: options.mechanical.shearStiffness,
       areaDensity: options.mechanical.areaDensity,
       originY,
-    }, { timeoutMs: gpuHoldMsUntilDeadline(options.createdAt) });
+    }, { timeoutMs: options.remainingMs });
   } finally {
     await releaseGpuAfterDrape(options.jobId);
   }
@@ -374,7 +385,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
   const allowNewton = input.allowXpbd ?? true;
   const { data: job, error: jobError } = await input.supabase
     .from('fit_jobs')
-    .select('id, status, height_cm, parametric_result, created_at')
+    .select('id, status, height_cm, parametric_result, created_at, gpu_hold_until')
     .eq('id', input.jobId)
     .eq('tenant_id', input.tenantId)
     .maybeSingle();
@@ -434,7 +445,11 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
       return cached;
     }
 
-    if (!allowNewton || gpuHoldMsUntilDeadline(job.created_at) < DRAPE_MIN_REMAINING_MS) {
+    const remainingMs = remainingGpuHoldMs(
+      job.created_at,
+      typeof job.gpu_hold_until === 'string' ? job.gpu_hold_until : null,
+    );
+    if (!allowNewton || remainingMs < DRAPE_MIN_REMAINING_MS) {
       return unavailable(MHR_TOPOLOGY_VERSION);
     }
 
@@ -450,7 +465,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
     const category = readGarmentCategory(garment.category) ?? restMesh.category;
     const mesh = await runNewtonDrape({
       jobId: input.jobId,
-      createdAt: job.created_at,
+      remainingMs,
       parametric: mhr,
       restMesh,
       mechanical: mechanicalFromProfile(garment),

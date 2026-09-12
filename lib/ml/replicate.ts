@@ -131,6 +131,9 @@ interface ReplicatePredictionResponse {
   status: string;
   output: unknown;
   error: string | null;
+  createdAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 const ANNY_FIT_VERSION_ID_PATTERN = /^[0-9a-f]{64}$/i;
@@ -323,6 +326,30 @@ export function getAnnyFitModelVersion(): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readOptionalIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length < 10) {
+    return null;
+  }
+
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function parseReplicatePredictionPayload(payload: unknown): ReplicatePredictionResponse {
+  if (!isRecord(payload) || typeof payload.id !== 'string' || typeof payload.status !== 'string') {
+    throw new Error('Replicate prediction response was invalid.');
+  }
+
+  return {
+    id: payload.id,
+    status: payload.status,
+    output: payload.output,
+    error: typeof payload.error === 'string' ? payload.error : null,
+    createdAt: readOptionalIsoTimestamp(payload.created_at),
+    startedAt: readOptionalIsoTimestamp(payload.started_at),
+    completedAt: readOptionalIsoTimestamp(payload.completed_at),
+  };
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -815,16 +842,7 @@ export async function fetchReplicatePrediction(
   }
 
   const payload: unknown = await response.json();
-  if (!isRecord(payload) || typeof payload.id !== 'string' || typeof payload.status !== 'string') {
-    throw new Error('Replicate prediction response was invalid.');
-  }
-
-  return {
-    id: payload.id,
-    status: payload.status,
-    output: payload.output,
-    error: typeof payload.error === 'string' ? payload.error : null,
-  };
+  return parseReplicatePredictionPayload(payload);
 }
 
 export async function cancelReplicatePrediction(predictionId: string): Promise<void> {
@@ -1039,7 +1057,7 @@ async function requestReplicatePrediction(
     );
   }
 
-  return (await response.json()) as ReplicatePredictionResponse;
+  return parseReplicatePredictionPayload(await response.json());
 }
 
 export async function dispatchAnnyFitPrediction(

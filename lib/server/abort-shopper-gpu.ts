@@ -1,8 +1,7 @@
-import { cancelReplicatePrediction } from '@/lib/ml/replicate';
+import { cancelReplicatePrediction, fetchReplicatePrediction } from '@/lib/ml/replicate';
 import {
   SHOPPER_GPU_TIMEOUT_MESSAGE,
   SHOPPER_GPU_WARMUP_IDLE_MS,
-  SHOPPER_INFERENCE_DEADLINE_MS,
   isShopperInferenceOverdue,
 } from '@/lib/ml/session-gpu';
 import { purgeBiometricJobImages } from '@/lib/server/biometrics-wipe';
@@ -71,19 +70,38 @@ export async function abortShopperFitJob(job: AbortableFitJob): Promise<boolean>
 
   await releaseGpuHoldForFitJob(job.id);
   await sleepGpuIfNoActiveFitJobs();
+  // #region agent log
+  fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H1',location:'lib/server/abort-shopper-gpu.ts:abortShopperFitJob',message:'job aborted at GPU wall',data:{jobId:job.id,ageMs:Date.now()-Date.parse(job.created_at),hadPrediction:Boolean(job.replicate_prediction_id)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   return true;
+}
+
+async function readInferenceStartedAt(predictionId: string | null): Promise<{
+  startedAt: string | null;
+  status: string | null;
+}> {
+  if (!predictionId) {
+    return { startedAt: null, status: null };
+  }
+
+  try {
+    const prediction = await fetchReplicatePrediction(predictionId);
+    return { startedAt: prediction.startedAt, status: prediction.status };
+  } catch {
+    return { startedAt: null, status: null };
+  }
 }
 
 export async function abortOverdueShopperFitJobs(): Promise<number> {
   const supabase = createServiceClient();
-  const cutoff = new Date(Date.now() - SHOPPER_INFERENCE_DEADLINE_MS).toISOString();
   const { data, error } = await supabase
     .from('fit_jobs')
     .select(
       'id, tenant_id, status, created_at, replicate_prediction_id, front_image_path, side_image_path',
     )
     .in('status', [...ACTIVE_STATUSES])
-    .lte('created_at', cutoff);
+    .order('created_at', { ascending: true })
+    .limit(25);
 
   if (error || !data) {
     return 0;
@@ -91,11 +109,7 @@ export async function abortOverdueShopperFitJobs(): Promise<number> {
 
   let aborted = 0;
   for (const row of data) {
-    const job = row as AbortableFitJob;
-    if (!isShopperInferenceOverdue(job.created_at)) {
-      continue;
-    }
-    if (await abortShopperFitJob(job)) {
+    if (await abortFitJobIfOverdue((row as AbortableFitJob).id)) {
       aborted += 1;
     }
   }
@@ -118,7 +132,20 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
   }
 
   const job = data as AbortableFitJob;
-  if (!isShopperInferenceOverdue(job.created_at)) {
+  if (job.status !== 'pending' && job.status !== 'processing') {
+    return false;
+  }
+
+  const timing = await readInferenceStartedAt(job.replicate_prediction_id);
+  if (timing.status === 'succeeded' || timing.status === 'failed') {
+    return false;
+  }
+
+  const overdue = isShopperInferenceOverdue(job.created_at, Date.now(), timing.startedAt);
+  // #region agent log
+  fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'post-fix',hypothesisId:'H1',location:'lib/server/abort-shopper-gpu.ts:abortFitJobIfOverdue',message:'overdue check vs Replicate started_at',data:{jobId:job.id,overdue,predictionStatus:timing.status,hasStartedAt:Boolean(timing.startedAt),ageMs:Date.now()-Date.parse(job.created_at)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  if (!overdue) {
     return false;
   }
 
@@ -131,18 +158,12 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
  */
 export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
   const supabase = createServiceClient();
-  const { data: job } = await supabase
-    .from('fit_jobs')
-    .select('id, created_at, status')
-    .eq('id', jobId)
-    .maybeSingle();
+  const watchStarted = Date.now();
+  // Stay under Vercel maxDuration=130. Do not sleep the GPU when this
+  // function ends — Cog setup may still be finishing on Replicate.
+  const functionGuardMs = 110_000;
 
-  if (!job) {
-    return;
-  }
-
-  const deadline = Date.parse(job.created_at) + SHOPPER_INFERENCE_DEADLINE_MS;
-  while (Date.now() < deadline) {
+  while (Date.now() - watchStarted < functionGuardMs) {
     await sleep(4000);
     const { data: latest } = await supabase
       .from('fit_jobs')
@@ -157,19 +178,16 @@ export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
     if (latest.status !== 'pending' && latest.status !== 'processing') {
       return;
     }
-  }
 
-  try {
-    await abortFitJobIfOverdue(jobId);
-    await releaseGpuHoldForFitJob(jobId);
-    await sleepGpuIfNoActiveFitJobs();
-  } catch {
-    try {
-      await sleepGpuIfNoActiveFitJobs();
-    } catch {
-      // Last resort already attempted.
+    const aborted = await abortFitJobIfOverdue(jobId);
+    if (aborted) {
+      return;
     }
   }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'post-fix',hypothesisId:'H1',location:'lib/server/abort-shopper-gpu.ts:watchShopperGpuDeadline',message:'watch ended without aborting queued job',data:{jobId,elapsedMs:Date.now()-watchStarted},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 }
 
 /**

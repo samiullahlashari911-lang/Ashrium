@@ -53,6 +53,9 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     await claimShopperGpuSession(tenantId, sessionKey);
+    // #region agent log
+    fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H3',location:'app/api/v1/hmr/warmup/route.ts:POST',message:'warmup claimed',data:{sessionKeyLen:sessionKey.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   } catch (error) {
     if (error instanceof FittingRoomAtCapacityError) {
       return Response.json(
@@ -60,6 +63,10 @@ export async function POST(request: Request): Promise<Response> {
         { status: 409 },
       );
     }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H3',location:'app/api/v1/hmr/warmup/route.ts:POST',message:'warmup failed',data:{error:(error instanceof Error ? error.message : 'unknown').slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     return Response.json({ code: 'SESSION_GPU_FAILED' }, { status: 502 });
   }

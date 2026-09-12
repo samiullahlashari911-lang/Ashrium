@@ -195,12 +195,18 @@ export async function uploadDualHeadlessWebps(
         putWebpToSignedUrl(signed.front.uploadUrl, frontBlob),
         putWebpToSignedUrl(signed.side.uploadUrl, sideBlob),
       ]);
+      // #region agent log
+      fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H2',location:'lib/widget/fit-client.ts:uploadDualHeadlessWebps',message:'signed PUT succeeded',data:{frontBytes:frontBlob.size,sideBytes:sideBlob.size,path:'signed'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return {
         jobId: signed.jobId,
         front: { filePath: signed.front.filePath },
         side: { filePath: signed.side.filePath },
       };
     } catch {
+      // #region agent log
+      fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H2',location:'lib/widget/fit-client.ts:uploadDualHeadlessWebps',message:'signed PUT failed, using proxy',data:{frontBytes:frontBlob.size,sideBytes:sideBlob.size,path:'proxy-fallback'},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       // CORS or network on the bucket — fall through to the Vercel proxy.
     }
   }
