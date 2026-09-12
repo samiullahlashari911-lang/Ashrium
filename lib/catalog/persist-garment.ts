@@ -76,6 +76,10 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
   return { meshes: result.meshes, approximateFit: draft.approximateFit };
 }
 
+function publishedGirthOrNull(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 async function writeSizeVariants(
   supabase: SupabaseClient<Database, 'public'>,
   tenantId: string,
@@ -83,6 +87,10 @@ async function writeSizeVariants(
   draft: CatalogGarmentDraft,
   restPaths: Map<string, string>,
 ): Promise<void> {
+  if (draft.sizeVariants.length === 0) {
+    return;
+  }
+
   const { data: existingVariants, error: existingError } = await supabase
     .from('garment_size_variants')
     .select('id, size_code')
@@ -111,10 +119,10 @@ async function writeSizeVariants(
         tenant_id: tenantId,
         garment_id: garmentId,
         size_code: variant.sizeCode,
-        chest_cm: variant.chestCm,
-        waist_cm: variant.waistCm,
-        hip_cm: variant.hipCm,
-        length_cm: variant.lengthCm,
+        chest_cm: publishedGirthOrNull(variant.chestCm),
+        waist_cm: publishedGirthOrNull(variant.waistCm),
+        hip_cm: publishedGirthOrNull(variant.hipCm),
+        length_cm: publishedGirthOrNull(variant.lengthCm),
         rest_length_path: restPaths.get(variant.sizeCode) ?? null,
         external_sku: variant.externalSku,
       },
@@ -122,12 +130,6 @@ async function writeSizeVariants(
     );
 
     if (error) {
-      const unpublishedGirthRejected = /null value|not-null|check constraint|22P02/i.test(
-        error.message,
-      );
-      if (unpublishedGirthRejected) {
-        continue;
-      }
       throw new Error(error.message);
     }
   }

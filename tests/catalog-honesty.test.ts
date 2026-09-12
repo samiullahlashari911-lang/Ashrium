@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { draftsFromShopifyProduct } from '@/lib/catalog/parse-product';
-import { storefrontHostsForCatalog } from '@/lib/catalog/fetch-product-page';
+import {
+  extractStorefrontProductJsHtml,
+  storefrontHostsForCatalog,
+} from '@/lib/catalog/fetch-product-page';
 import { scanSizeChartFromPage } from '@/lib/catalog/scan-product-page';
 import type { ShopifyProduct } from '@/lib/catalog/shopify-admin';
 
@@ -17,7 +20,7 @@ test('page chart keeps missing source measurements absent', () => {
   assert.deepEqual(chart.get('M'), { chestCm: 104, waistCm: 88 });
 });
 
-test('incomplete Shopify chart rows stay approximate and are not persisted as size variants', () => {
+test('incomplete Shopify chart rows stay approximate and keep published sizes without inventing girths', () => {
   const product: ShopifyProduct = {
     id: 'gid://shopify/Product/1',
     title: 'Essential Tee',
@@ -51,7 +54,46 @@ test('incomplete Shopify chart rows stay approximate and are not persisted as si
   const [draft] = draftsFromShopifyProduct(product);
 
   assert.equal(draft.approximateFit, true);
-  assert.equal(draft.sizeVariants.length, 0);
+  assert.equal(draft.sizeVariants.length, 1);
+  assert.equal(draft.sizeVariants[0]?.sizeCode, 'M');
+  assert.equal(draft.sizeVariants[0]?.chestCm, 104);
+  assert.equal(draft.sizeVariants[0]?.waistCm, 88);
+  assert.equal(draft.sizeVariants[0]?.hipCm, 104);
+  assert.equal(draft.sizeVariants[0]?.lengthCm, null);
+});
+
+test('Shopify Size options persist even when the product page has no size chart', () => {
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/14',
+    title: 'Essential Tee',
+    handle: 'essential-tee',
+    productType: 'T-Shirt',
+    tags: [],
+    description: '',
+    descriptionHtml: '',
+    onlineStoreUrl: 'https://store.example/products/essential-tee',
+    imageUrl: null,
+    metafields: [
+      { namespace: 'custom', key: 'composition', type: 'single_line_text_field', value: '100% Cotton' },
+    ],
+    variants: ['S', 'M', 'L', 'XL'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${20 + index}`,
+      sku: `TEE-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.approximateFit, true);
+  assert.equal(draft.mode, 'C');
+  assert.deepEqual(
+    draft.sizeVariants.map((variant) => variant.sizeCode),
+    ['S', 'M', 'L', 'XL'],
+  );
+  assert.equal(draft.sizeVariants.every((variant) => variant.chestCm === null), true);
+  assert.equal(draft.sizeVariants.every((variant) => variant.measurementsFromSource === false), true);
 });
 
 test('hoodies stay Approximate and are flagged as unsupported geometry', () => {
@@ -206,6 +248,37 @@ test('Legendary inch tables persist category-complete charts without inventing g
   assert.equal(annie.get('S')?.waistCm, 28 * 2.54);
 });
 
+test('short-sleeve tees are not classified as pants', () => {
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/15',
+    title: 'Face Art Print Short Sleeve T-Shirts Streetwear',
+    handle: 'shirts-for-men-face-art-print-short-sleeve-tshirts-streetwear-mens-black',
+    productType: '',
+    tags: [],
+    description: '',
+    descriptionHtml: '',
+    onlineStoreUrl: 'https://store.example/products/short-sleeve-tee',
+    imageUrl: null,
+    metafields: [
+      { namespace: 'custom', key: 'composition', type: 'single_line_text_field', value: '100% Cotton' },
+    ],
+    variants: ['S', 'M', 'L'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${30 + index}`,
+      sku: `FACE-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.category, 'tee');
+  assert.deepEqual(
+    draft.sizeVariants.map((variant) => variant.sizeCode),
+    ['S', 'M', 'L'],
+  );
+});
+
 test('children and electronics products are not ingested', () => {
   const kids: ShopifyProduct = {
     id: 'gid://shopify/Product/12',
@@ -257,5 +330,65 @@ test('catalog storefront hosts include the Admin shop and the primary domain', (
   ]);
   assert.ok(hosts.includes('2sdyw6-ki.myshopify.com'));
   assert.ok(hosts.includes('legendary1122.myshopify.com'));
+});
+
+test('Shopify product.js description HTML is used when body_html is absent', () => {
+  const html = extractStorefrontProductJsHtml(
+    JSON.stringify({
+      handle: 'camo-print-casual-t-shirt',
+      description:
+        '<p>Product Measurements (Measurements by inches)</p><table><tr><th>Size</th><th>Top Length</th><th>Bust</th></tr><tr><td>S</td><td>23.6</td><td>37.8</td></tr></table>',
+    }),
+  );
+  const chart = scanSizeChartFromPage(html);
+  assert.equal(chart.get('S')?.chestCm, 37.8 * 2.54);
+  assert.equal(chart.get('S')?.lengthCm, 23.6 * 2.54);
+  assert.equal(extractStorefrontProductJsHtml(JSON.stringify({ title: 'No chart' })), '');
+});
+
+test('Legendary camo tee Size options ingest S/M/L/XL from the published inch table', () => {
+  const camoHtml = `
+    <p>Product Measurements (Measurements by inches) &amp; Size Conversion</p>
+    <table>
+      <tr><th>Size</th><th>Top Length</th><th>Bust</th></tr>
+      <tr><td>S</td><td>23.6</td><td>37.8</td></tr>
+      <tr><td>M</td><td>24.4</td><td>40.2</td></tr>
+      <tr><td>L</td><td>25.2</td><td>42.5</td></tr>
+      <tr><td>XL</td><td>26</td><td>45.7</td></tr>
+    </table>
+    95% polyester, 5% elastane
+  `;
+  const camoProduct: ShopifyProduct = {
+    id: 'gid://shopify/Product/10',
+    title: 'Camo Print Casual T Shirt',
+    handle: 'camo-print-casual-t-shirt',
+    productType: '',
+    tags: ['Ship From Overseas'],
+    description: '',
+    descriptionHtml: camoHtml,
+    onlineStoreUrl: 'https://legendary1122.myshopify.com/products/camo-print-casual-t-shirt',
+    imageUrl: null,
+    metafields: [],
+    variants: ['S', 'M', 'L', 'XL'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${100 + index}`,
+      sku: `10010063404127${index}`,
+      title: `Gray / ${size}`,
+      selectedOptions: [
+        { name: 'Color', value: 'Gray' },
+        { name: 'Size', value: size },
+      ],
+      metafields: [],
+    })),
+  };
+  const [camo] = draftsFromShopifyProduct(camoProduct);
+  assert.equal(camo.category, 'tee');
+  assert.deepEqual(
+    camo.sizeVariants.map((variant) => variant.sizeCode),
+    ['S', 'M', 'L', 'XL'],
+  );
+  assert.ok((camo.sizeVariants[0]?.chestCm ?? 0) > 0);
+  assert.ok((camo.sizeVariants[0]?.lengthCm ?? 0) > 0);
+  assert.equal(camo.sizeVariants[0]?.waistCm, null);
+  assert.equal(camo.sizeVariants[0]?.hipCm, null);
 });
 

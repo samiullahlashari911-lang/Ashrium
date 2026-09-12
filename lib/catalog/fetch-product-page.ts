@@ -92,23 +92,36 @@ export async function fetchStorefrontProductHtml(url: string): Promise<string> {
   return fetchHttpsText(url, 'text/html');
 }
 
+export function extractStorefrontProductJsHtml(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return raw;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.body_html === 'string' && record.body_html.trim().length > 0) {
+      return record.body_html;
+    }
+
+    // Shopify /products/{handle}.js uses `description`, not REST `body_html`.
+    if (typeof record.description === 'string' && record.description.trim().length > 0) {
+      return record.description;
+    }
+
+    return '';
+  } catch {
+    return raw;
+  }
+}
+
 export async function fetchStorefrontProductJsHtml(url: string): Promise<string> {
   const raw = await fetchHttpsText(url, 'application/json');
   if (!raw) {
     return '';
   }
 
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && 'body_html' in parsed) {
-      const html = (parsed as { body_html?: unknown }).body_html;
-      return typeof html === 'string' ? html : '';
-    }
-  } catch {
-    return raw;
-  }
-
-  return '';
+  return extractStorefrontProductJsHtml(raw);
 }
 
 export async function fetchStorefrontProductCorpus(

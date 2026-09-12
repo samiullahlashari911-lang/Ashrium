@@ -75,7 +75,7 @@ function inferCategory(product: ShopifyProduct): GarmentCategory {
   }
 
   const haystack = `${product.productType} ${product.tags.join(' ')} ${product.title} ${product.handle}`.toLowerCase();
-  if (/\b(pant|pants|trouser|jean|chino|short|legging|jogger|skirt)\b/.test(haystack)) {
+  if (/\b(pant|pants|trouser|jeans?|chino|shorts|legging|jogger|skirt)\b/.test(haystack)) {
     return 'pant';
   }
   if (/\b(dress|gown|jumpsuit|romper)\b/.test(haystack)) {
@@ -84,7 +84,7 @@ function inferCategory(product: ShopifyProduct): GarmentCategory {
   if (/\b(jacket|coat|parka|hoodie|outerwear|blazer|sweater|cardigan)\b/.test(haystack)) {
     return 'outerwear';
   }
-  if (/\b(tee|t-shirt|tshirt|top|polo|shirt|blouse|tank)\b/.test(haystack)) {
+  if (/\b(tee|tees|t-shirts?|tshirts?|tops?|polo|polos|shirts?|blouse|blouses|tanks?)\b/.test(haystack)) {
     return 'tee';
   }
 
@@ -248,6 +248,34 @@ function publishedGirth(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
+function publishedOrNull(value: number | null | undefined): number | null {
+  return publishedGirth(value) ? value : null;
+}
+
+function hasPublishedGirth(
+  measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
+): boolean {
+  return [measurements.chestCm, measurements.waistCm, measurements.hipCm, measurements.lengthCm].some(
+    publishedGirth,
+  );
+}
+
+function sizeInputFromPartial(
+  sizeCode: string,
+  measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
+  externalSku: string | null,
+): CatalogSizeVariantInput {
+  return {
+    sizeCode,
+    chestCm: publishedOrNull(measurements.chestCm),
+    waistCm: publishedOrNull(measurements.waistCm),
+    hipCm: publishedOrNull(measurements.hipCm),
+    lengthCm: publishedOrNull(measurements.lengthCm),
+    externalSku,
+    measurementsFromSource: hasPublishedGirth(measurements),
+  };
+}
+
 function isFullyPublished(
   measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
 ): measurements is Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'> {
@@ -296,7 +324,7 @@ export function shouldIngestShopifyProduct(product: ShopifyProduct): boolean {
 }
 
 interface VariantMeasurements {
-  input: CatalogSizeVariantInput | null;
+  input: CatalogSizeVariantInput;
   hasMissingMeasurements: boolean;
 }
 
@@ -322,22 +350,14 @@ function measurementsForVariant(
     hipCm: fromVariant.hipCm ?? jsonMeasurements?.hipCm ?? chart?.hipCm ?? null,
     lengthCm: fromVariant.lengthCm ?? jsonMeasurements?.lengthCm ?? chart?.lengthCm ?? null,
   };
-  const missing = !isFullyPublished(measurements);
-
-  if (!isCategoryComplete(category, measurements)) {
-    return { input: null, hasMissingMeasurements: true };
-  }
+  const missing = !isFullyPublished(measurements) || !isCategoryComplete(category, measurements);
 
   return {
-    input: {
+    input: sizeInputFromPartial(
       sizeCode,
-      chestCm: measurements.chestCm,
-      waistCm: measurements.waistCm,
-      hipCm: measurements.hipCm,
-      lengthCm: measurements.lengthCm,
-      externalSku: variant.sku.length > 0 ? variant.sku.slice(0, 128) : null,
-      measurementsFromSource: true,
-    },
+      measurements,
+      variant.sku.length > 0 ? variant.sku.slice(0, 128) : null,
+    ),
     hasMissingMeasurements: missing,
   };
 }
@@ -439,9 +459,7 @@ function draftForVariants(
   const variantMeasurements = variants.map((variant) =>
     measurementsForVariant(variant, sizeChart, variantSizeCode(variant), category),
   );
-  const sizesFromVariants = uniqueSizes(
-    variantMeasurements.flatMap((measurement) => (measurement.input ? [measurement.input] : [])),
-  );
+  const sizesFromVariants = uniqueSizes(variantMeasurements.map((measurement) => measurement.input));
   let hasMissingMeasurements = variantMeasurements.some(
     (measurement) => measurement.hasMissingMeasurements,
   );
@@ -451,21 +469,8 @@ function draftForVariants(
       continue;
     }
 
-    if (!isCategoryComplete(category, partial)) {
-      hasMissingMeasurements = true;
-      continue;
-    }
-
-    chartOnly.push({
-      sizeCode,
-      chestCm: partial.chestCm ?? null,
-      waistCm: partial.waistCm ?? null,
-      hipCm: partial.hipCm ?? null,
-      lengthCm: partial.lengthCm ?? null,
-      externalSku: null,
-      measurementsFromSource: true,
-    });
-    if (!isFullyPublished(partial)) {
+    chartOnly.push(sizeInputFromPartial(sizeCode, partial, null));
+    if (!isFullyPublished(partial) || !isCategoryComplete(category, partial)) {
       hasMissingMeasurements = true;
     }
   }
