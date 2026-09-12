@@ -33,6 +33,10 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const client = readFileSync(path.join(process.cwd(), 'lib/widget/fit-client.ts'), 'utf8');
   const cogFit = readFileSync(path.join(process.cwd(), 'cog/body/mhr_fit.py'), 'utf8');
   const cogPredict = readFileSync(path.join(process.cwd(), 'cog/predict.py'), 'utf8');
+  const cogInit = readFileSync(path.join(process.cwd(), 'cog/body/initializer.py'), 'utf8');
+  const cogTopology = readFileSync(path.join(process.cwd(), 'cog/body/topology.py'), 'utf8');
+  const cogYaml = readFileSync(path.join(process.cwd(), 'cog/cog.yaml'), 'utf8');
+  const applyHmr = readFileSync(path.join(process.cwd(), 'lib/server/apply-hmr-prediction.ts'), 'utf8');
 
   assert.match(hmr, /warmAndWaitForShopperGpu/);
   assert.match(hmr, /await warmGpu/);
@@ -47,6 +51,30 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(capture, /SHOPPER_INFERENCE_DEADLINE_MS/);
   assert.match(capture, /warmShopperGpu/);
   assert.match(client, /\/api\/v1\/hmr\/warmup/);
+  assert.match(applyHmr, /purgeBiometricJobImages/);
+  assert.match(applyHmr, /isTerminalReplicateStatus/);
   assert.match(cogFit, /FIT_STEPS = 20/);
+  assert.match(cogFit, /MIN_FIT_STEPS = 4/);
+  assert.match(cogFit, /PLATEAU_PATIENCE = 3/);
+  assert.match(cogFit, /project_scale_along_stature_gradient/);
+  assert.match(cogFit, /batched_view_model_params/);
+  assert.match(cogFit, /skeleton_quaternions/);
+  assert.match(cogFit, /pred_joint_coords/);
+  assert.match(cogFit, /Do not fit against pred_keypoints_3d/);
+  assert.match(cogFit, /Refusing to pad scale_params/);
+  assert.match(cogFit, /MHR_SKELETON_POS_START:MHR_SKELETON_POS_END/);
+  assert.doesNotMatch(cogFit, /skel_state\[\.\.\., -3:\]/);
+  assert.match(cogTopology, /MHR_SKELETON_POS_START = 0/);
+  assert.match(cogTopology, /MHR_SKELETON_QUAT_START = 3/);
+  assert.match(cogTopology, /MHR_JOINT_QUAT_DIM = MHR_JOINT_COUNT \* 4/);
+  assert.match(cogInit, /SAM3D_INFERENCE_TYPE = "body"/);
+  assert.match(cogInit, /inference_type=SAM3D_INFERENCE_TYPE/);
+  assert.match(cogInit, /extract_loaded_mhr/);
+  assert.match(
+    cogYaml,
+    /--no-build-isolation --no-deps "git\+https:\/\/github.com\/facebookresearch\/sam2.git@/,
+  );
   assert.match(cogPredict, /max_side: int = 640/);
+  assert.doesNotMatch(cogPredict, /^from drape\./m);
+  assert.match(cogPredict, /from drape\.newton_xpbd import drape_newton_xpbd/);
 });

@@ -8,6 +8,7 @@ import {
   MHR_SKELETON_DIM,
   MHR_TOPOLOGY_VERSION,
   MHR_VERTEX_COUNT,
+  readMhrFitDiagnostics,
   type AnnyDerivedMeasurements,
   type AnnyParametricVector,
   type AnnyPhenotype,
@@ -577,6 +578,11 @@ export function parseMhrParametricVector(
 
   if (isFiniteNumber(unwrapped.clothing_residual)) {
     result.clothing_residual = unwrapped.clothing_residual;
+  }
+
+  const diagnostics = readMhrFitDiagnostics(unwrapped.fit_diagnostics);
+  if (diagnostics) {
+    result.fit_diagnostics = diagnostics;
   }
 
   return result;

@@ -19,6 +19,10 @@ export const MHR_IDENTITY_DIM = 45;
 export const MHR_BODY_IDENTITY_DIM = 20;
 export const MHR_SKELETON_DIM = 68;
 export const MHR_MODEL_PARAM_DIM = 204;
+/** Momentum skeleton_state: coords [0:3], quaternion xyzw [3:7], scale [7]. */
+export const MHR_SKELETON_STATE_DIM = 8;
+/** Canonical joint rotations: 127 xyzw quaternions (not 3D positions). */
+export const MHR_JOINT_QUAT_DIM = MHR_JOINT_COUNT * 4;
 
 /** Shipped default ANNY hull: triangulated `anny` topology + compact `anny` rig. */
 export const ANNY_VERTEX_COUNT = 13380;
@@ -50,6 +54,39 @@ export interface BodyGirthMeasurements {
 export type AnnyDerivedMeasurements = BodyGirthMeasurements;
 export type MhrDerivedMeasurements = BodyGirthMeasurements;
 
+/** Non-biometric Cog `task=body` stage timings in milliseconds. */
+export const MHR_STAGE_TIMING_KEYS = [
+  'setup',
+  'sam2_front',
+  'sam2_side',
+  'sam3d_front',
+  'sam3d_side',
+  'mhr_fit',
+  'serialization',
+] as const;
+
+export interface MhrFitStageTimingsMs {
+  setup?: number;
+  sam2_front?: number;
+  sam2_side?: number;
+  sam3d_front?: number;
+  sam3d_side?: number;
+  mhr_fit?: number;
+  serialization?: number;
+}
+
+/**
+ * Non-biometric fit diagnostics from the Cog. Iteration count, native-joint
+ * RMSE, residuals, and stage timings — never photos or face pixels.
+ */
+export interface MhrFitDiagnostics {
+  iteration_count?: number;
+  native_joint_rmse_cm?: number;
+  height_residual_cm?: number;
+  silhouette_residual?: number;
+  stage_timings_ms?: MhrFitStageTimingsMs;
+}
+
 /**
  * Product body representation from a live ANNY-Fit call.
  * Joint rotations stay a flat number array so shader-texture, PCA-subset, or
@@ -68,11 +105,13 @@ export interface AnnyParametricVector {
  * Identity is 45 PCA coeffs (first 20 = shared body). Skeleton is the 68
  * scale parameters. Pose is the 204 MHR model_parameters used to evaluate
  * the canonical mesh. Prefer `vertex_positions` from the Cog (LOD 1 cm).
+ * `joint_rotations` are canonical xyzw quaternions (127 × 4), not joint positions.
  */
 export interface MhrParametricVector {
   shape: number[];
   skeleton: number[];
   pose: number[];
+  /** Canonical joint rotations as xyzw quaternions, length `MHR_JOINT_QUAT_DIM`. */
   joint_rotations: number[];
   derived_measurements: MhrDerivedMeasurements;
   topology_version: typeof MHR_TOPOLOGY_VERSION;
@@ -81,6 +120,7 @@ export interface MhrParametricVector {
   vertex_storage_url?: string;
   height_residual_cm?: number;
   clothing_residual?: number;
+  fit_diagnostics?: MhrFitDiagnostics;
 }
 
 export type FitParametricVector = MhrParametricVector | AnnyParametricVector;
@@ -197,6 +237,51 @@ function readFiniteNumbers(value: unknown, minimumLength: number): number[] | nu
   return value.slice();
 }
 
+function readOptionalFinite(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined;
+}
+
+export function readMhrFitDiagnostics(value: unknown): MhrFitDiagnostics | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const diagnostics: MhrFitDiagnostics = {};
+  if (isFiniteNumber(value.iteration_count) && value.iteration_count >= 0) {
+    diagnostics.iteration_count = Math.trunc(value.iteration_count);
+  }
+
+  const jointRmse = readOptionalFinite(value.native_joint_rmse_cm);
+  if (jointRmse !== undefined && jointRmse >= 0) {
+    diagnostics.native_joint_rmse_cm = jointRmse;
+  }
+
+  const heightResidual = readOptionalFinite(value.height_residual_cm);
+  if (heightResidual !== undefined && heightResidual >= 0) {
+    diagnostics.height_residual_cm = heightResidual;
+  }
+
+  const silhouetteResidual = readOptionalFinite(value.silhouette_residual);
+  if (silhouetteResidual !== undefined && silhouetteResidual >= 0) {
+    diagnostics.silhouette_residual = silhouetteResidual;
+  }
+
+  if (isRecord(value.stage_timings_ms)) {
+    const timings: MhrFitStageTimingsMs = {};
+    for (const key of MHR_STAGE_TIMING_KEYS) {
+      const entry = readOptionalFinite(value.stage_timings_ms[key]);
+      if (entry !== undefined && entry >= 0) {
+        timings[key] = entry;
+      }
+    }
+    if (Object.keys(timings).length > 0) {
+      diagnostics.stage_timings_ms = timings;
+    }
+  }
+
+  return Object.keys(diagnostics).length > 0 ? diagnostics : null;
+}
+
 function readGirths(value: unknown): MhrDerivedMeasurements | null {
   if (!isRecord(value)) {
     return null;
@@ -274,6 +359,11 @@ export function readMhrParametricVector(value: unknown): MhrParametricVector | n
 
   if (isFiniteNumber(value.clothing_residual)) {
     result.clothing_residual = value.clothing_residual;
+  }
+
+  const diagnostics = readMhrFitDiagnostics(value.fit_diagnostics);
+  if (diagnostics) {
+    result.fit_diagnostics = diagnostics;
   }
 
   return result;

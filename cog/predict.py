@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import Any
 
 import numpy as np
@@ -12,14 +13,11 @@ import torch
 from cog import BasePredictor, Input, Path
 from PIL import Image
 
+from body.diagnostics import StageClock, elapsed_ms, merge_fit_diagnostics
 from body.initializer import Sam3dAccessError, load_sam3d_estimator, initialize_view
-from body.mhr_fit import fit_two_view_mhr, load_mhr_script
+from body.mhr_fit import fit_two_view_mhr
 from body.silhouettes import load_sam2_predictor, segment_person
 from body.topology import MHR_TOPOLOGY_VERSION
-from drape.collider import downsample_to_lod3, parse_collider_mesh
-from drape.garment import build_cloth_from_rest_mesh, parse_rest_length_mesh
-from drape.newton_xpbd import drape_newton_xpbd
-from pattern.paths import garmentcode_root
 
 
 def _read_rgb(path: Path, max_side: int = 640) -> np.ndarray:
@@ -55,9 +53,11 @@ class Predictor(BasePredictor):
 
         self.device = torch.device("cuda")
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        self.setup_ms = 0.0
+        setup_started = time.perf_counter()
         try:
-            self.estimator, mhr_path = load_sam3d_estimator(self.device)
-            self.mhr = load_mhr_script(mhr_path, self.device)
+            # Reuse the MHR TorchScript SAM 3D Body already loaded — no second jit.load.
+            self.estimator, self.mhr = load_sam3d_estimator(self.device)
             self.sam2 = load_sam2_predictor(self.device)
         except Sam3dAccessError:
             raise
@@ -65,7 +65,10 @@ class Predictor(BasePredictor):
             raise RuntimeError(f"Cog setup failed on live weights: {error}") from error
 
         # Cheap path check so task=pattern cannot silently miss GarmentCode MIT assets.
+        from pattern.paths import garmentcode_root
+
         self.garmentcode_root = garmentcode_root()
+        self.setup_ms = elapsed_ms(setup_started)
 
     def predict(
         self,
@@ -192,22 +195,41 @@ class Predictor(BasePredictor):
         front_rgb = _read_rgb(front_image)
         side_rgb = _read_rgb(side_image)
 
-        front_mask, front_bbox = segment_person(self.sam2, front_rgb)
-        side_mask, side_bbox = segment_person(self.sam2, side_rgb)
+        clock = StageClock()
+        clock.set("setup", getattr(self, "setup_ms", 0.0))
+        with clock.measure("sam2_front"):
+            front_mask, front_bbox = segment_person(self.sam2, front_rgb)
+        with clock.measure("sam2_side"):
+            side_mask, side_bbox = segment_person(self.sam2, side_rgb)
 
-        front_init = initialize_view(self.estimator, front_rgb, front_mask, front_bbox)
-        side_init = initialize_view(self.estimator, side_rgb, side_mask, side_bbox)
+        with clock.measure("sam3d_front"):
+            front_init = initialize_view(self.estimator, front_rgb, front_mask, front_bbox)
+        with clock.measure("sam3d_side"):
+            side_init = initialize_view(self.estimator, side_rgb, side_mask, side_bbox)
 
-        result = fit_two_view_mhr(
-            mhr=self.mhr,
-            front=front_init,
-            side=side_init,
-            front_mask=front_mask,
-            side_mask=side_mask,
-            height_cm=float(height_cm),
-            weight_kg=None if weight_kg is None or float(weight_kg) <= 0 else float(weight_kg),
-            device=self.device,
-        )
+        with clock.measure("mhr_fit"):
+            result = fit_two_view_mhr(
+                mhr=self.mhr,
+                front=front_init,
+                side=side_init,
+                front_mask=front_mask,
+                side_mask=side_mask,
+                height_cm=float(height_cm),
+                weight_kg=None if weight_kg is None or float(weight_kg) <= 0 else float(weight_kg),
+                device=self.device,
+            )
+
+        diagnostics = result.get("fit_diagnostics")
+        serialization_ms = 0.0
+        if isinstance(diagnostics, dict):
+            timings = diagnostics.get("stage_timings_ms")
+            if isinstance(timings, dict) and isinstance(timings.get("serialization"), (int, float)):
+                serialization_ms = float(timings["serialization"])
+        if serialization_ms > 0:
+            clock.subtract("mhr_fit", serialization_ms)
+            clock.set("serialization", serialization_ms)
+
+        merge_fit_diagnostics(result, stage_timings_ms=clock.as_dict())
         result["task"] = "body"
         result["topology_version"] = MHR_TOPOLOGY_VERSION
         result["sex"] = sex
@@ -225,6 +247,10 @@ class Predictor(BasePredictor):
         area_density: float,
         origin_y: float,
     ) -> dict:
+        from drape.collider import downsample_to_lod3, parse_collider_mesh
+        from drape.garment import build_cloth_from_rest_mesh, parse_rest_length_mesh
+        from drape.newton_xpbd import drape_newton_xpbd
+
         positions, indices = parse_collider_mesh(
             _parse_json(collider_positions, "collider_positions"),
             _parse_json(collider_indices, "collider_indices"),

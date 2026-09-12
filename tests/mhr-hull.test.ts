@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import { readShippedMhrHullStamp } from '@/lib/graphics/anny-hull-server';
@@ -36,4 +38,15 @@ test('status-route reconcile only writes terminal Replicate predictions', () => 
   assert.equal(isTerminalReplicateStatus('canceled'), true);
   assert.equal(isTerminalReplicateStatus('processing'), false);
   assert.equal(isTerminalReplicateStatus('starting'), false);
+});
+
+test('terminal HMR apply wipes both biometric webps before storing the phenotype', () => {
+  const applyHmr = readFileSync(path.join(process.cwd(), 'lib/server/apply-hmr-prediction.ts'), 'utf8');
+  const start = applyHmr.indexOf('export async function applyHmrPredictionToFitJob');
+  const end = applyHmr.indexOf("if (prediction.status === 'succeeded')");
+  const purgeBlock = applyHmr.slice(start, end);
+  assert.match(purgeBlock, /purgeBiometricJobImages/);
+  assert.match(purgeBlock, /front_image_path/);
+  assert.match(purgeBlock, /side_image_path/);
+  assert.match(purgeBlock, /PURGE_FAILED/);
 });

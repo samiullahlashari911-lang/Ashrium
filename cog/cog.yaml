@@ -25,14 +25,23 @@ build:
     - libgdk-pixbuf2.0-0
     - shared-mime-info
   python_requirements: requirements.txt
+  # Git sources are pinned to reviewed full SHAs so a rebuild cannot silently
+  # pick up a newer main. SHAs live in cog/body/pins.py and must match this file.
+  # Detectron2 matches SAM 3D Body INSTALL.md (a1ce2f9).
+  # MoGe is the last MoGe-2 tree before V3 — SAM 3D Body uses fov_name=moge2.
+  # DINOv3 is cloned and torch.hub is rewritten off floating `main`.
   run:
-    - git clone --depth 1 https://github.com/facebookresearch/sam-3d-body.git /src/sam-3d-body
+    - git clone https://github.com/facebookresearch/sam-3d-body.git /src/sam-3d-body && git -C /src/sam-3d-body checkout --detach b5c765a0d89d789985e186d396315e7590887b94
     - python -c "from pathlib import Path; import site; Path(site.getsitepackages()[0], 'sam3dbody.pth').write_text('/src/sam-3d-body\n')"
-    - pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git@a1ce2f9"
-    - pip install "git+https://github.com/facebookresearch/sam2.git"
-    - pip install "git+https://github.com/microsoft/MoGe.git"
-    # GarmentCode MIT programs + body/design YAML. pygarment lives in this tree.
+    - pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git@a1ce2f956a1d2212ad672e3c47d53405c2fe4312"
+    # --no-deps/--no-build-isolation: base image already has torch 2.5.1+cu124.
+    # A plain pip install re-downloads torch into this layer (~3GB) and the
+    # r8.im upload of that blob times out.
+    - pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/sam2.git@2b90b9f5ceec907a1c18123530e92e794ad901a4"
+    - pip install "git+https://github.com/microsoft/MoGe.git@07444410f1e33f402353b99d6ccd26bd31e469e8"
+    - git clone https://github.com/facebookresearch/dinov3.git /src/dinov3 && git -C /src/dinov3 checkout --detach 346f38fee679c56a6888f91c51670fae61d364e0
+    # GarmentCode MIT v2.0.2 (55f7edfa). pygarment lives in this tree.
     # --no-deps: pip pygarment pins numpy<2 and pulls cgal/libigl/nicegui (GUI + sim).
-    - git clone --depth 1 --branch v2.0.2 https://github.com/maria-korosteleva/GarmentCode.git /src/garmentcode
+    - git clone https://github.com/maria-korosteleva/GarmentCode.git /src/garmentcode && git -C /src/garmentcode checkout --detach 55f7edfa9c69a0d487a1d23f59cbdd3fa867ad4f
 
 predict: "predict.py:Predictor"

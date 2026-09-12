@@ -1,0 +1,9 @@
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.cog/
+checkpoints/
+*.ckpt
+*.pt
+.env
+.env.*
