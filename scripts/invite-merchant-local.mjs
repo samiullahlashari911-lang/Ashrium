@@ -153,13 +153,24 @@ const { data: linkData, error: linkError } = await service.auth.admin.generateLi
 });
 
 if (linkError) {
-  console.log(JSON.stringify({ tenantId: userId, userId, inviteLink: null }, null, 2));
-  process.exit(0);
+  console.error(
+    'Invite created a tenant but no invite link was returned. Do not email the merchant. Repair with npm run merchant:set-password.',
+  );
+  console.error(JSON.stringify({ tenantId: userId, userId, inviteLink: null }, null, 2));
+  process.exit(1);
 }
 
 const inviteLink =
   linkData.properties && typeof linkData.properties.action_link === 'string'
     ? linkData.properties.action_link
     : null;
+
+if (!inviteLink || !/^https?:\/\//i.test(inviteLink.trim())) {
+  console.error(
+    'Invite created a tenant but no invite link was returned. Do not email the merchant. Repair with npm run merchant:set-password.',
+  );
+  console.error(JSON.stringify({ tenantId: userId, userId, inviteLink: null }, null, 2));
+  process.exit(1);
+}
 
 console.log(JSON.stringify({ tenantId: userId, userId, inviteLink }, null, 2));

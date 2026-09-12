@@ -147,8 +147,8 @@ export function StorefrontSandbox({
         <p className="text-sm font-medium text-obsidian-accent-muted">Legendary store mock</p>
         <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Product page</h1>
         <p className="mt-2 text-sm text-obsidian-muted">
-          Switch garments, then tap Try On above Add to cart. Phone camera only on the live storefront;
-          gallery stays sandbox-only.
+          Switch garments, then tap Try On above Add to cart. Phone camera only on the live
+          storefront; gallery stays sandbox-only. A successful sandbox session is not storefront go-live.
         </p>
       </header>
 

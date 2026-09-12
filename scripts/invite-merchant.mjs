@@ -79,4 +79,22 @@ if (!response.ok) {
   process.exit(1);
 }
 
+let payload;
+try {
+  payload = JSON.parse(body);
+} catch {
+  console.error('Invite returned a non-JSON body. Do not email the merchant.');
+  console.error(body);
+  process.exit(1);
+}
+
+const inviteLink = typeof payload?.inviteLink === 'string' ? payload.inviteLink.trim() : '';
+if (!/^https?:\/\//i.test(inviteLink)) {
+  console.error(
+    'Invite created a tenant but no invite link was returned. Do not email the merchant. Repair with npm run merchant:set-password.',
+  );
+  console.error(body);
+  process.exit(1);
+}
+
 console.log(body);

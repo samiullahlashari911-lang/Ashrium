@@ -15,6 +15,23 @@ export interface ProvisionMerchantResult {
   inviteLink: string | null;
 }
 
+export const MISSING_INVITE_LINK_MESSAGE =
+  'Invite created a tenant but no invite link was returned. Do not email the merchant. Repair with npm run merchant:set-password.';
+
+export function readOperatorInviteLink(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+
+  const link = 'inviteLink' in payload ? payload.inviteLink : null;
+  if (typeof link !== 'string') {
+    return null;
+  }
+
+  const trimmed = link.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+}
+
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }

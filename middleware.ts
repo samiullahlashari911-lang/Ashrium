@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { resolveApiCorsOrigin } from '@/lib/server/widget-cors';
 import type { Database } from '@/types/database';
 
 const API_PREFIX = '/api/v1/';
@@ -35,25 +36,14 @@ function getConfiguredOrigins(): string[] {
     .filter((origin) => origin.length > 0);
 }
 
-function isLocalDevelopmentOrigin(origin: string): boolean {
-  try {
-    const hostname = new URL(origin).hostname;
-    return hostname === 'localhost' || hostname === '127.0.0.1';
-  } catch {
-    return false;
-  }
-}
-
-function isAllowedCorsOrigin(request: NextRequest, origin: string | null): origin is string {
-  if (!origin) {
-    return false;
-  }
-
-  return (
-    origin === request.nextUrl.origin
-    || getConfiguredOrigins().includes(origin)
-    || (process.env.NODE_ENV === 'development' && isLocalDevelopmentOrigin(origin))
-  );
+function resolveRequestCorsOrigin(request: NextRequest, origin: string | null): string | null {
+  return resolveApiCorsOrigin({
+    configuredOrigins: getConfiguredOrigins(),
+    isDevelopment: process.env.NODE_ENV === 'development',
+    origin,
+    pathname: request.nextUrl.pathname,
+    requestOrigin: request.nextUrl.origin,
+  });
 }
 
 function applySecurityHeaders(response: NextResponse, pathname: string): void {
@@ -102,14 +92,16 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   const origin = request.headers.get('origin');
   const isApiRequest = pathname.startsWith(API_PREFIX);
 
+  const corsOrigin = isApiRequest ? resolveRequestCorsOrigin(request, origin) : null;
+
   if (isApiRequest && request.method === 'OPTIONS') {
     const response = new NextResponse(null, {
-      status: isAllowedCorsOrigin(request, origin) ? 204 : 403,
+      status: corsOrigin ? 204 : 403,
     });
     applySecurityHeaders(response, pathname);
 
-    if (isAllowedCorsOrigin(request, origin)) {
-      applyCorsHeaders(response, origin);
+    if (corsOrigin) {
+      applyCorsHeaders(response, corsOrigin);
     }
 
     return response;
@@ -121,8 +113,8 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     const response = NextResponse.next({ request });
     applySecurityHeaders(response, pathname);
 
-    if (isApiRequest && isAllowedCorsOrigin(request, origin)) {
-      applyCorsHeaders(response, origin);
+    if (corsOrigin) {
+      applyCorsHeaders(response, corsOrigin);
     }
 
     return response;
@@ -172,8 +164,8 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (isApiRequest && isAllowedCorsOrigin(request, origin)) {
-    applyCorsHeaders(response, origin);
+  if (corsOrigin) {
+    applyCorsHeaders(response, corsOrigin);
   }
 
   return response;

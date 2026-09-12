@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 import { redirect } from 'next/navigation';
 
 import { DashboardNavigation } from '@/app/(dashboard)/dashboard-navigation';
+import { StorefrontGoLiveBanner } from '@/components/dashboard/storefront-golive-banner';
 import { ThemeShell } from '@/components/theme/atmosphere-backdrop';
+import { loadStorefrontGoLiveStatus } from '@/lib/server/storefront-golive';
 import { createClient } from '@/lib/supabase/server';
 import {
   merchantPortalSignInPath,
@@ -21,9 +23,17 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
     redirect(merchantPortalSignInPath(access.reason));
   }
 
+  let goLiveStatus = null;
+  try {
+    goLiveStatus = await loadStorefrontGoLiveStatus(access.tenantId);
+  } catch {
+    goLiveStatus = null;
+  }
+
   return (
     <ThemeShell intensity="subtle" surface="dashboard">
       <DashboardNavigation />
+      {goLiveStatus ? <StorefrontGoLiveBanner status={goLiveStatus} /> : null}
       {children}
     </ThemeShell>
   );

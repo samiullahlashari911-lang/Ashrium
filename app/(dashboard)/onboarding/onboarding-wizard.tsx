@@ -108,7 +108,8 @@ export function OnboardingWizard({
         <p className="text-sm font-medium text-obsidian-accent-muted">Getting started</p>
         <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Set up your fitting room</h1>
         <p className="mt-2 text-sm text-obsidian-muted">
-          Four steps to a live Try On. You can leave and come back — progress is saved as you go.
+          Four steps to a live Try On. Sandbox preview is not storefront go-live. You can leave
+          and come back — progress is saved as you go.
         </p>
         <div
           className="mt-5 h-2 overflow-hidden rounded-full bg-white/10"
@@ -165,18 +166,18 @@ export function OnboardingWizard({
       <StepShell
         index={3}
         complete={shopifyConnected}
-        title="Connect Shopify and install the block"
+        title="Connect Shopify and enable Try On"
         description="Authorize the Ashrium VFR Partner app once; catalog ingest runs server-side."
       >
         <div className="obsidian-glass flex flex-col gap-4 p-6">
           <p className="text-sm text-obsidian-muted">
             {shopifyConnected && shopDomain
-              ? `Connected to ${shopDomain}. Add the "Virtual fitting room" app block to your product template.`
-              : 'Connect Shopify with OAuth, then add the "Virtual fitting room" app block to your product template.'}
+              ? `Connected to ${shopDomain}. In the published theme, open Theme settings → App embeds, enable “Ashrium Try On”, and set the platform URL below. Do not also add the “Virtual fitting room” section block unless the embed cannot find Add to cart.`
+              : 'Connect Shopify with OAuth, then enable Theme settings → App embeds → Ashrium Try On on the published theme.'}
           </p>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
-              Ashrium platform URL for the block
+              Ashrium platform URL for the embed
             </p>
             <p className="mt-1 break-all font-mono text-sm text-obsidian-ink">
               {platformUrl || 'Set APP_BASE_URL to display your platform URL.'}
@@ -197,7 +198,7 @@ export function OnboardingWizard({
         <div className="obsidian-glass flex flex-col gap-4 p-6">
           <p className="text-sm text-obsidian-muted">
             {garmentsComplete
-              ? `${garmentCount} garment${garmentCount === 1 ? '' : 's'} in your library. Open the sandbox to preview a drape.`
+              ? `${garmentCount} garment${garmentCount === 1 ? '' : 's'} in your library. Sandbox can preview capture — that is not live storefront Try On.`
               : 'Your garment library is empty. Sync your catalog to grade sizes and materials.'}
           </p>
           <div className="flex flex-wrap gap-3">

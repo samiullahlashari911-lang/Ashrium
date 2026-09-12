@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation';
 
 import { EmptyState } from '@/components/dashboard/empty-state';
 import { calculateReturnRateAnalytics } from '@/lib/analytics/return-rates';
-import { tenantNeedsOnboarding } from '@/lib/onboarding';
 import { getShopifyConnectionStatus } from '@/lib/server/shopify-credentials';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentTenantId } from '@/lib/supabase/tenant';
@@ -26,7 +25,7 @@ export default async function MerchantDashboardPage() {
     await Promise.all([
       supabase
         .from('tenants')
-        .select('company_name, allowed_domains')
+        .select('company_name')
         .eq('id', tenantId)
         .maybeSingle(),
       supabase.from('store_telemetry').select('*').eq('tenant_id', tenantId),
@@ -38,7 +37,6 @@ export default async function MerchantDashboardPage() {
     ]);
 
   const analytics = calculateReturnRateAnalytics(telemetry ?? []);
-  const needsOnboarding = tenantNeedsOnboarding(tenant?.allowed_domains);
   const hasGarments = (garmentCount ?? 0) > 0;
   const hasTelemetry = analytics.totalOrders > 0;
 
@@ -53,14 +51,6 @@ export default async function MerchantDashboardPage() {
           Monitor fit adoption and return-rate performance across your storefront.
         </p>
       </header>
-
-      {needsOnboarding ? (
-        <EmptyState
-          title="Finish setting up your fitting room"
-          description="Add a storefront origin, connect Shopify, and load your first garment before shoppers can open Try On."
-          action={{ href: '/onboarding', label: 'Continue setup' }}
-        />
-      ) : null}
 
       {hasTelemetry ? (
         <>
@@ -122,7 +112,9 @@ export default async function MerchantDashboardPage() {
           className="obsidian-glass p-5 transition hover:border-obsidian-accent/60 hover:bg-white/[0.09]"
         >
           <h2 className="font-semibold text-obsidian-ink">3D Sandbox</h2>
-          <p className="mt-2 text-sm text-obsidian-muted">Test fit, drape, and strain heatmaps.</p>
+          <p className="mt-2 text-sm text-obsidian-muted">
+            First-party capture preview. Not storefront go-live.
+          </p>
         </Link>
         <Link
           href="/dashboard/garments"
