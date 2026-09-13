@@ -28,6 +28,33 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
     isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:04:00.000Z'), started),
     true,
   );
+  assert.equal(
+    isShopperInferenceOverdue(
+      created,
+      Date.parse('2026-01-01T00:02:01.000Z'),
+      created,
+      'starting',
+    ),
+    false,
+  );
+  assert.equal(
+    isShopperInferenceOverdue(
+      created,
+      Date.parse('2026-01-01T00:03:59.000Z'),
+      started,
+      'processing',
+    ),
+    false,
+  );
+  assert.equal(
+    isShopperInferenceOverdue(
+      created,
+      Date.parse('2026-01-01T00:04:00.000Z'),
+      started,
+      'processing',
+    ),
+    true,
+  );
   assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 90_000);
   assert.equal(
     gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:03:30.000Z'), started),
@@ -78,7 +105,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
   assert.match(abort, /cancelReplicatePrediction/);
   assert.match(abort, /applyHmrPredictionToFitJob/);
-  assert.match(abort, /isTerminalReplicateStatus/);
+  assert.match(abort, /predictionStatus/);
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
   assert.match(abort, /latest.status !== 'pending'/);
   assert.match(abort, /functionGuardMs/);

@@ -70,8 +70,11 @@ export function shopperGpuActiveLookbackMs(): number {
 export function shopperInferenceDeadlineMs(
   createdAt: string,
   inferenceStartedAt?: string | null,
+  predictionStatus?: string | null,
 ): number {
-  const started = inferenceStartedAt ? Date.parse(inferenceStartedAt) : Number.NaN;
+  const status = predictionStatus?.trim().toLowerCase() ?? '';
+  const setupOnly = status === 'starting' || status === 'queued';
+  const started = !setupOnly && inferenceStartedAt ? Date.parse(inferenceStartedAt) : Number.NaN;
   if (Number.isFinite(started)) {
     return started + SHOPPER_INFERENCE_DEADLINE_MS;
   }
@@ -88,16 +91,18 @@ export function isShopperInferenceOverdue(
   createdAt: string,
   now = Date.now(),
   inferenceStartedAt?: string | null,
+  predictionStatus?: string | null,
 ): boolean {
-  return now >= shopperInferenceDeadlineMs(createdAt, inferenceStartedAt);
+  return now >= shopperInferenceDeadlineMs(createdAt, inferenceStartedAt, predictionStatus);
 }
 
 export function gpuHoldMsUntilDeadline(
   createdAt: string,
   now = Date.now(),
   inferenceStartedAt?: string | null,
+  predictionStatus?: string | null,
 ): number {
-  return Math.max(0, shopperInferenceDeadlineMs(createdAt, inferenceStartedAt) - now);
+  return Math.max(0, shopperInferenceDeadlineMs(createdAt, inferenceStartedAt, predictionStatus) - now);
 }
 
 export function sessionGpuShouldSleep(input: {

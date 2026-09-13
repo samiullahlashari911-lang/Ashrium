@@ -104,7 +104,12 @@ export async function applyHmrPredictionToFitJob(
         throw new HmrJobApplyError('Unable to save fit job output.', 'SAVE_FAILED');
       }
 
-      const holdMs = gpuHoldMsUntilDeadline(job.created_at, Date.now(), prediction.startedAt);
+      const holdMs = gpuHoldMsUntilDeadline(
+        job.created_at,
+        Date.now(),
+        prediction.startedAt,
+        prediction.status,
+      );
       if (holdMs > 0) {
         await holdGpuForFitJob(jobId, holdMs);
       } else {

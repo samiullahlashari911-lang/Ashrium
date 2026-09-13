@@ -123,10 +123,12 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
   }
 
   let startedAt: string | null = null;
+  let predictionStatus: string | null = null;
   if (job.replicate_prediction_id) {
     try {
       const prediction = await fetchReplicatePrediction(job.replicate_prediction_id);
       startedAt = prediction.startedAt;
+      predictionStatus = prediction.status;
       if (isTerminalReplicateStatus(prediction.status)) {
         try {
           await applyHmrPredictionToFitJob(job.id, prediction, job);
@@ -140,7 +142,7 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
     }
   }
 
-  if (!isShopperInferenceOverdue(job.created_at, Date.now(), startedAt)) {
+  if (!isShopperInferenceOverdue(job.created_at, Date.now(), startedAt, predictionStatus)) {
     return false;
   }
 
