@@ -64,6 +64,7 @@ export function GuidedCapture({
   const [waitSeconds, setWaitSeconds] = useState(0);
   const [uploadStage, setUploadStage] = useState<DualUploadProgress | null>(null);
   const [warmupError, setWarmupError] = useState<string | null>(null);
+  const [gpuArmed, setGpuArmed] = useState(false);
   const gpuSessionKeyRef = useRef(
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -71,7 +72,6 @@ export function GuidedCapture({
   );
   const jobIdRef = useRef<string | null>(null);
   const completedRef = useRef(false);
-  const previousStepRef = useRef<CaptureStep>(step);
   jobIdRef.current = jobId;
 
   const stopGpu = useCallback((nextJobId?: string | null) => {
@@ -127,7 +127,9 @@ export function GuidedCapture({
   );
 
   useEffect(() => {
-    if (step !== 'front' && step !== 'side') {
+    const warming =
+      step === 'front' || step === 'side' || (gpuArmed && step === 'intake');
+    if (!warming) {
       return;
     }
 
@@ -163,7 +165,7 @@ export function GuidedCapture({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [embedToken, step]);
+  }, [embedToken, gpuArmed, step]);
 
   useEffect(() => {
     if (step !== 'uploading' && step !== 'inferring') {
@@ -230,14 +232,6 @@ export function GuidedCapture({
   }, [failCapture, step, waitSeconds]);
 
   useEffect(() => {
-    const previous = previousStepRef.current;
-    previousStepRef.current = step;
-    if (step === 'intake' && (previous === 'front' || previous === 'side')) {
-      stopGpu();
-    }
-  }, [step, stopGpu]);
-
-  useEffect(() => {
     const onPageHide = (): void => {
       stopGpu();
     };
@@ -260,6 +254,7 @@ export function GuidedCapture({
     setWaitSeconds(0);
     setUploadStage(null);
     setWarmupError(null);
+    setGpuArmed(false);
   };
 
   const warmupBanner = warmupError ? (
@@ -288,6 +283,7 @@ export function GuidedCapture({
         {warmupBanner}
         <CaptureIntake
           submitLabel="Next"
+          onConsentPassed={() => setGpuArmed(true)}
           onSubmit={(values) => {
             setIntake(values);
             setStep('front');
@@ -343,7 +339,7 @@ export function GuidedCapture({
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
             ? uploadCopy
-            : 'Keep this screen open. The first GPU start can take up to 15 minutes while the body model loads. Do not close Try On.'}
+            : 'Keep this screen open. Usually under two minutes on a warm GPU. First start of a session can take up to five minutes. Closing Try On stops billing.'}
         </p>
         <p className="font-mono text-xs text-obsidian-subtle">
           {step === 'inferring'

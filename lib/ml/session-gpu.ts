@@ -7,18 +7,22 @@
 export const SHOPPER_INFERENCE_DEADLINE_MS = 2 * 60 * 1000;
 export const SESSION_GPU_SAFETY_TIMEOUT_MS = SHOPPER_INFERENCE_DEADLINE_MS;
 
-/** If capture starts the GPU but no job is submitted, sleep after this. */
-export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;
+/**
+ * If capture warms the GPU but no job is submitted, sleep after this.
+ * Height + two photos routinely take longer than three minutes; the widget
+ * pings warmup every 45s while consent/photos are open, so this is idle
+ * after the last ping. Must fit inside Vercel maxDuration (300s).
+ */
+export const SHOPPER_GPU_WARMUP_IDLE_MS = 4 * 60 * 1000;
 
 /**
- * Max time a prediction may stay queued/starting before we abort. Cold A100
- * image pull + Cog `setup()` (SAM 2 + SAM 3D Body, including a first-time
- * HuggingFace fetch when the image is not baked) often exceeds five minutes.
- * Aborting during `starting` is why shoppers never received an avatar.
+ * Max time a prediction may stay queued/starting after submit. Consent
+ * warmup should already be pulling the baked image. Do not bill a shopper
+ * for a 15-minute start.
  */
-export const SHOPPER_GPU_SETUP_BUDGET_MS = 15 * 60 * 1000;
+export const SHOPPER_GPU_SETUP_BUDGET_MS = 3 * 60 * 1000;
 
-/** Widget / occupancy lookback covering setup plus the inference wall. */
+/** Widget wait: 3 minutes starting + 2 minutes of predict(). */
 export const SHOPPER_AVATAR_WAIT_MS =
   SHOPPER_GPU_SETUP_BUDGET_MS + SHOPPER_INFERENCE_DEADLINE_MS;
 

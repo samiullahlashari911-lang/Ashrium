@@ -280,9 +280,16 @@ export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
 
 /**
  * Capture warmup can scale the A100 before a fit job exists. Sleep it if
- * the shopper never submits.
+ * the shopper never submits. Bound by Vercel maxDuration (300s).
  */
 export async function watchWarmGpuIdleTimeout(): Promise<void> {
-  await sleep(SHOPPER_GPU_WARMUP_IDLE_MS);
+  const watchStarted = Date.now();
+  const functionGuardMs = 280_000;
+  const waitMs = Math.min(SHOPPER_GPU_WARMUP_IDLE_MS, functionGuardMs);
+
+  while (Date.now() - watchStarted < waitMs) {
+    await sleep(15_000);
+  }
+
   await reconcileShopperGpu();
 }

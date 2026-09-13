@@ -141,11 +141,14 @@ block.
 - **Design tokens:** `lib/design-tokens.ts` (Obsidian — indigo canvas, glass
   panels, purple→magenta CTAs); do not introduce a new UI kit unless asked.
 
-Session GPU warm uses Deployment PATCH `min_instances=1` when live capture
-starts (after consent) so Cog `setup()` overlaps photos. Body and optional
-drape then share a **2-minute wall clock from job start**. If the avatar is
-not ready, cancel the prediction, fail the job, and sleep (`min_instances=0`).
-If capture starts the GPU and no job is submitted, sleep after 3 minutes.
+Session GPU warm uses Deployment PATCH `min_instances=1` when the shopper
+passes age + privacy consent so Cog `setup()` overlaps height and photos.
+After submit, a prediction may stay `starting` for **up to 3 minutes**.
+Once Replicate sets `started_at`, body + optional drape share a **2-minute
+wall clock**. Widget wait is **5 minutes** total. If the avatar is not
+ready, cancel the prediction, fail the job, and sleep (`min_instances=0`).
+If capture starts the GPU and no job is submitted, sleep after 4 minutes
+without a warmup ping.
 Merchants cannot scale the Deployment. Operator/cron may POST
 `/api/v1/hmr/keepalive`. Do not add 24/7 Vercel cron keep-alive against the
 trial A100 credit.
@@ -225,13 +228,13 @@ Shopify Admin directly.
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
 | Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (faceless mannequin, undergarment, GarmentCode UVs), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
 | Cog (Python) | `cog/predict.py`, `cog/cog.yaml` + `cog/body/pins.py` (git sources pinned to reviewed SHAs), `cog/requirements.txt`, `cog/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, joint-informed ISO girths, stage timings / fit diagnostics), `cog/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `cog/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject). Never `NvidiaWarp-GarmentCode`. |
-| ML | `lib/ml/replicate.ts` (Deployment fetch; parse MHR output; GET/cancel prediction; PATCH `min_instances`), `lib/ml/session-gpu.ts` (2-minute shopper GPU wall clock) |
-| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/warmup/route.ts` (embed-token capture warm), `app/api/v1/hmr/status/route.ts` (Replicate GET reconcile + 2-minute abort), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper capture/submit warms), `app/api/v1/cron/ttl-sweep/route.ts`, `app/api/v1/webhooks/replicate/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/abort-shopper-gpu.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/server/widget-cors.ts` (widget `/api/v1/widget/*` HTTPS preflight; tenant allowlist remains the authz gate), `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Cog `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
+| ML | `lib/ml/replicate.ts` (Deployment fetch; parse MHR output; GET/cancel prediction; PATCH `min_instances`), `lib/ml/session-gpu.ts` (5-minute shopper wait; 2-minute inference after `started_at`) |
+| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/warmup/route.ts` (embed-token capture warm), `app/api/v1/hmr/status/route.ts` (Replicate GET reconcile + 5-minute session abort), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper capture/submit warms), `app/api/v1/cron/ttl-sweep/route.ts`, `app/api/v1/webhooks/replicate/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/abort-shopper-gpu.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/server/widget-cors.ts` (widget `/api/v1/widget/*` HTTPS preflight; tenant allowlist remains the authz gate), `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Cog `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
 | Merchant UI | `app/page.tsx`, `app/privacy/page.tsx`, `lib/privacy/consent-copy.ts`, `lib/privacy/illinois-bipa.ts` (BIPA geofence ship flag; off until counsel), `app/(dashboard)/dashboard-navigation.tsx`, `app/(dashboard)/onboarding/page.tsx`, `app/(dashboard)/onboarding/onboarding-wizard.tsx`, `app/(dashboard)/settings/page.tsx`, `app/(dashboard)/settings/integrations/shopify-form.tsx`, `components/settings/domain-allowlist-form.tsx`, `components/settings/telemetry-secret-form.tsx`, `components/dashboard/empty-state.tsx`, `components/dashboard/catalog-sync-bar.tsx`, `components/dashboard/replicate-runtime-banner.tsx`, `components/dashboard/storefront-golive-banner.tsx` (Sandbox is not storefront go-live), `lib/onboarding.ts`, `lib/server/storefront-golive.ts`, `lib/server/tenant-settings.ts` |
 | Theme | `lib/design-tokens.ts`, `components/theme/atmosphere-backdrop.tsx` |
 | Auth / access | `app/(auth)/sign-in/auth-form.tsx`, `lib/supabase/merchant-access.ts`, `lib/server/provision-merchant.ts`, `lib/server/operator-secret.ts`, `scripts/invite-merchant.mjs` |
 | Storefront twins | `extensions/shopify-vfr/blocks/vfr_embed.liquid`, `extensions/woocommerce-vfr/ashrium-vfr.php` |
-| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, pose-gate hysteresis, height dial units, capture step meter, iframe consent submit / `allow-forms`, dashboard scroll pauses / deferred sandbox iframe, widget CORS preflight vs tenant authz, storefront go-live checklist, route parsers, cron auth, catalog honesty, GarmentCode pattern ingest, print QA / mannequin albedo, MHR Cog contract / 120s GPU deadline). Cog: `cog/tests/` (girth geometry, diagnostics, skeleton layout, 127-joint alignment, axes/units, adaptive convergence, height projection, true rotations). |
+| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, pose-gate hysteresis, height dial units, capture step meter, iframe consent submit / `allow-forms`, dashboard scroll pauses / deferred sandbox iframe, widget CORS preflight vs tenant authz, storefront go-live checklist, route parsers, cron auth, catalog honesty, GarmentCode pattern ingest, print QA / mannequin albedo, MHR Cog contract / 5-minute shopper GPU session). Cog: `cog/tests/` (girth geometry, diagnostics, skeleton layout, 127-joint alignment, axes/units, adaptive convergence, height projection, true rotations). |
 | DB | migrations for `fit_jobs` columns, WebP paths, size variants, vector cache, `match_simulation_cache` RPC, `garment-simulations` bucket, Realtime trigger, invite-only merchant access (`tenants.status`), Shopify catalog credentials + `garment-cad` rest-length bucket, durable `rate_limit_hits` + TTL sweep RPCs |
 
 ---
@@ -268,12 +271,15 @@ patterns to replicate, not copy pixel-for-pixel:
   the product texture. Legend sits at the edge, not overlapping the model.
   Strain is not a verdict.
 - **GPU session chrome (sandbox):** shopper/sandbox path uses a Replicate
-  Deployment. The A100 warms (`min_instances=1`) when live capture starts
-  after consent, so Cog setup overlaps the photos. Submit then dispatches
-  to a warm GPU. Body + optional drape share a **2-minute wall clock from
-  job start**. If the avatar is not ready, cancel the prediction, fail the
-  job, wipe photos, and PATCH `min_instances=0`. Do not leave the GPU billed
-  past 120s after submit. Abandoned capture sleeps the GPU after 3 minutes.
+  Deployment. The A100 warms (`min_instances=1`) when the shopper passes
+  age + privacy consent, so Cog setup overlaps height and photos. Submit
+  then dispatches to a warm GPU. A prediction may stay `starting` for up
+  to **3 minutes** after submit. Once `started_at` is set, body + optional
+  drape share a **2-minute wall clock**. Shopper wait is **5 minutes**
+  total. If the avatar is not ready, cancel the prediction, fail the
+  job, wipe photos, and PATCH `min_instances=0`. Do not leave the GPU
+  billed past that 5-minute session. Abandoned capture sleeps the GPU
+  after 4 minutes without a warmup ping.
   Merchants cannot Warm/Sleep the GPU. Manual scale is operator-only
   (`ASHRIUM_OPERATOR_SECRET` or `CRON_SECRET` on
   `POST /api/v1/hmr/keepalive`). Do **not** run 24/7 Vercel cron keep-alive.
@@ -436,8 +442,9 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   If HuggingFace access to SAM 3D Body weights is not granted, stop — do
   not stub the initializer.
 - **Session GPU, not 24/7 cron.** Shopper path uses the Deployment.
-  `min_instances=1` when live capture starts; hard stop at **120s after
-  job start** (cancel prediction, fail the job, `min_instances=0`).
+  `min_instances=1` when the shopper passes consent; hard stop at **5
+  minutes after submit** (3 minutes if still `starting`, then 120s after
+  `started_at`; cancel prediction, fail the job, `min_instances=0`).
   Merchants cannot Warm/Sleep. Operator/cron may scale via keepalive. Do
   not keep-alive with dummy predictions against the ~$5 A100 credit.
 - **Ask before changing existing UI** that isn't part of the current task's

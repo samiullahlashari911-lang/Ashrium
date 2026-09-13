@@ -33,6 +33,8 @@ export interface CaptureIntakeValues {
 
 interface CaptureIntakeProps {
   onSubmit: (values: CaptureIntakeValues) => void;
+  /** Age + privacy passed — start the A100 while height/photos continue. */
+  onConsentPassed?: () => void;
   heading?: string;
   submitLabel?: string;
   showStep?: boolean;
@@ -101,6 +103,7 @@ function NextCircleButton({
 
 export function CaptureIntake({
   onSubmit,
+  onConsentPassed,
   heading = 'Before we start',
   submitLabel = 'Next',
   showStep = true,
@@ -171,6 +174,7 @@ export function CaptureIntake({
 
     setError(null);
     setPage('height');
+    onConsentPassed?.();
   };
 
   const goProfile = (): void => {

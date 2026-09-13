@@ -51,6 +51,7 @@ test('intake uses a height dial with Next on the right and vertical sex options'
   assert.match(intakeSource, /flex min-w-0 flex-1 flex-col gap-2/);
   assert.match(intakeSource, /Weight <span className="font-normal text-obsidian-subtle">optional/);
   assert.match(intakeSource, /CaptureFlowMeter/);
+  assert.match(intakeSource, /onConsentPassed/);
 });
 
 test('live capture passes the last gate into pose evaluation and tints the outline', () => {
