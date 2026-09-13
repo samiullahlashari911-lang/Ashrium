@@ -245,8 +245,8 @@ export async function reconcileShopperGpu(): Promise<{
 
 /**
  * Stays attached to POST /api/v1/hmr so a closed widget cannot leave the A100
- * billed. The 1-minute gpu-guard cron continues the deadline if this function
- * hits maxDuration while Cog setup is still running.
+ * billed. A daily gpu-guard cron is a last-resort sweeper; closing the widget
+ * or any capture error cancels the prediction immediately.
  */
 export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
   const supabase = createServiceClient();
