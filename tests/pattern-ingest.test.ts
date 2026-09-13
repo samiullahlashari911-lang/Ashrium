@@ -11,7 +11,7 @@ import {
   isPatternCogBodyOutput,
   parsePatternPredictionOutput,
   rewritePatternCogError,
-} from '@/lib/ml/replicate';
+} from '@/lib/ml/gpu';
 import { REST_LENGTH_SCHEMA, type CatalogGarmentDraft } from '@/types/garment';
 import { MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 
@@ -137,7 +137,7 @@ test('task=pattern body-image errors are a deployment mismatch, not a fallback',
 
   const rewritten = rewritePatternCogError(new Error(replicate422));
   assert.equal(rewritten.message, describePatternCogMismatch());
-  assert.match(rewritten.message, /REPLICATE_DEPLOYMENT/);
+  assert.match(rewritten.message, /modal deploy/);
   assert.match(rewritten.message, /task=pattern/);
   assert.match(rewritten.message, /no mock, Laplacian, or fixture fallback/i);
 

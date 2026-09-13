@@ -1,4 +1,4 @@
-import { parseMhrParametricVector } from '@/lib/ml/replicate';
+import { parseMhrParametricVector } from '@/lib/ml/gpu';
 import { gpuHoldMsUntilDeadline } from '@/lib/ml/session-gpu';
 import { purgeBiometricJobImages } from '@/lib/server/biometrics-wipe';
 import {
@@ -38,7 +38,7 @@ export class HmrJobApplyError extends Error {
   }
 }
 
-export function isTerminalReplicateStatus(status: string): boolean {
+export function isTerminalGpuStatus(status: string): boolean {
   return (
     status === 'succeeded'
     || status === 'failed'
@@ -47,12 +47,15 @@ export function isTerminalReplicateStatus(status: string): boolean {
   );
 }
 
+/** @deprecated Alias kept for tests that still mention the old name. */
+export const isTerminalReplicateStatus = isTerminalGpuStatus;
+
 function toJson(value: MhrParametricVector): Json {
   return JSON.parse(JSON.stringify(value)) as Json;
 }
 
 /**
- * Shared write path for the Replicate webhook and status-route reconcile.
+ * Shared write path for Modal body completion and status-route reconcile.
  * Wipes biometrics on any terminal prediction, then stores MHR params or the
  * real parse / Replicate error. Does not invent a phenotype.
  */
@@ -65,7 +68,7 @@ export async function applyHmrPredictionToFitJob(
     return { applied: false };
   }
 
-  if (!isTerminalReplicateStatus(prediction.status)) {
+  if (!isTerminalGpuStatus(prediction.status)) {
     return { applied: false };
   }
 
@@ -103,7 +106,8 @@ export async function applyHmrPredictionToFitJob(
           inference_duration_ms: inferenceDurationMs,
           error_message: null,
         })
-        .eq('id', jobId);
+        .eq('id', jobId)
+        .in('status', ['pending', 'processing']);
 
       if (updateError) {
         throw new HmrJobApplyError('Unable to save fit job output.', 'SAVE_FAILED');
@@ -127,7 +131,7 @@ export async function applyHmrPredictionToFitJob(
         throw error;
       }
 
-      const message = error instanceof Error ? error.message : 'MHR Cog output was invalid.';
+      const message = error instanceof Error ? error.message : 'MHR GPU output was invalid.';
       const { error: updateError } = await serviceClient
         .from('fit_jobs')
         .update({
@@ -136,7 +140,8 @@ export async function applyHmrPredictionToFitJob(
           side_image_path: null,
           error_message: message,
         })
-        .eq('id', jobId);
+        .eq('id', jobId)
+        .in('status', ['pending', 'processing']);
 
       if (updateError) {
         throw new HmrJobApplyError('Unable to save fit job failure.', 'SAVE_FAILED');
@@ -154,9 +159,10 @@ export async function applyHmrPredictionToFitJob(
       status: 'failed',
       front_image_path: null,
       side_image_path: null,
-      error_message: prediction.error ?? `Replicate prediction ${prediction.status}.`,
+      error_message: prediction.error ?? `GPU prediction ${prediction.status}.`,
     })
-    .eq('id', jobId);
+    .eq('id', jobId)
+    .in('status', ['pending', 'processing']);
 
   if (updateError) {
     throw new HmrJobApplyError('Unable to save fit job failure.', 'SAVE_FAILED');

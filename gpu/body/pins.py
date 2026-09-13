@@ -1,6 +1,6 @@
-"""Reviewed git SHAs for Cog image builds. Keep in sync with cog/cog.yaml.
+"""Reviewed git SHAs for Modal image builds. Keep in sync with gpu/modal_app.py.
 
-A rebuild must not float on `main`. Tests assert every SHA appears in cog.yaml.
+A rebuild must not float on `main`. Tests assert every SHA appears in modal_app.py.
 """
 
 from __future__ import annotations

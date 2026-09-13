@@ -21,18 +21,19 @@ test('WebP magic bytes are required and oversized buffers are rejected', () => {
   assert.equal(BIOMETRIC_WEBP_MAX_BYTES, 5 * 1024 * 1024);
 });
 
-test('Replicate biometric read URLs outlive an A100 cold start', () => {
+test('HMR reads biometric WebPs from Storage then POSTs base64 to Modal', () => {
   assert.equal(BIOMETRIC_SIGNED_READ_SECONDS, 15 * 60);
 
   const hmr = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/route.ts'), 'utf8');
-  assert.match(hmr, /uploadReplicateInputFile/);
+  assert.match(hmr, /runBodyPrediction/);
+  assert.match(hmr, /toString\('base64'\)/);
   assert.match(hmr, /\.download\(/);
   assert.doesNotMatch(hmr, /createSignedUrl/);
   assert.match(hmr, /convertWarmupLeaseToJob/);
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
-  assert.match(hmr, /const prediction = await dispatchAnnyFitPrediction/);
   assert.match(hmr, /watchShopperGpuDeadline/);
   assert.doesNotMatch(hmr, /GPU_COLD_START_WAIT_MS/);
+  assert.doesNotMatch(hmr, /uploadReplicateInputFile/);
 });
 
 test('shopper capture PUTs WebPs to signed Storage URLs in parallel', () => {

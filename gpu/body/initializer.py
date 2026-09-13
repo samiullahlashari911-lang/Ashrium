@@ -42,9 +42,9 @@ def huggingface_token(*, required: bool = True) -> str:
     if not token and required:
         raise Sam3dAccessError(
             "HuggingFace access to SAM 3D Body is required. "
-            "Set HF_TOKEN as a Replicate secret after accepting "
-            "facebook/sam-3d-body-dinov3, or bake the snapshot into "
-            "cog/weights before cog push. Do not stub the initializer."
+            "Set HF_TOKEN as a Modal secret after accepting "
+            "facebook/sam-3d-body-dinov3, or prefetch weights into the "
+            "ashrium-weights Volume. Do not stub the initializer."
         )
     return token
 

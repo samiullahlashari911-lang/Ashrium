@@ -16,7 +16,7 @@ import {
   simDeltaToBase64,
 } from '@/lib/graphics/meshopt-delta';
 import { garmentOriginY } from '@/lib/graphics/xpbd-cloth';
-import { runDrapePrediction } from '@/lib/ml/replicate';
+import { runDrapePrediction } from '@/lib/ml/gpu';
 import { DRAPE_MIN_REMAINING_MS, gpuHoldMsUntilDeadline } from '@/lib/ml/session-gpu';
 import {
   holdGpuForFitJob,

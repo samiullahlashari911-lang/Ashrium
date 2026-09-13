@@ -1,4 +1,4 @@
-import { cancelReplicatePrediction, fetchReplicatePrediction } from '@/lib/ml/replicate';
+import { cancelGpuCall, fetchGpuPrediction } from '@/lib/ml/gpu';
 import {
   SHOPPER_GPU_TIMEOUT_MESSAGE,
   SHOPPER_GPU_WARMUP_IDLE_MS,
@@ -7,7 +7,7 @@ import {
 } from '@/lib/ml/session-gpu';
 import {
   applyHmrPredictionToFitJob,
-  isTerminalReplicateStatus,
+  isTerminalGpuStatus,
 } from '@/lib/server/apply-hmr-prediction';
 import { purgeBiometricJobImages } from '@/lib/server/biometrics-wipe';
 import {
@@ -42,7 +42,7 @@ async function cancelPredictionWithRetry(predictionId: string | null): Promise<v
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await cancelReplicatePrediction(predictionId);
+      await cancelGpuCall(predictionId);
       return;
     } catch {
       if (attempt === 2) {
@@ -135,10 +135,10 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
   let predictionStatus: string | null = null;
   if (job.replicate_prediction_id) {
     try {
-      const prediction = await fetchReplicatePrediction(job.replicate_prediction_id);
+      const prediction = await fetchGpuPrediction(job.replicate_prediction_id);
       startedAt = prediction.startedAt;
       predictionStatus = prediction.status;
-      if (isTerminalReplicateStatus(prediction.status)) {
+      if (isTerminalGpuStatus(prediction.status)) {
         try {
           await applyHmrPredictionToFitJob(job.id, prediction, job);
         } catch {
@@ -147,7 +147,7 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
         return false;
       }
     } catch {
-      // Replicate lookup failed; fall through to the wall-clock check.
+      // GPU lookup failed; fall through to the wall-clock check.
     }
   }
 
@@ -183,8 +183,8 @@ export async function abortShopperFitJobById(
 }
 
 /**
- * UI/timeout can mark a job failed while the Cog is still billed. Cancel those
- * leftover predictions, then sleep idle replicas.
+ * UI/timeout can mark a job failed while the A100 is still billed. Cancel those
+ * leftover calls, then sleep idle replicas.
  */
 export async function cancelPredictionsForRecentlyFailedJobs(): Promise<number> {
   const supabase = createServiceClient();

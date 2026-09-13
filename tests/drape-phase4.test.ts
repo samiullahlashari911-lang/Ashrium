@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { mhrSimulationCacheVector } from '@/lib/fit/mhr-cache-vector';
 import { decimateToMhrLod3 } from '@/lib/graphics/mhr-lod3';
-import { parseDrapeSimOutput } from '@/lib/ml/replicate';
+import { parseDrapeSimOutput } from '@/lib/ml/gpu';
 import {
   MHR_LOD3_VERTEX_MAX,
   MHR_LOD3_VERTEX_MIN,

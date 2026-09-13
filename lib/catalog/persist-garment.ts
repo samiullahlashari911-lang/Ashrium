@@ -10,7 +10,7 @@ import {
   runPatternPrediction,
   rewritePatternCogError,
   type PatternIngestResult,
-} from '@/lib/ml/replicate';
+} from '@/lib/ml/gpu';
 import type { Database, GarmentCadProfileInsert, Json } from '@/types/database';
 import type { CatalogGarmentDraft, RestLengthMesh } from '@/types/garment';
 

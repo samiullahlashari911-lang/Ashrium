@@ -1,4 +1,7 @@
-"""Ashrium VFR Cog: SAM 2 + SAM 3D Body initializer + two-view MHR + Newton drape + GarmentCode pattern."""
+"""Ashrium VFR GPU pipeline: SAM 2 + SAM 3D Body init + two-view MHR + Newton + GarmentCode.
+
+Host-agnostic. Modal loads this from @enter; there is no Cog BasePredictor.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +9,11 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
-from cog import BasePredictor, Input, Path
 from PIL import Image
 
 from body.diagnostics import StageClock, elapsed_ms, merge_fit_diagnostics
@@ -42,14 +45,14 @@ def _parse_json(value: str, label: str) -> Any:
         raise RuntimeError(f"{label} is not valid JSON: {error}") from error
 
 
-class Predictor(BasePredictor):
+class AshriumPipeline:
     def setup(self) -> None:
         package_root = os.path.dirname(os.path.abspath(__file__))
         if package_root not in sys.path:
             sys.path.insert(0, package_root)
 
         if not torch.cuda.is_available():
-            raise RuntimeError("This Cog requires a CUDA GPU (gpu-a100-large).")
+            raise RuntimeError("Ashrium GPU pipeline requires a CUDA GPU (A100-80GB).")
 
         self.device = torch.device("cuda")
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
@@ -58,146 +61,33 @@ class Predictor(BasePredictor):
         configure_hf_cache()
         baked = sam3d_snapshot_ready()
         print(
-            "Ashrium Cog setup starting "
-            f"(sam3d_baked={'yes' if baked else 'no'}).",
+            "Ashrium GPU setup starting "
+            f"(sam3d_volume={'yes' if baked else 'no'}).",
             flush=True,
         )
         self.setup_ms = 0.0
         setup_started = time.perf_counter()
         try:
-            # Reuse the MHR TorchScript SAM 3D Body already loaded — no second jit.load.
             self.estimator, self.mhr = load_sam3d_estimator(self.device)
             self.sam2 = load_sam2_predictor(self.device)
         except Sam3dAccessError:
             raise
         except Exception as error:
-            raise RuntimeError(f"Cog setup failed on live weights: {error}") from error
+            raise RuntimeError(f"GPU setup failed on live weights: {error}") from error
 
-        # Cheap path check so task=pattern cannot silently miss GarmentCode MIT assets.
         from pattern.paths import garmentcode_root
 
         self.garmentcode_root = garmentcode_root()
         self.setup_ms = elapsed_ms(setup_started)
 
-    def predict(
+    def predict_body(
         self,
-        task: str = Input(
-            description="Cog task. body = MHR avatar. drape = Newton XPBD. pattern = GarmentCode 2D ingest.",
-            default="body",
-            choices=["body", "drape", "pattern"],
-        ),
-        front_image: Path = Input(
-            description="Head-cropped front A-pose WebP/PNG/JPEG. Required for task=body.",
-            default=None,
-        ),
-        side_image: Path = Input(
-            description="Head-cropped side profile WebP/PNG/JPEG. Required for task=body.",
-            default=None,
-        ),
-        height_cm: float = Input(
-            description="Stated height in centimetres. Required for task=body.",
-            default=0,
-            ge=0,
-            le=250,
-        ),
-        sex: str = Input(
-            description="Capture sex. Used as metadata; girths come from the MHR mesh.",
-            default="unspecified",
-            choices=["female", "male", "unspecified"],
-        ),
-        weight_kg: float = Input(
-            description="Optional stated weight in kilograms. Omit or set 0 if unknown.",
-            default=0,
-            ge=0,
-            le=400,
-        ),
-        collider_positions: str = Input(
-            description="JSON float xyz metres for the rigid collider (LOD 1 or LOD 3).",
-            default="",
-        ),
-        collider_indices: str = Input(
-            description="JSON int triangle indices for the rigid collider.",
-            default="",
-        ),
-        garment_rest_mesh: str = Input(
-            description="JSON ashrium.rest_length.v1 panel used to build the cloth mesh.",
-            default="",
-        ),
-        tensile_stiffness: float = Input(
-            description="KES tensile stiffness (N/m). Drape look only; does not flip size.",
-            default=75,
-            ge=0,
-        ),
-        bending_rigidity: float = Input(
-            description="KES bending rigidity (N*m). Drape look only.",
-            default=0.03,
-            ge=0,
-        ),
-        shear_stiffness: float = Input(
-            description="KES shear stiffness (N/m). Drape look only.",
-            default=45,
-            ge=0,
-        ),
-        area_density: float = Input(
-            description="Fabric area density (kg/m^2).",
-            default=0.18,
-            ge=0,
-        ),
-        origin_y: float = Input(
-            description="Cloth vertical origin in metres (Y-up).",
-            default=0,
-        ),
-        product_text: str = Input(
-            description="Product title, tags, and description for HTML-style parse. task=pattern.",
-            default="",
-        ),
-        size_chart: str = Input(
-            description="JSON array of {sizeCode, chestCm, waistCm, hipCm, lengthCm}. task=pattern.",
-            default="",
-        ),
-        garment_category: str = Input(
-            description="Garment category for task=pattern: tee, pant, dress, outerwear, other.",
-            default="tee",
-            choices=["tee", "pant", "dress", "outerwear", "other"],
-        ),
-    ) -> dict:
-        if task == "pattern":
-            return self._predict_pattern(
-                product_text=product_text,
-                size_chart=size_chart,
-                garment_category=garment_category,
-            )
-        if task == "drape":
-            return self._predict_drape(
-                collider_positions=collider_positions,
-                collider_indices=collider_indices,
-                garment_rest_mesh=garment_rest_mesh,
-                tensile_stiffness=tensile_stiffness,
-                bending_rigidity=bending_rigidity,
-                shear_stiffness=shear_stiffness,
-                area_density=area_density,
-                origin_y=origin_y,
-            )
-        if task != "body":
-            raise RuntimeError(f"Unknown task={task}.")
-        return self._predict_body(
-            front_image=front_image,
-            side_image=side_image,
-            height_cm=height_cm,
-            sex=sex,
-            weight_kg=weight_kg,
-        )
-
-    def _predict_body(
-        self,
-        front_image: Path | None,
-        side_image: Path | None,
+        front_image: Path,
+        side_image: Path,
         height_cm: float,
         sex: str,
         weight_kg: float,
     ) -> dict:
-        if front_image is None or side_image is None:
-            raise RuntimeError("task=body requires front_image and side_image.")
         if float(height_cm) < 50:
             raise RuntimeError("task=body requires height_cm between 50 and 250.")
 
@@ -245,7 +135,7 @@ class Predictor(BasePredictor):
         result["stated_height_cm"] = float(height_cm)
         return result
 
-    def _predict_drape(
+    def predict_drape(
         self,
         collider_positions: str,
         collider_indices: str,
@@ -284,7 +174,7 @@ class Predictor(BasePredictor):
         draped["topology_version"] = MHR_TOPOLOGY_VERSION
         return draped
 
-    def _predict_pattern(
+    def predict_pattern(
         self,
         product_text: str,
         size_chart: str,

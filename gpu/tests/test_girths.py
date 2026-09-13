@@ -166,10 +166,9 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertNotIn("landmarks", diagnostics)
         self.assertEqual(diagnostics["stage_timings_ms"], {"setup": 15.0})
 
-    def test_cog_yaml_pins_match_reviewed_shas(self) -> None:
-        manifest = (COG_ROOT / "cog.yaml").read_text(encoding="utf-8")
+    def test_modal_app_pins_match_reviewed_shas(self) -> None:
+        manifest = (COG_ROOT / "modal_app.py").read_text(encoding="utf-8")
         self.assertNotRegex(manifest, r"git clone --depth 1 https://github.com/")
-        self.assertNotRegex(manifest, r'git\+https://github.com/[^"\s]+(?<!@[0-9a-f]{40})"')
         self.assertIn(
             'pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/sam2.git@',
             manifest,

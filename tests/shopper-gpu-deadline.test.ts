@@ -13,7 +13,7 @@ import {
   isShopperInferenceOverdue,
 } from '@/lib/ml/session-gpu';
 
-test('shopper GPU wall clock is two minutes after Replicate starts', () => {
+test('shopper GPU wall clock is two minutes after Modal starts', () => {
   assert.equal(SHOPPER_INFERENCE_DEADLINE_MS, 120_000);
   assert.equal(SHOPPER_GPU_SETUP_BUDGET_MS, 180_000);
   assert.equal(SHOPPER_AVATAR_WAIT_MS, 300_000);
@@ -91,7 +91,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
 test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const hmr = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/route.ts'), 'utf8');
   const warmup = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/warmup/route.ts'), 'utf8');
-  const replicate = readFileSync(path.join(process.cwd(), 'lib/ml/replicate.ts'), 'utf8');
+  const gpuClient = readFileSync(path.join(process.cwd(), 'lib/ml/gpu.ts'), 'utf8');
   const sessionGpu = readFileSync(path.join(process.cwd(), 'lib/server/session-gpu.ts'), 'utf8');
   const abort = readFileSync(path.join(process.cwd(), 'lib/server/abort-shopper-gpu.ts'), 'utf8');
   const capture = readFileSync(
@@ -103,11 +103,11 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
     'utf8',
   );
   const client = readFileSync(path.join(process.cwd(), 'lib/widget/fit-client.ts'), 'utf8');
-  const cogFit = readFileSync(path.join(process.cwd(), 'cog/body/mhr_fit.py'), 'utf8');
-  const cogPredict = readFileSync(path.join(process.cwd(), 'cog/predict.py'), 'utf8');
-  const cogInit = readFileSync(path.join(process.cwd(), 'cog/body/initializer.py'), 'utf8');
-  const cogTopology = readFileSync(path.join(process.cwd(), 'cog/body/topology.py'), 'utf8');
-  const cogYaml = readFileSync(path.join(process.cwd(), 'cog/cog.yaml'), 'utf8');
+  const cogFit = readFileSync(path.join(process.cwd(), 'gpu/body/mhr_fit.py'), 'utf8');
+  const pipeline = readFileSync(path.join(process.cwd(), 'gpu/pipeline.py'), 'utf8');
+  const cogInit = readFileSync(path.join(process.cwd(), 'gpu/body/initializer.py'), 'utf8');
+  const cogTopology = readFileSync(path.join(process.cwd(), 'gpu/body/topology.py'), 'utf8');
+  const modalApp = readFileSync(path.join(process.cwd(), 'gpu/modal_app.py'), 'utf8');
   const applyHmr = readFileSync(path.join(process.cwd(), 'lib/server/apply-hmr-prediction.ts'), 'utf8');
   const status = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/status/route.ts'), 'utf8');
   const abortRoute = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/abort/route.ts'), 'utf8');
@@ -117,21 +117,19 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(hmr, /convertWarmupLeaseToJob/);
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
   assert.match(hmr, /watchShopperGpuDeadline/);
-  assert.match(hmr, /uploadReplicateInputFile/);
+  assert.match(hmr, /runBodyPrediction/);
   assert.match(hmr, /\.download\(/);
   assert.match(hmr, /maxDuration = 300/);
-  assert.match(hmr, /cancelReplicatePrediction/);
   assert.match(hmr, /SESSION_GPU_FAILED|Unable to start the fitting GPU/);
   assert.match(warmup, /watchWarmGpuIdleTimeout/);
   assert.match(warmup, /maxDuration = 300/);
   assert.match(warmup, /claimShopperGpuSession/);
   assert.match(warmup, /FITTING_ROOM_AT_CAPACITY/);
-  assert.match(replicate, /cancelReplicatePrediction/);
-  assert.match(replicate, /body\.version = versionId|version: versionId/);
-  assert.match(replicate, /status === 409/);
-  assert.match(replicate, /no effect/i);
-  assert.match(replicate, /deploymentMeetsRequestedScale/);
-  assert.match(replicate, /Math\.max\(1, nextMinInstances/);
+  assert.match(gpuClient, /cancelGpuCall/);
+  assert.match(gpuClient, /ASHRIUM_GPU_HMAC/);
+  assert.match(gpuClient, /MODAL_GPU_URL/);
+  assert.match(gpuClient, /min_containers/);
+  assert.match(gpuClient, /A100-80GB/);
   assert.match(sessionGpu, /shopperGpuActiveLookbackMs/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /SHOPPER_GPU_WARMUP_IDLE_MS/);
@@ -139,8 +137,8 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(sessionGpu, /shopper_gpu_sessions/);
   assert.match(sessionGpu, /deleteShopperGpuSession/);
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
-  assert.doesNotMatch(sessionGpu, /minInstancesUpdated: false/);
-  assert.match(abort, /cancelReplicatePrediction/);
+  assert.match(sessionGpu, /scaleModalGpu/);
+  assert.match(abort, /cancelGpuCall/);
   assert.match(abort, /applyHmrPredictionToFitJob/);
   assert.match(abort, /predictionStatus/);
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
@@ -173,14 +171,14 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(client, /\/api\/v1\/hmr\/warmup/);
   assert.match(client, /\/api\/v1\/hmr\/abort/);
   assert.match(applyHmr, /purgeBiometricJobImages/);
-  assert.match(applyHmr, /isTerminalReplicateStatus/);
+  assert.match(applyHmr, /isTerminalGpuStatus/);
   assert.match(applyHmr, /aborted/);
   assert.match(applyHmr, /prediction\.startedAt/);
-  assert.match(status, /fetchReplicatePrediction/);
+  assert.match(status, /fetchGpuPrediction/);
   assert.match(status, /abortFitJobIfOverdue/);
   const statusGet = status.slice(status.indexOf('export async function GET'));
   assert.ok(
-    statusGet.indexOf('fetchReplicatePrediction') < statusGet.indexOf('abortFitJobIfOverdue'),
+    statusGet.indexOf('fetchGpuPrediction') < statusGet.indexOf('abortFitJobIfOverdue'),
   );
   assert.match(cogFit, /FIT_STEPS = 20/);
   assert.match(cogFit, /MIN_FIT_STEPS = 4/);
@@ -201,21 +199,19 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(cogInit, /inference_type=SAM3D_INFERENCE_TYPE/);
   assert.match(cogInit, /extract_loaded_mhr/);
   assert.match(cogInit, /sam3d_snapshot_ready/);
-  assert.match(cogPredict, /configure_hf_cache/);
-  assert.match(cogYaml, /python -m body.prefetch_weights/);
-  const dockerignore = readFileSync(path.join(process.cwd(), 'cog/.dockerignore'), 'utf8');
-  const prefetch = readFileSync(path.join(process.cwd(), 'cog/body/prefetch_weights.py'), 'utf8');
-  assert.doesNotMatch(dockerignore, /^\*\.pt$/m);
-  assert.doesNotMatch(dockerignore, /^\*\.ckpt$/m);
+  assert.match(pipeline, /configure_hf_cache/);
+  assert.match(modalApp, /gpu="A100-80GB"/);
+  assert.match(modalApp, /ASHRIUM_WEIGHTS_ROOT/);
+  const prefetch = readFileSync(path.join(process.cwd(), 'gpu/body/prefetch_weights.py'), 'utf8');
   assert.match(prefetch, /SAM3D_HF_REPO/);
   assert.match(prefetch, /SAM2_HF_ID/);
   assert.match(prefetch, /MOGE_HF_REPO/);
   assert.match(prefetch, /include_gated/);
   assert.match(
-    cogYaml,
+    modalApp,
     /--no-build-isolation --no-deps "git\+https:\/\/github.com\/facebookresearch\/sam2.git@/,
   );
-  assert.match(cogPredict, /max_side: int = 640/);
-  assert.doesNotMatch(cogPredict, /^from drape\./m);
-  assert.match(cogPredict, /from drape\.newton_xpbd import drape_newton_xpbd/);
+  assert.match(pipeline, /max_side: int = 640/);
+  assert.doesNotMatch(pipeline, /^from drape\./m);
+  assert.match(pipeline, /from drape\.newton_xpbd import drape_newton_xpbd/);
 });

@@ -1,5 +1,9 @@
 import { after } from 'next/server';
 
+import { modalCallIdForJob, runBodyPrediction } from '@/lib/ml/gpu';
+import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
+import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
+import { applyHmrPredictionToFitJob } from '@/lib/server/apply-hmr-prediction';
 import {
   parseBiometricJobImagePath,
   purgeBiometricJobImages,
@@ -8,14 +12,6 @@ import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/server/hmr-request';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
-import { createServiceClient } from '@/lib/supabase/service';
-import {
-  cancelReplicatePrediction,
-  dispatchAnnyFitPrediction,
-  uploadReplicateInputFile,
-} from '@/lib/ml/replicate';
-import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
-import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
 import {
   convertWarmupLeaseToJob,
   FittingRoomAtCapacityError,
@@ -24,21 +20,7 @@ import {
   settleWarmReplicaIfNeeded,
   sleepGpuIfNoActiveFitJobs,
 } from '@/lib/server/session-gpu';
-
-function getWebhookBaseUrl(): URL {
-  const appBaseUrl = process.env.APP_BASE_URL?.trim();
-
-  if (!appBaseUrl) {
-    throw new Error('APP_BASE_URL is required for live Replicate webhooks.');
-  }
-
-  const parsedUrl = new URL(appBaseUrl);
-  if (parsedUrl.protocol !== 'https:') {
-    throw new Error('APP_BASE_URL must use HTTPS for live Replicate webhooks.');
-  }
-
-  return parsedUrl;
-}
+import { createServiceClient } from '@/lib/supabase/service';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -109,17 +91,15 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
   }
 
-  let frontImageUrl: string;
-  let sideImageUrl: string;
+  let frontImageB64: string;
+  let sideImageB64: string;
   try {
     const [frontBytes, sideBytes] = await Promise.all([
       frontObject.data.arrayBuffer(),
       sideObject.data.arrayBuffer(),
     ]);
-    [frontImageUrl, sideImageUrl] = await Promise.all([
-      uploadReplicateInputFile(frontBytes, 'front.webp'),
-      uploadReplicateInputFile(sideBytes, 'side.webp'),
-    ]);
+    frontImageB64 = Buffer.from(frontBytes).toString('base64');
+    sideImageB64 = Buffer.from(sideBytes).toString('base64');
   } catch {
     void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 502 });
@@ -137,7 +117,7 @@ export async function POST(request: Request): Promise<Response> {
       front_image_path: body.frontImagePath,
       side_image_path: body.sideImagePath,
     })
-    .select('id')
+    .select('id, created_at')
     .single();
 
   if (createError || !job) {
@@ -177,9 +157,13 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ job_id: job.id, status: 'failed' }, { status: 502 });
   }
 
+  const callId = modalCallIdForJob(job.id);
   const { error: processingError } = await serviceClient
     .from('fit_jobs')
-    .update({ status: 'processing' })
+    .update({
+      status: 'processing',
+      replicate_prediction_id: callId,
+    })
     .eq('id', job.id)
     .eq('tenant_id', tenantId);
 
@@ -205,63 +189,76 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ job_id: job.id, status: 'pending' }, { status: 500 });
   }
 
-  let dispatchedPredictionId: string | null = null;
-  try {
-    const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
-    webhookUrl.searchParams.set('job_id', job.id);
-    const prediction = await dispatchAnnyFitPrediction({
-      frontImageUrl,
-      sideImageUrl,
-      heightCm: body.heightCm,
-      sex: body.sex,
-      weightKg: body.weightKg,
-      webhookUrl: webhookUrl.toString(),
-    });
-    dispatchedPredictionId = prediction.id;
+  after(() => {
+    void watchShopperGpuDeadline(job.id);
+    void (async () => {
+      const startedAt = new Date().toISOString();
+      const jobRow = {
+        replicate_prediction_id: callId,
+        front_image_path: body.frontImagePath,
+        side_image_path: body.sideImagePath,
+        created_at: job.created_at,
+        weight_kg: body.weightKg ?? null,
+      };
 
-    const { error: dispatchUpdateError } = await serviceClient
-      .from('fit_jobs')
-      .update({ replicate_prediction_id: prediction.id })
-      .eq('id', job.id)
-      .eq('tenant_id', tenantId);
-
-    if (dispatchUpdateError) {
-      throw new Error('Unable to associate the Replicate prediction with the fit job.');
-    }
-
-    after(() => {
-      void watchShopperGpuDeadline(job.id);
-    });
-  } catch {
-    if (dispatchedPredictionId) {
       try {
-        await cancelReplicatePrediction(dispatchedPredictionId);
-      } catch {
-        // Job is failed below; gpu-guard will retry cancel.
+        const output = await runBodyPrediction({
+          frontImageB64,
+          sideImageB64,
+          heightCm: body.heightCm,
+          sex: body.sex,
+          weightKg: body.weightKg,
+        });
+        await applyHmrPredictionToFitJob(
+          job.id,
+          {
+            id: callId,
+            status: 'succeeded',
+            output,
+            error: null,
+            startedAt,
+          },
+          jobRow,
+        );
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : 'Unable to dispatch the live body prediction.';
+        try {
+          await applyHmrPredictionToFitJob(
+            job.id,
+            {
+              id: callId,
+              status: 'failed',
+              output: null,
+              error: message,
+              startedAt,
+            },
+            jobRow,
+          );
+        } catch {
+          const wasPurged = await purgeBiometricJobImages(
+            body.frontImagePath,
+            body.sideImagePath,
+          );
+          await serviceClient
+            .from('fit_jobs')
+            .update({
+              status: 'failed',
+              front_image_path: wasPurged ? null : body.frontImagePath,
+              side_image_path: wasPurged ? null : body.sideImagePath,
+              error_message: wasPurged
+                ? message
+                : `${message} Biometric photos could not be purged.`,
+            })
+            .eq('id', job.id)
+            .eq('tenant_id', tenantId)
+            .in('status', ['pending', 'processing']);
+          void sleepGpuIfNoActiveFitJobs();
+        }
       }
-    }
-
-    const wasPurged = await purgeBiometricJobImages(
-      body.frontImagePath,
-      body.sideImagePath,
-    );
-
-    await serviceClient
-      .from('fit_jobs')
-      .update({
-        status: 'failed',
-        front_image_path: wasPurged ? null : body.frontImagePath,
-        side_image_path: wasPurged ? null : body.sideImagePath,
-        error_message: wasPurged
-          ? 'Unable to dispatch the live body prediction.'
-          : 'Unable to dispatch the live body prediction or purge biometric source images.',
-      })
-      .eq('id', job.id)
-      .eq('tenant_id', tenantId);
-
-    void sleepGpuIfNoActiveFitJobs();
-    return Response.json({ job_id: job.id, status: 'failed' }, { status: 502 });
-  }
+    })();
+  });
 
   return Response.json({ job_id: job.id, status: 'pending' }, { status: 202 });
 }

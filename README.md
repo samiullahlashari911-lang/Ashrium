@@ -38,55 +38,42 @@ authenticated server code with `createWidgetEmbedConfig`. Never construct
 widget URLs from a `tenant_id` query parameter or expose the service-role key
 to an embed script.
 
-For live Replicate inference, set `REPLICATE_API_TOKEN`,
-`REPLICATE_HMR_MODEL_VERSION`, `REPLICATE_DEPLOYMENT`, and
-`REPLICATE_WEBHOOK_SIGNING_SECRET` in `.env.local`. Do not paste the token
-into chat or commit it. Obtain the webhook secret from Replicate and
-configure it to call the public Vercel route `/api/v1/webhooks/replicate`;
-do not use a local tunnel.
+For live Modal inference, set `MODAL_GPU_URL` and `ASHRIUM_GPU_HMAC` in
+`.env.local`. Do not paste secrets into chat or commit them. There is no
+Replicate webhook.
 
-`REPLICATE_HMR_MODEL_VERSION` must be a live Cog version: a 64-character
-hash, or `owner/name:<hash>`. `REPLICATE_DEPLOYMENT=owner/name` is
-required. Shopper inference talks to that Deployment. Merchants cannot
-Warm/Sleep it. There is no default hash, no mock model, and no dummy
-keep-alive prediction.
+### Deploy the A100 GPU app on Modal
 
-### Push the A100 Cog and create a Deployment
-
-The live GPU is the tree in `cog/` (SAM 2 silhouettes → SAM 3D Body
-initializer → two-view MHR `task=body`) on `gpu-a100-large`. HuggingFace
-access to **SAM 3D Body** is required — set `HF_TOKEN` as a Replicate
-secret after the gated repo accepts you. Do not stub the initializer.
+The live GPU is the tree in `gpu/` (SAM 2 silhouettes → SAM 3D Body
+initializer → two-view MHR `task=body`) on Modal `A100-80GB`. HuggingFace
+access to **SAM 3D Body** is required — set `HF_TOKEN` as a Modal secret
+after the gated repo accepts you. Do not stub the initializer.
 
 ```powershell
-# From a machine with the Cog CLI and a Replicate token
-cog login
-Set-Location cog
-cog push r8.im/<owner>/ashrium-vfr
+pip install modal
+modal token new
+modal secret create HF_TOKEN HF_TOKEN=hf_...
+modal secret create ASHRIUM_GPU_HMAC ASHRIUM_GPU_HMAC=...
+modal deploy gpu/modal_app.py
+modal run gpu/modal_app.py::prefetch_weights
 ```
 
-Then in the Replicate dashboard: create a **Deployment** of that model on
-Nvidia A100 80GB (`gpu-a100-large`), leave `min_instances=0` until a test
-session, and put the version hash plus `owner/name` into `.env.local`.
-
-`POST /api/v1/hmr` warms the Deployment (`min_instances=1`) when a shopper
-submits both verified photos. The GPU sleeps (`min_instances=0`) when no
-fit job is still pending or processing. Merchants cannot scale the GPU.
-Manual Warm/Sleep is operator-only (`ASHRIUM_OPERATOR_SECRET` or
-`CRON_SECRET` on `POST /api/v1/hmr/keepalive`). GET on that route only
-reads status. `$5 ≈ 3,571s` of billed A100 including idle
-(`$0.001400/s`). Do not leave `min_instances=1` overnight.
+Put the HTTPS web endpoint into `MODAL_GPU_URL`. Shopper consent warms
+`min_containers=1`. The GPU sleeps (`min_containers=0`) when no fit job is
+still pending or processing. Merchants cannot scale the GPU. Manual
+Warm/Sleep is operator-only (`ASHRIUM_OPERATOR_SECRET` or `CRON_SECRET` on
+`POST /api/v1/hmr/keepalive`). GET on that route only reads status.
+Idle A100 is `$0.000694/s`. Do not leave `min_containers=1` overnight.
 
 TTL sweep cron (`GET /api/v1/cron/ttl-sweep` with `CRON_SECRET`) stays
 separate. Immediate photo wipe on inference success or failure is still
 the hot path.
 
-`POST /api/v1/hmr` dispatches `task=body` to the Deployment and returns
-`202` right away, completion arrives via `/api/v1/webhooks/replicate`,
-and the widget waits on the `fit_job:{id}` Realtime topic with a 2-second
-status poll as backup. Photos are still wiped as soon as inference
-finishes or fails. A real body predict returns MHR params or the **real**
-Replicate error — there is no fixture phenotype.
+`POST /api/v1/hmr` returns `202` and runs Modal `task=body` on the request
+path. The widget waits on the `fit_job:{id}` Realtime topic with a status
+poll as backup. Photos are still wiped as soon as inference finishes or
+fails. A real body predict returns MHR params or the **real** Modal error
+— there is no fixture phenotype.
 
 Hobby can schedule a single daily cron. Prefer `/api/v1/cron/ttl-sweep`
 in that slot (`0 4 * * *`). The migration also tries to schedule

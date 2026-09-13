@@ -1,4 +1,4 @@
-import { fetchReplicatePrediction } from '@/lib/ml/replicate';
+import { fetchGpuPrediction } from '@/lib/ml/gpu';
 import { abortFitJobIfOverdue } from '@/lib/server/abort-shopper-gpu';
 import { applyHmrPredictionToFitJob } from '@/lib/server/apply-hmr-prediction';
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
@@ -83,7 +83,7 @@ export async function GET(request: Request): Promise<Response> {
 
   if (shouldReconcile && predictionId) {
     try {
-      const prediction = await fetchReplicatePrediction(predictionId);
+      const prediction = await fetchGpuPrediction(predictionId);
       await applyHmrPredictionToFitJob(jobId, prediction, job);
     } catch {
       // Webhook may still land. Fall through to the overdue check.

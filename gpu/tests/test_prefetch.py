@@ -12,8 +12,10 @@ if str(COG_ROOT) not in sys.path:
 
 from body.prefetch_weights import (  # noqa: E402
     BAKED_HF_REPOS,
+    CHUNK_MARK,
     GATED_HF_REPOS,
     PUBLIC_HF_REPOS,
+    assemble_chunked_files,
     weights_root,
 )
 from body.topology import MOGE_HF_REPO, SAM2_HF_ID, SAM3D_HF_REPO
@@ -28,18 +30,22 @@ class PrefetchContractTests(unittest.TestCase):
         self.assertEqual(PUBLIC_HF_REPOS, (SAM2_HF_ID, MOGE_HF_REPO))
         self.assertEqual(BAKED_HF_REPOS, PUBLIC_HF_REPOS + GATED_HF_REPOS)
 
-    def test_host_weights_are_under_cog_weights(self) -> None:
+    def test_host_weights_are_under_gpu_or_volume(self) -> None:
         root = weights_root()
         self.assertEqual(root.name, "weights")
-        self.assertEqual(root.parent.name, "cog")
+        self.assertIn(root.parent.name, {"gpu", "opt", ""})
 
-    def test_dockerignore_copies_baked_weights(self) -> None:
-        ignore = Path(__file__).resolve().parents[1] / ".dockerignore"
-        text = ignore.read_text(encoding="utf-8")
-        self.assertNotIn("*.pt", text.splitlines())
-        self.assertNotIn("*.ckpt", text.splitlines())
-        self.assertIn("weights/", text)
-        self.assertIn("MUST be copied", text)
+    def test_assemble_chunked_files_rebuilds_original(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "model.ckpt"
+            payload = b"abcdefghijklmnopqrstuvwxyz0123456789"
+            (Path(tmp) / f"model.ckpt{CHUNK_MARK}00").write_bytes(payload[:10])
+            (Path(tmp) / f"model.ckpt{CHUNK_MARK}01").write_bytes(payload[10:])
+            self.assertEqual(assemble_chunked_files(Path(tmp)), 1)
+            self.assertEqual(dest.read_bytes(), payload)
+            self.assertEqual(assemble_chunked_files(Path(tmp)), 0)
 
 
 if __name__ == "__main__":

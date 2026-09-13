@@ -1,7 +1,7 @@
 /**
  * Shopper A100 budget. Body + optional drape must finish inside this wall
- * clock **after Replicate starts running** (`started_at`). Cog `setup()` /
- * queue time is a separate budget so a cold replica is not canceled at the
+ * clock **after Modal starts running** (`started_at`). Image pull /
+ * `@modal.enter` is a separate budget so a cold replica is not canceled at the
  * exact moment `task=body` begins.
  */
 export const SHOPPER_INFERENCE_DEADLINE_MS = 2 * 60 * 1000;
@@ -34,14 +34,14 @@ export const GPU_HOLD_DURING_DRAPE_MS = SHOPPER_INFERENCE_DEADLINE_MS;
 export const DRAPE_MIN_REMAINING_MS = 20 * 1000;
 
 /**
- * Extra wait after scaling 0→1 so Cog `setup()` can finish before dispatch.
- * When min_instances is already 1, submit still waits a short settle so a
- * capture-warm GPU that is still pulling the image is not dispatched empty.
+ * Extra wait after scaling 0→1 so Modal `@enter` can finish before dispatch.
+ * When min_containers is already 1, submit still waits a short settle so a
+ * capture-warm GPU that is still loading weights is not dispatched empty.
  */
 export const GPU_COLD_START_WAIT_MS = 70 * 1000;
 export const GPU_WARM_SETTLE_WAIT_MS = 12 * 1000;
 
-/** Concurrent gpu-a100-large replicas. Operator env ASHRIUM_GPU_MAX_INSTANCES. */
+/** Concurrent Modal A100-80GB replicas. Operator env ASHRIUM_GPU_MAX_INSTANCES. */
 export const DEFAULT_SHOPPER_GPU_MAX_INSTANCES = 3;
 export const SHOPPER_GPU_MAX_INSTANCES_CEILING = 8;
 
@@ -60,8 +60,7 @@ export function readShopperGpuMaxInstances(raw = process.env.ASHRIUM_GPU_MAX_INS
   );
 }
 
-/** Replicate Nvidia A100 80GB list price used in operator copy. */
-export const REPLICATE_A100_USD_PER_SEC = 0.0014;
+export const MODAL_A100_USD_PER_SEC = 0.000694;
 
 export const SHOPPER_GPU_TIMEOUT_MESSAGE =
   'Sorry — the fitting GPU stopped so you are not billed further. Please try again and keep Try On open until the avatar appears.';

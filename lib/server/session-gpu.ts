@@ -1,4 +1,4 @@
-import { patchReplicateDeployment, setReplicateSessionGpu } from '@/lib/ml/replicate';
+import { scaleModalGpu, setModalSessionGpu } from '@/lib/ml/gpu';
 import {
   FITTING_ROOM_AT_CAPACITY_MESSAGE,
   GPU_COLD_START_WAIT_MS,
@@ -103,12 +103,8 @@ async function scaleShopperDeployment(occupancy: number): Promise<{
 }> {
   const cap = readShopperGpuMaxInstances();
   const n = Math.min(cap, Math.max(0, occupancy));
-  const patched = await patchReplicateDeployment({
-    minInstances: n,
-    maxInstances: cap,
-    pinHardware: true,
-  });
-  return { minInstancesUpdated: patched.minInstancesUpdated };
+  const patched = await scaleModalGpu(n);
+  return { minInstancesUpdated: patched.minContainersUpdated };
 }
 
 function isLiveLease(expiresAt: string | null | undefined): boolean {
@@ -260,7 +256,7 @@ export async function scaleShopperGpuToOccupancy(): Promise<{
 
 /** Operator keepalive still pins a single warm replica. Shopper path uses leases. */
 export async function warmGpuForShopperSubmit(): Promise<void> {
-  await setReplicateSessionGpu('warm');
+  await setModalSessionGpu('warm');
 }
 
 /**
@@ -310,7 +306,7 @@ export async function releaseGpuHoldForFitJob(jobId: string): Promise<void> {
 }
 
 /**
- * Sleep the Deployment when no body job, drape hold, or capture lease remains.
+ * Sleep Modal replicas when no body job, drape hold, or capture lease remains.
  */
 export async function sleepGpuIfNoActiveFitJobs(): Promise<void> {
   const supabase = createServiceClient();
@@ -338,5 +334,5 @@ export async function sleepGpuIfNoActiveFitJobs(): Promise<void> {
     return;
   }
 
-  await setReplicateSessionGpu('sleep');
+  await setModalSessionGpu('sleep');
 }

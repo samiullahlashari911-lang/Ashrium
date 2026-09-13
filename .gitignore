@@ -54,7 +54,12 @@ venv/
 __pycache__/
 *.py[cod]
 
-# Cog local weights — never commit gated SAM 3D Body checkpoints
+# GPU local weights — never commit gated SAM 3D Body checkpoints
+gpu/weights/
+gpu/**/*.ckpt
+gpu/**/*.pt
+
+# Retired Cog packaging (if a local leftover remains)
 .cog/
 cog/checkpoints/
 cog/weights/

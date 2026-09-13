@@ -1,17 +1,15 @@
-"""Bake HuggingFace checkpoints into the Cog image.
+"""Download HuggingFace checkpoints into ASHRIUM_WEIGHTS_ROOT.
 
-Cog copies this tree to /src after `run:` steps, so weights must live under
-`cog/weights/` on the host (gitignored) and be allowed by `.dockerignore`.
-Cold-start `setup()` then loads from disk instead of downloading ~8GB from HF.
-
-SAM 3D Body is gated. Prefetch requires HF_TOKEN for that repo. SAM 2 and
-MoGe-2 are public and still worth baking.
+On Modal that is the `/weights` Volume. SAM 3D Body is gated and needs HF_TOKEN.
+Do not stub the initializer.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 from .topology import MOGE_HF_REPO, SAM2_HF_ID, SAM3D_HF_REPO
@@ -19,6 +17,10 @@ from .topology import MOGE_HF_REPO, SAM2_HF_ID, SAM3D_HF_REPO
 PUBLIC_HF_REPOS: tuple[str, ...] = (SAM2_HF_ID, MOGE_HF_REPO)
 GATED_HF_REPOS: tuple[str, ...] = (SAM3D_HF_REPO,)
 BAKED_HF_REPOS: tuple[str, ...] = PUBLIC_HF_REPOS + GATED_HF_REPOS
+# r8.im times out committing ~2GB+ blobs. Bake those files as 384MiB parts
+# and concatenate during setup().
+CHUNK_MARK = ".ashrium_part."
+CHUNK_BYTES = 384 * 1024 * 1024
 
 
 def repo_root() -> Path:
@@ -29,8 +31,8 @@ def weights_root() -> Path:
     override = os.environ.get("ASHRIUM_WEIGHTS_ROOT", "").strip()
     if override:
         return Path(override)
-    if Path("/src/predict.py").is_file():
-        return Path("/src/weights")
+    if Path("/opt/ashrium/pipeline.py").is_file() or Path("/weights").is_dir():
+        return Path(os.environ.get("ASHRIUM_WEIGHTS_ROOT", "/weights"))
     return Path(__file__).resolve().parents[1] / "weights"
 
 
@@ -72,12 +74,39 @@ def read_hf_token() -> str:
     ).strip()
 
 
+def assemble_chunked_files(root: Path) -> int:
+    """Concatenate `name.ashrium_part.00+` into `name` when the whole file is absent."""
+    groups: dict[Path, list[Path]] = defaultdict(list)
+    if not root.is_dir():
+        return 0
+    for path in root.rglob("*"):
+        if not path.is_file() or CHUNK_MARK not in path.name:
+            continue
+        base_name = path.name.split(CHUNK_MARK, 1)[0]
+        groups[path.with_name(base_name)].append(path)
+    assembled = 0
+    for dest, parts in groups.items():
+        ordered = sorted(parts, key=lambda item: item.name)
+        expected = sum(part.stat().st_size for part in ordered)
+        if dest.is_file() and dest.stat().st_size == expected:
+            continue
+        tmp = dest.with_name(dest.name + ".assembling")
+        with tmp.open("wb") as out:
+            for part in ordered:
+                with part.open("rb") as inp:
+                    shutil.copyfileobj(inp, out, 8 * 1024 * 1024)
+        tmp.replace(dest)
+        assembled += 1
+    return assembled
+
+
 def configure_hf_cache() -> Path:
     """Point huggingface_hub / SAM 2 / MoGe at the baked cache."""
     home = hf_home()
     hub = hub_cache()
     home.mkdir(parents=True, exist_ok=True)
     hub.mkdir(parents=True, exist_ok=True)
+    assemble_chunked_files(hub)
     os.environ["HF_HOME"] = str(home)
     os.environ["HF_HUB_CACHE"] = str(hub)
     os.environ["HUGGINGFACE_HUB_CACHE"] = str(hub)

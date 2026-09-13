@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { EmptyState } from '@/components/dashboard/empty-state';
 import {
-  ReplicateRuntimeBanner,
-  type ReplicateRuntimeBannerConfig,
+  GpuRuntimeBanner,
+  type GpuRuntimeBannerConfig,
 } from '@/components/dashboard/replicate-runtime-banner';
 import { VFR_WIDGET_SCRIPT_SRC } from '@/lib/widget/embed-origin';
 import type { GarmentIngestMode, GarmentIngestTier } from '@/types/garment';
@@ -59,12 +59,12 @@ function ingestLabel(garment: SandboxGarmentOption): string {
 
 export function StorefrontSandbox({
   token,
-  replicate,
+  gpu,
   garments,
 }: {
   tenantId: string;
   token: string;
-  replicate: ReplicateRuntimeBannerConfig;
+  gpu: GpuRuntimeBannerConfig;
   garments: readonly SandboxGarmentOption[];
 }): React.JSX.Element {
   const scriptMountRef = useRef<HTMLDivElement | null>(null);
@@ -152,7 +152,7 @@ export function StorefrontSandbox({
         </p>
       </header>
 
-      <ReplicateRuntimeBanner config={replicate} />
+      <GpuRuntimeBanner config={gpu} />
 
       {garments.length === 0 ? (
         <EmptyState

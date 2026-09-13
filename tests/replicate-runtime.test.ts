@@ -2,20 +2,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  REPLICATE_A100_80GB_SKU,
-  describeMissingReplicateDeployment,
-  describeMissingReplicateModelVersion,
-  describeMissingReplicateToken,
-  getReplicateHardwareSku,
-  inspectReplicateRuntimeConfig,
+  MODAL_A100_80GB_SKU,
+  describeMissingGpuHmac,
+  describeMissingModalGpuUrl,
+  inspectModalRuntimeConfig,
   parseMhrParametricVector,
-  parseReplicateDeploymentRef,
-  parseReplicateHardwareSku,
-} from '@/lib/ml/replicate';
+  signGpuRequest,
+} from '@/lib/ml/gpu';
 import {
   GPU_HOLD_AFTER_BODY_MS,
   GPU_HOLD_DURING_DRAPE_MS,
-  REPLICATE_A100_USD_PER_SEC,
+  MODAL_A100_USD_PER_SEC,
   SESSION_GPU_SAFETY_TIMEOUT_MS,
   readShopperGpuMaxInstances,
   sessionGpuShouldSleep,
@@ -36,7 +33,7 @@ test('session GPU stays warm through body and drape, then sleeps', () => {
   assert.equal(SESSION_GPU_SAFETY_TIMEOUT_MS, 2 * 60 * 1000);
   assert.equal(GPU_HOLD_AFTER_BODY_MS, 2 * 60 * 1000);
   assert.equal(GPU_HOLD_DURING_DRAPE_MS, 2 * 60 * 1000);
-  assert.equal(REPLICATE_A100_USD_PER_SEC, 0.0014);
+  assert.equal(MODAL_A100_USD_PER_SEC, 0.000694);
   assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 1, activeDrapeHoldCount: 0 }), false);
   assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 1 }), false);
   assert.equal(sessionGpuShouldSleep({ activeBodyJobCount: 0, activeDrapeHoldCount: 0 }), true);
@@ -50,76 +47,49 @@ test('session GPU stays warm through body and drape, then sleeps', () => {
   assert.equal(readShopperGpuMaxInstances('12'), 8);
 });
 
-test('A100 80GB sku is gpu-a100-large and is the default hardware pin', () => {
-  assert.equal(REPLICATE_A100_80GB_SKU, 'gpu-a100-large');
-  assert.equal(parseReplicateHardwareSku('gpu-a100-large'), 'gpu-a100-large');
-
-  const previous = process.env.REPLICATE_HARDWARE;
-  delete process.env.REPLICATE_HARDWARE;
-  assert.equal(getReplicateHardwareSku(), 'gpu-a100-large');
-  if (previous === undefined) {
-    delete process.env.REPLICATE_HARDWARE;
-  } else {
-    process.env.REPLICATE_HARDWARE = previous;
-  }
+test('A100 80GB sku is Modal A100-80GB', () => {
+  assert.equal(MODAL_A100_80GB_SKU, 'A100-80GB');
 });
 
-test('deployment refs must be owner/name', () => {
-  assert.deepEqual(parseReplicateDeploymentRef('acme/ashrium-vfr-a100'), {
-    configured: 'acme/ashrium-vfr-a100',
-    owner: 'acme',
-    name: 'ashrium-vfr-a100',
-  });
-  assert.throws(() => parseReplicateDeploymentRef('not-a-deployment'));
-});
+test('inspectModalRuntimeConfig fails closed without URL or HMAC', () => {
+  const previousUrl = process.env.MODAL_GPU_URL;
+  const previousHmac = process.env.ASHRIUM_GPU_HMAC;
+  delete process.env.MODAL_GPU_URL;
+  delete process.env.ASHRIUM_GPU_HMAC;
 
-test('inspectReplicateRuntimeConfig fails closed without token, version, or deployment', () => {
-  const previousToken = process.env.REPLICATE_API_TOKEN;
-  const previousVersion = process.env.REPLICATE_HMR_MODEL_VERSION;
-  const previousHardware = process.env.REPLICATE_HARDWARE;
-  const previousDeployment = process.env.REPLICATE_DEPLOYMENT;
-  delete process.env.REPLICATE_API_TOKEN;
-  delete process.env.REPLICATE_HMR_MODEL_VERSION;
-  delete process.env.REPLICATE_HARDWARE;
-  delete process.env.REPLICATE_DEPLOYMENT;
+  const missing = inspectModalRuntimeConfig();
+  assert.equal(missing.urlConfigured, false);
+  assert.equal(missing.hmacConfigured, false);
+  assert.equal(missing.operatorMessage, describeMissingModalGpuUrl());
+  assert.equal(missing.hardware.sku, 'A100-80GB');
+  assert.equal(missing.hardware.pinMode, 'modal');
+  assert.match(describeMissingGpuHmac(), /ASHRIUM_GPU_HMAC/);
 
-  const missing = inspectReplicateRuntimeConfig();
-  assert.equal(missing.tokenConfigured, false);
-  assert.equal(missing.modelVersionConfigured, false);
-  assert.equal(missing.deploymentConfigured, false);
-  assert.equal(missing.operatorMessage, describeMissingReplicateToken());
-  assert.equal(missing.hardware.sku, 'gpu-a100-large');
-  assert.equal(missing.hardware.pinMode, 'model_dashboard');
-  assert.match(describeMissingReplicateModelVersion(), /REPLICATE_HMR_MODEL_VERSION/);
-  assert.match(describeMissingReplicateDeployment(), /REPLICATE_DEPLOYMENT/);
+  process.env.MODAL_GPU_URL = 'https://ashrium-vfr-gpu.modal.run';
+  const missingHmac = inspectModalRuntimeConfig();
+  assert.equal(missingHmac.urlConfigured, true);
+  assert.equal(missingHmac.hmacConfigured, false);
+  assert.equal(missingHmac.operatorMessage, describeMissingGpuHmac());
 
-  process.env.REPLICATE_API_TOKEN = 'r8_test_token';
-  process.env.REPLICATE_HMR_MODEL_VERSION = 'a'.repeat(64);
-  const missingDeployment = inspectReplicateRuntimeConfig();
-  assert.equal(missingDeployment.tokenConfigured, true);
-  assert.equal(missingDeployment.modelVersionConfigured, true);
-  assert.equal(missingDeployment.deploymentConfigured, false);
-  assert.equal(missingDeployment.operatorMessage, describeMissingReplicateDeployment());
+  process.env.ASHRIUM_GPU_HMAC = 'x'.repeat(16);
+  const ready = inspectModalRuntimeConfig();
+  assert.equal(ready.urlConfigured, true);
+  assert.equal(ready.hmacConfigured, true);
+  assert.equal(ready.operatorMessage, null);
+  assert.equal(
+    signGpuRequest('{}', '1700000000', 'x'.repeat(16)).length,
+    64,
+  );
 
-  if (previousToken === undefined) {
-    delete process.env.REPLICATE_API_TOKEN;
+  if (previousUrl === undefined) {
+    delete process.env.MODAL_GPU_URL;
   } else {
-    process.env.REPLICATE_API_TOKEN = previousToken;
+    process.env.MODAL_GPU_URL = previousUrl;
   }
-  if (previousVersion === undefined) {
-    delete process.env.REPLICATE_HMR_MODEL_VERSION;
+  if (previousHmac === undefined) {
+    delete process.env.ASHRIUM_GPU_HMAC;
   } else {
-    process.env.REPLICATE_HMR_MODEL_VERSION = previousVersion;
-  }
-  if (previousHardware === undefined) {
-    delete process.env.REPLICATE_HARDWARE;
-  } else {
-    process.env.REPLICATE_HARDWARE = previousHardware;
-  }
-  if (previousDeployment === undefined) {
-    delete process.env.REPLICATE_DEPLOYMENT;
-  } else {
-    process.env.REPLICATE_DEPLOYMENT = previousDeployment;
+    process.env.ASHRIUM_GPU_HMAC = previousHmac;
   }
 });
 
