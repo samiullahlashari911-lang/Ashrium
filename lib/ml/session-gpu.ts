@@ -11,11 +11,12 @@ export const SESSION_GPU_SAFETY_TIMEOUT_MS = SHOPPER_INFERENCE_DEADLINE_MS;
 export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;
 
 /**
- * Max time a prediction may stay queued/starting before we abort. Observed
- * A100 Cog setup is ~120s; this matches capture warmup idle so a replica that
- * never comes up cannot bill forever.
+ * Max time a prediction may stay queued/starting before we abort. Cold A100
+ * image pull + Cog `setup()` (SAM 2 + SAM 3D Body) is often ~2 minutes and
+ * can exceed the 3-minute capture idle. Aborting at boot-complete is why
+ * shoppers never received an avatar.
  */
-export const SHOPPER_GPU_SETUP_BUDGET_MS = SHOPPER_GPU_WARMUP_IDLE_MS;
+export const SHOPPER_GPU_SETUP_BUDGET_MS = 5 * 60 * 1000;
 
 /** Widget / occupancy lookback covering setup plus the inference wall. */
 export const SHOPPER_AVATAR_WAIT_MS =

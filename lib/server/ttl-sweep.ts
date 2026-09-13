@@ -1,4 +1,4 @@
-import { abortOverdueShopperFitJobs } from '@/lib/server/abort-shopper-gpu';
+import { reconcileShopperGpu } from '@/lib/server/abort-shopper-gpu';
 import {
   isBiometricAssetPath,
   purgeBiometricJobImages,
@@ -114,7 +114,7 @@ async function collectStaleBiometricObjectPaths(
 export async function runPrivacyTtlSweep(): Promise<PrivacyTtlSweepResult> {
   const supabase = createServiceClient();
   try {
-    await abortOverdueShopperFitJobs();
+    await reconcileShopperGpu();
   } catch {
     // Overdue GPU abort must not block the privacy sweep.
   }

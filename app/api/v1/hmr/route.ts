@@ -10,7 +10,7 @@ import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/serve
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
-import { dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
+import { cancelReplicatePrediction, dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
 import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
 import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
 import {
@@ -38,7 +38,7 @@ function getWebhookBaseUrl(): URL {
 }
 
 export const runtime = 'nodejs';
-export const maxDuration = 130;
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<Response> {
   let payload: unknown;
@@ -192,6 +192,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ job_id: job.id, status: 'pending' }, { status: 500 });
   }
 
+  let dispatchedPredictionId: string | null = null;
   try {
     const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
     webhookUrl.searchParams.set('job_id', job.id);
@@ -203,6 +204,7 @@ export async function POST(request: Request): Promise<Response> {
       weightKg: body.weightKg,
       webhookUrl: webhookUrl.toString(),
     });
+    dispatchedPredictionId = prediction.id;
 
     const { error: dispatchUpdateError } = await serviceClient
       .from('fit_jobs')
@@ -218,6 +220,14 @@ export async function POST(request: Request): Promise<Response> {
       void watchShopperGpuDeadline(job.id);
     });
   } catch {
+    if (dispatchedPredictionId) {
+      try {
+        await cancelReplicatePrediction(dispatchedPredictionId);
+      } catch {
+        // Job is failed below; gpu-guard will retry cancel.
+      }
+    }
+
     const wasPurged = await purgeBiometricJobImages(
       body.frontImagePath,
       body.sideImagePath,

@@ -25,6 +25,7 @@ export const RATE_LIMITS = {
   hmrDispatch: 20,
   hmrWarmup: 12,
   hmrStatus: 60,
+  hmrAbort: 30,
   fitRecommend: 60,
   fitResolve: 20,
   catalogSync: 10,

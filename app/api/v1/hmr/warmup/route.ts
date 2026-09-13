@@ -11,7 +11,7 @@ import {
 } from '@/lib/server/session-gpu';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const maxDuration = 300;
 
 function readSessionKey(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) {

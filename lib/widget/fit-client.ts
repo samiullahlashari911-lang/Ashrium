@@ -339,6 +339,32 @@ export async function uploadDualWebpAndDispatch(
   return { jobId: dispatch.jobId };
 }
 
+export async function abortShopperGpu(
+  embedToken: string | null,
+  input: { jobId?: string; gpuSessionKey?: string },
+): Promise<void> {
+  const jobId = input.jobId?.trim();
+  const gpuSessionKey = input.gpuSessionKey?.trim();
+  if (!jobId && (!gpuSessionKey || gpuSessionKey.length < 8)) {
+    return;
+  }
+
+  try {
+    await fetch('/api/v1/hmr/abort', {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: authHeaders(embedToken, true),
+      body: JSON.stringify({
+        ...(jobId ? { jobId } : {}),
+        ...(gpuSessionKey && gpuSessionKey.length >= 8 ? { gpuSessionKey } : {}),
+      }),
+    });
+  } catch {
+    // Best-effort stop. gpu-guard cron still cancels leftover predictions.
+  }
+}
+
 export interface FitRecommendResponse {
   size: {
     code: string;

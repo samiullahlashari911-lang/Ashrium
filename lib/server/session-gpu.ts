@@ -175,6 +175,35 @@ export async function claimShopperGpuSession(
   };
 }
 
+export async function deleteShopperGpuSession(
+  tenantId: string,
+  sessionKey: string,
+): Promise<void> {
+  const key = sessionKey.trim();
+  if (key.length < 8 || key.length > 80) {
+    return;
+  }
+
+  const supabase = createServiceClient();
+  const { error } = await supabase
+    .from('shopper_gpu_sessions')
+    .delete()
+    .eq('tenant_id', tenantId)
+    .eq('session_key', key);
+
+  if (error && !isMissingGpuSessionTable(error)) {
+    return;
+  }
+}
+
+export async function releaseShopperGpuSession(
+  tenantId: string,
+  sessionKey: string,
+): Promise<void> {
+  await deleteShopperGpuSession(tenantId, sessionKey);
+  await sleepGpuIfNoActiveFitJobs();
+}
+
 export async function convertWarmupLeaseToJob(
   tenantId: string,
   sessionKey?: string,

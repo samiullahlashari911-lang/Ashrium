@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { POST as postWidgetToken } from '@/app/api/v1/widget/token/route';
 import { GET as getKeepAlive, POST as postKeepAlive } from '@/app/api/v1/hmr/keepalive/route';
 import { GET as getTtlSweep } from '@/app/api/v1/cron/ttl-sweep/route';
+import { GET as getGpuGuard } from '@/app/api/v1/cron/gpu-guard/route';
 import { GET as getWidgetScript } from '@/app/api/v1/widget/script/route';
 import { createWidgetEmbedToken, verifyWidgetEmbedToken } from '@/lib/server/widget-embed';
 
@@ -27,8 +28,10 @@ test('keep-alive and TTL sweep require CRON_SECRET', async () => {
 
   const keepAlive = await getKeepAlive(new Request('http://localhost/api/v1/hmr/keepalive'));
   const ttlSweep = await getTtlSweep(new Request('http://localhost/api/v1/cron/ttl-sweep'));
+  const gpuGuard = await getGpuGuard(new Request('http://localhost/api/v1/cron/gpu-guard'));
   assert.equal(keepAlive.status, 503);
   assert.equal(ttlSweep.status, 503);
+  assert.equal(gpuGuard.status, 503);
 
   process.env.CRON_SECRET = 'cron-secret-value-ok';
   const unauthorized = await getTtlSweep(

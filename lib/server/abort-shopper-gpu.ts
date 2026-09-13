@@ -3,6 +3,7 @@ import {
   SHOPPER_GPU_TIMEOUT_MESSAGE,
   SHOPPER_GPU_WARMUP_IDLE_MS,
   isShopperInferenceOverdue,
+  shopperGpuActiveLookbackMs,
 } from '@/lib/ml/session-gpu';
 import {
   applyHmrPredictionToFitJob,
@@ -34,24 +35,32 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+async function cancelPredictionWithRetry(predictionId: string | null): Promise<void> {
+  if (typeof predictionId !== 'string' || predictionId.length === 0) {
+    return;
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await cancelReplicatePrediction(predictionId);
+      return;
+    } catch {
+      if (attempt === 2) {
+        return;
+      }
+      await sleep(400);
+    }
+  }
+}
+
 export async function abortShopperFitJob(job: AbortableFitJob): Promise<boolean> {
   if (job.status !== 'pending' && job.status !== 'processing') {
+    await cancelPredictionWithRetry(job.replicate_prediction_id);
+    await sleepGpuIfNoActiveFitJobs();
     return false;
   }
 
-  if (typeof job.replicate_prediction_id === 'string' && job.replicate_prediction_id.length > 0) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        await cancelReplicatePrediction(job.replicate_prediction_id);
-        break;
-      } catch {
-        if (attempt === 2) {
-          break;
-        }
-        await sleep(400);
-      }
-    }
-  }
+  await cancelPredictionWithRetry(job.replicate_prediction_id);
 
   const wasPurged = await purgeBiometricJobImages(job.front_image_path, job.side_image_path);
   const supabase = createServiceClient();
@@ -87,7 +96,7 @@ export async function abortOverdueShopperFitJobs(): Promise<number> {
     )
     .in('status', [...ACTIVE_STATUSES])
     .order('created_at', { ascending: true })
-    .limit(25);
+    .limit(50);
 
   if (error || !data) {
     return 0;
@@ -149,16 +158,100 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
   return abortShopperFitJob(job);
 }
 
+export async function abortShopperFitJobById(
+  jobId: string,
+  tenantId?: string,
+): Promise<boolean> {
+  const supabase = createServiceClient();
+  let query = supabase
+    .from('fit_jobs')
+    .select(
+      'id, tenant_id, status, created_at, replicate_prediction_id, front_image_path, side_image_path, weight_kg',
+    )
+    .eq('id', jobId);
+
+  if (tenantId) {
+    query = query.eq('tenant_id', tenantId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) {
+    return false;
+  }
+
+  return abortShopperFitJob(data as AbortableFitJob);
+}
+
+/**
+ * UI/timeout can mark a job failed while the Cog is still billed. Cancel those
+ * leftover predictions, then sleep idle replicas.
+ */
+export async function cancelPredictionsForRecentlyFailedJobs(): Promise<number> {
+  const supabase = createServiceClient();
+  const cutoff = new Date(Date.now() - shopperGpuActiveLookbackMs()).toISOString();
+  const { data, error } = await supabase
+    .from('fit_jobs')
+    .select('replicate_prediction_id')
+    .eq('status', 'failed')
+    .not('replicate_prediction_id', 'is', null)
+    .gt('updated_at', cutoff)
+    .limit(50);
+
+  if (error || !data) {
+    return 0;
+  }
+
+  const ids = Array.from(
+    new Set(
+      data
+        .map((row) => row.replicate_prediction_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  );
+
+  for (const predictionId of ids) {
+    await cancelPredictionWithRetry(predictionId);
+  }
+
+  return ids.length;
+}
+
+export async function reconcileShopperGpu(): Promise<{
+  aborted: number;
+  canceledFailed: number;
+}> {
+  let aborted = 0;
+  try {
+    aborted = await abortOverdueShopperFitJobs();
+  } catch {
+    aborted = 0;
+  }
+
+  let canceledFailed = 0;
+  try {
+    canceledFailed = await cancelPredictionsForRecentlyFailedJobs();
+  } catch {
+    canceledFailed = 0;
+  }
+
+  try {
+    await sleepGpuIfNoActiveFitJobs();
+  } catch {
+    // Idle sleep must not throw into cron / after().
+  }
+
+  return { aborted, canceledFailed };
+}
+
 /**
  * Stays attached to POST /api/v1/hmr so a closed widget cannot leave the A100
- * billed. Sleeps the Deployment at the 2-minute wall clock.
+ * billed. The 1-minute gpu-guard cron continues the deadline if this function
+ * hits maxDuration while Cog setup is still running.
  */
 export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
   const supabase = createServiceClient();
   const watchStarted = Date.now();
-  // Stay under Vercel maxDuration=130. Do not sleep the GPU when this
-  // function ends — Cog setup may still be finishing on Replicate.
-  const functionGuardMs = 110_000;
+  const functionGuardMs = 280_000;
 
   while (Date.now() - watchStarted < functionGuardMs) {
     await sleep(4000);
@@ -181,6 +274,8 @@ export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
       return;
     }
   }
+
+  await abortFitJobIfOverdue(jobId);
 }
 
 /**
@@ -189,14 +284,5 @@ export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
  */
 export async function watchWarmGpuIdleTimeout(): Promise<void> {
   await sleep(SHOPPER_GPU_WARMUP_IDLE_MS);
-  try {
-    await abortOverdueShopperFitJobs();
-  } catch {
-    // Stale jobs must not keep the idle watcher from sleeping the GPU.
-  }
-  try {
-    await sleepGpuIfNoActiveFitJobs();
-  } catch {
-    // Idle watcher must not throw into after().
-  }
+  await reconcileShopperGpu();
 }

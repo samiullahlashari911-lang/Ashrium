@@ -10,6 +10,7 @@ import {
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import {
+  abortShopperGpu,
   uploadDualWebpAndDispatch,
   warmShopperGpu,
   type DualUploadProgress,
@@ -68,6 +69,27 @@ export function GuidedCapture({
       ? crypto.randomUUID()
       : `gpu-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
   );
+  const jobIdRef = useRef<string | null>(null);
+  const completedRef = useRef(false);
+  const previousStepRef = useRef<CaptureStep>(step);
+  jobIdRef.current = jobId;
+
+  const stopGpu = useCallback((nextJobId?: string | null) => {
+    if (completedRef.current) {
+      return;
+    }
+
+    void abortShopperGpu(embedToken, {
+      jobId: nextJobId ?? jobIdRef.current ?? undefined,
+      gpuSessionKey: gpuSessionKeyRef.current,
+    });
+  }, [embedToken]);
+
+  const failCapture = useCallback((message: string, nextJobId?: string | null) => {
+    stopGpu(nextJobId);
+    setError(message);
+    setStep('error');
+  }, [stopGpu]);
 
   const handleFrontCaptured = useCallback((blob: Blob, gate: PoseGateStatus) => {
     setFrontBlob(blob);
@@ -98,15 +120,14 @@ export function GuidedCapture({
           setStep('inferring');
         })
         .catch((caught: unknown) => {
-          setError(caught instanceof Error ? caught.message : 'Upload or dispatch failed.');
-          setStep('error');
+          failCapture(caught instanceof Error ? caught.message : 'Upload or dispatch failed.');
         });
     },
-    [embedToken, frontBlob, intake],
+    [embedToken, failCapture, frontBlob, intake],
   );
 
   useEffect(() => {
-    if (step === 'uploading' || step === 'inferring' || step === 'error') {
+    if (step !== 'front' && step !== 'side') {
       return;
     }
 
@@ -168,6 +189,7 @@ export function GuidedCapture({
       embedToken,
       (job) => {
         if (job.status === 'completed' && job.parametric_result) {
+          completedRef.current = true;
           const session: CaptureSession = {
             tenantId,
             fitJobId: job.id,
@@ -185,16 +207,14 @@ export function GuidedCapture({
         }
 
         if (job.status === 'failed') {
-          setError(job.error_message ?? 'Avatar inference failed.');
-          setStep('error');
+          failCapture(job.error_message ?? 'Avatar inference failed.', job.id);
         }
       },
       (watchError) => {
-        setError(watchError.message);
-        setStep('error');
+        failCapture(watchError.message);
       },
     );
-  }, [embedToken, frontGate, intake, jobId, onComplete, sideGate, step, tenantId]);
+  }, [embedToken, failCapture, frontGate, intake, jobId, onComplete, sideGate, step, tenantId]);
 
   useEffect(() => {
     if (step !== 'inferring') {
@@ -205,11 +225,31 @@ export function GuidedCapture({
       return;
     }
 
-    setError(SHOPPER_GPU_TIMEOUT_MESSAGE);
-    setStep('error');
-  }, [step, waitSeconds]);
+    failCapture(SHOPPER_GPU_TIMEOUT_MESSAGE);
+  }, [failCapture, step, waitSeconds]);
+
+  useEffect(() => {
+    const previous = previousStepRef.current;
+    previousStepRef.current = step;
+    if (step === 'intake' && (previous === 'front' || previous === 'side')) {
+      stopGpu();
+    }
+  }, [step, stopGpu]);
+
+  useEffect(() => {
+    const onPageHide = (): void => {
+      stopGpu();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      stopGpu();
+    };
+  }, [stopGpu]);
 
   const reset = (): void => {
+    completedRef.current = false;
+    stopGpu();
     setStep('intake');
     setIntake(null);
     setFrontBlob(null);

@@ -988,11 +988,15 @@ export async function patchReplicateDeployment(options: {
       || updateResponse.status === 429
       || updateResponse.status === 423;
     const latest = await fetchReplicateDeployment(deployment).catch(() => current);
+    const noEffect = updateResponse.status === 409 && /no effect/i.test(lastError);
     if (
-      conflict
-      && !needsHardware
-      && !needsVersion
-      && deploymentMeetsRequestedScale(latest, nextMinInstances, nextMaxInstances)
+      noEffect
+      || (
+        conflict
+        && !needsHardware
+        && !needsVersion
+        && deploymentMeetsRequestedScale(latest, nextMinInstances, nextMaxInstances)
+      )
     ) {
       return { status: latest, hardwareUpdated: false, minInstancesUpdated: false };
     }

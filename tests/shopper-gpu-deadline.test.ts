@@ -14,12 +14,12 @@ import {
 
 test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(SHOPPER_INFERENCE_DEADLINE_MS, 120_000);
-  assert.equal(SHOPPER_GPU_SETUP_BUDGET_MS, 180_000);
-  assert.equal(SHOPPER_AVATAR_WAIT_MS, 300_000);
+  assert.equal(SHOPPER_GPU_SETUP_BUDGET_MS, 300_000);
+  assert.equal(SHOPPER_AVATAR_WAIT_MS, 420_000);
   const created = new Date('2026-01-01T00:00:00.000Z').toISOString();
   const started = new Date('2026-01-01T00:02:00.000Z').toISOString();
-  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:02:00.000Z')), false);
-  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:03:00.000Z')), true);
+  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:04:59.000Z')), false);
+  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:05:00.000Z')), true);
   assert.equal(
     isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:03:59.000Z'), started),
     false,
@@ -55,7 +55,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
     ),
     true,
   );
-  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 90_000);
+  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 210_000);
   assert.equal(
     gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:03:30.000Z'), started),
     30_000,
@@ -67,7 +67,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(
     isShopperInferenceOverdue(
       created,
-      Date.parse('2026-01-01T00:02:59.000Z'),
+      Date.parse('2026-01-01T00:04:59.000Z'),
       created,
       'starting',
     ),
@@ -76,7 +76,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(
     isShopperInferenceOverdue(
       created,
-      Date.parse('2026-01-01T00:03:00.000Z'),
+      Date.parse('2026-01-01T00:05:00.000Z'),
       created,
       'starting',
     ),
@@ -104,24 +104,31 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const cogYaml = readFileSync(path.join(process.cwd(), 'cog/cog.yaml'), 'utf8');
   const applyHmr = readFileSync(path.join(process.cwd(), 'lib/server/apply-hmr-prediction.ts'), 'utf8');
   const status = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/status/route.ts'), 'utf8');
+  const abortRoute = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/abort/route.ts'), 'utf8');
+  const gpuGuard = readFileSync(path.join(process.cwd(), 'app/api/v1/cron/gpu-guard/route.ts'), 'utf8');
+  const vercel = readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf8');
 
   assert.match(hmr, /convertWarmupLeaseToJob/);
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
   assert.match(hmr, /watchShopperGpuDeadline/);
-  assert.match(hmr, /maxDuration = 130/);
+  assert.match(hmr, /maxDuration = 300/);
+  assert.match(hmr, /cancelReplicatePrediction/);
   assert.match(hmr, /SESSION_GPU_FAILED|Unable to start the fitting GPU/);
   assert.match(warmup, /watchWarmGpuIdleTimeout/);
+  assert.match(warmup, /maxDuration = 300/);
   assert.match(warmup, /claimShopperGpuSession/);
   assert.match(warmup, /FITTING_ROOM_AT_CAPACITY/);
   assert.match(replicate, /cancelReplicatePrediction/);
   assert.match(replicate, /body\.version = versionId|version: versionId/);
   assert.match(replicate, /status === 409/);
+  assert.match(replicate, /no effect/i);
   assert.match(replicate, /deploymentMeetsRequestedScale/);
   assert.match(replicate, /Math\.max\(1, nextMinInstances/);
   assert.match(sessionGpu, /shopperGpuActiveLookbackMs/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
   assert.match(sessionGpu, /shopper_gpu_sessions/);
+  assert.match(sessionGpu, /deleteShopperGpuSession/);
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
   assert.doesNotMatch(sessionGpu, /minInstancesUpdated: false/);
   assert.match(abort, /cancelReplicatePrediction/);
@@ -130,12 +137,21 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
   assert.match(abort, /latest.status !== 'pending'/);
   assert.match(abort, /functionGuardMs/);
+  assert.match(abort, /reconcileShopperGpu/);
+  assert.match(abort, /abortShopperFitJobById/);
+  assert.match(abortRoute, /abortShopperFitJobById/);
+  assert.match(gpuGuard, /reconcileShopperGpu/);
+  assert.match(vercel, /\/api\/v1\/cron\/gpu-guard/);
   assert.match(capture, /SHOPPER_AVATAR_WAIT_MS/);
   assert.match(capture, /Keep this screen open/);
+  assert.match(capture, /pagehide/);
+  assert.match(capture, /abortShopperGpu/);
+  assert.match(capture, /step !== 'front'/);
   assert.doesNotMatch(capture, /120 - waitSeconds/);
   assert.match(capture, /warmShopperGpu/);
   assert.match(capture, /key=\{step\}/);
   assert.match(client, /\/api\/v1\/hmr\/warmup/);
+  assert.match(client, /\/api\/v1\/hmr\/abort/);
   assert.match(applyHmr, /purgeBiometricJobImages/);
   assert.match(applyHmr, /isTerminalReplicateStatus/);
   assert.match(applyHmr, /prediction\.startedAt/);
