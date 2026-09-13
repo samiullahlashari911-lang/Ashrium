@@ -929,9 +929,11 @@ export async function patchReplicateDeployment(options: {
   const nextMinInstances = options.minInstances === undefined
     ? undefined
     : Math.max(0, Math.trunc(options.minInstances));
+  // Never pin max_instances to 0. A slept replica still needs a cap so the
+  // next shopper PATCH can raise min_instances without min > max.
   const nextMaxInstances = options.maxInstances === undefined
     ? undefined
-    : Math.max(nextMinInstances ?? 0, Math.trunc(options.maxInstances));
+    : Math.max(1, nextMinInstances ?? 0, Math.trunc(options.maxInstances));
 
   let lastError = 'Replicate deployment PATCH failed.';
   for (let attempt = 0; attempt < 4; attempt += 1) {

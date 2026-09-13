@@ -32,6 +32,10 @@ from .topology import (
 KEYPOINT_LOSS_WEIGHT = 1.0
 SILHOUETTE_LOSS_WEIGHT = 0.05
 IDENTITY_REG_WEIGHT = 0.01
+# Candidate body path is three stages in predict.py (SAM 2, SAM 3D Body init,
+# this MHR fit). FIT_STEPS is only the Adam cap; plateau usually stops at
+# MIN_FIT_STEPS. Changing these numbers does not change Replicate until a
+# new Cog is pushed and pinned on ashrium-vfr-candidate.
 FIT_STEPS = 20
 MIN_FIT_STEPS = 4
 PLATEAU_PATIENCE = 3

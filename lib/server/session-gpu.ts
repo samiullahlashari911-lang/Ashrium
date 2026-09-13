@@ -168,18 +168,11 @@ export async function claimShopperGpuSession(
   const occupancy = error && isMissingGpuSessionTable(error)
     ? Math.max(1, (await readShopperGpuOccupancy()).occupancy)
     : (await readShopperGpuOccupancy()).occupancy;
-  try {
-    const scaled = await scaleShopperDeployment(occupancy);
-    return {
-      minInstancesUpdated: scaled.minInstancesUpdated || !refreshingLive,
-      created: !refreshingLive,
-    };
-  } catch {
-    return {
-      minInstancesUpdated: false,
-      created: !refreshingLive,
-    };
-  }
+  const scaled = await scaleShopperDeployment(occupancy);
+  return {
+    minInstancesUpdated: scaled.minInstancesUpdated || !refreshingLive,
+    created: !refreshingLive,
+  };
 }
 
 export async function convertWarmupLeaseToJob(

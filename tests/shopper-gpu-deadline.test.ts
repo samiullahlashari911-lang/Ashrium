@@ -64,8 +64,26 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
     gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:04:00.000Z'), started),
     0,
   );
+  assert.equal(
+    isShopperInferenceOverdue(
+      created,
+      Date.parse('2026-01-01T00:02:59.000Z'),
+      created,
+      'starting',
+    ),
+    false,
+  );
+  assert.equal(
+    isShopperInferenceOverdue(
+      created,
+      Date.parse('2026-01-01T00:03:00.000Z'),
+      created,
+      'starting',
+    ),
+    true,
+  );
   assert.match(SHOPPER_GPU_TIMEOUT_MESSAGE, /Sorry/);
-  assert.match(SHOPPER_GPU_TIMEOUT_MESSAGE, /2 minutes/);
+  assert.match(SHOPPER_GPU_TIMEOUT_MESSAGE, /fitting GPU/);
 });
 
 test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
@@ -91,6 +109,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
   assert.match(hmr, /watchShopperGpuDeadline/);
   assert.match(hmr, /maxDuration = 130/);
+  assert.match(hmr, /SESSION_GPU_FAILED|Unable to start the fitting GPU/);
   assert.match(warmup, /watchWarmGpuIdleTimeout/);
   assert.match(warmup, /claimShopperGpuSession/);
   assert.match(warmup, /FITTING_ROOM_AT_CAPACITY/);
@@ -98,11 +117,13 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(replicate, /body\.version = versionId|version: versionId/);
   assert.match(replicate, /status === 409/);
   assert.match(replicate, /deploymentMeetsRequestedScale/);
+  assert.match(replicate, /Math\.max\(1, nextMinInstances/);
   assert.match(sessionGpu, /shopperGpuActiveLookbackMs/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
   assert.match(sessionGpu, /shopper_gpu_sessions/);
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
+  assert.doesNotMatch(sessionGpu, /minInstancesUpdated: false/);
   assert.match(abort, /cancelReplicatePrediction/);
   assert.match(abort, /applyHmrPredictionToFitJob/);
   assert.match(abort, /predictionStatus/);

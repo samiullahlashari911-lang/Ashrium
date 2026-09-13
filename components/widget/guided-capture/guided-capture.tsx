@@ -26,7 +26,7 @@ type CaptureStep = 'intake' | 'front' | 'side' | 'uploading' | 'inferring' | 'er
 function captureErrorTitle(message: string | null): string {
   if (
     message
-    && /2 minutes|finish in time|canceled|could not finish/i.test(message)
+    && /fitting GPU|2 minutes|finish in time|canceled|could not finish/i.test(message)
   ) {
     return 'Sorry — we could not finish in time';
   }

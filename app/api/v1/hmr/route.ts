@@ -143,6 +143,25 @@ export async function POST(request: Request): Promise<Response> {
         { status: 409 },
       );
     }
+
+    const wasPurged = await purgeBiometricJobImages(
+      body.frontImagePath,
+      body.sideImagePath,
+    );
+    await serviceClient
+      .from('fit_jobs')
+      .update({
+        status: 'failed',
+        front_image_path: wasPurged ? null : body.frontImagePath,
+        side_image_path: wasPurged ? null : body.sideImagePath,
+        error_message: wasPurged
+          ? 'Unable to start the fitting GPU.'
+          : 'Unable to start the fitting GPU or purge biometric source images.',
+      })
+      .eq('id', job.id)
+      .eq('tenant_id', tenantId);
+    void sleepGpuIfNoActiveFitJobs();
+    return Response.json({ job_id: job.id, status: 'failed' }, { status: 502 });
   }
 
   const { error: processingError } = await serviceClient

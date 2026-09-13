@@ -59,7 +59,7 @@ export function readShopperGpuMaxInstances(raw = process.env.ASHRIUM_GPU_MAX_INS
 export const REPLICATE_A100_USD_PER_SEC = 0.0014;
 
 export const SHOPPER_GPU_TIMEOUT_MESSAGE =
-  'Sorry — we stopped the fitting GPU after 2 minutes so you are not billed further. Please try again.';
+  'Sorry — the fitting GPU stopped so you are not billed further. Please try again.';
 
 export type SessionGpuAction = 'warm' | 'sleep' | 'status';
 
