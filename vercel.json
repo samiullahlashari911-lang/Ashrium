@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/v1/cron/gpu-guard",
-      "schedule": "* * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }

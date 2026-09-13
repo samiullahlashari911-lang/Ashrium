@@ -142,6 +142,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(abortRoute, /abortShopperFitJobById/);
   assert.match(gpuGuard, /reconcileShopperGpu/);
   assert.match(vercel, /\/api\/v1\/cron\/gpu-guard/);
+  assert.match(vercel, /0 0 \* \* \*/);
   assert.match(capture, /SHOPPER_AVATAR_WAIT_MS/);
   assert.match(capture, /Keep this screen open/);
   assert.match(capture, /pagehide/);
