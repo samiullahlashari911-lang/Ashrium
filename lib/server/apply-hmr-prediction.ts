@@ -118,9 +118,6 @@ export async function applyHmrPredictionToFitJob(
       }
 
       const message = error instanceof Error ? error.message : 'MHR Cog output was invalid.';
-      // #region agent log
-      fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H4',location:'lib/server/apply-hmr-prediction.ts:applyHmrPredictionToFitJob',message:'MHR parse failed',data:{jobId,error:message.slice(0,180)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const { error: updateError } = await serviceClient
         .from('fit_jobs')
         .update({

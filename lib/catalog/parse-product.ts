@@ -19,7 +19,8 @@ import {
 export { parseCompositionText } from '@/lib/catalog/scan-product-page';
 
 const SIZE_OPTION_NAME = /^(size|taille|talla|größe|groesse|misura)$/i;
-const LETTER_SIZE = /^(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|OS|ONE SIZE)$/i;
+const LETTER_SIZE =
+  /^(XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|2XL|3XL|4XL|5XL|6XL|7XL|OS|ONE SIZE|ONESIZE)$/i;
 
 function metafieldValue(fields: readonly ShopifyMetafield[], keys: readonly string[]): string | null {
   const wanted = new Set(keys.map((key) => key.toLowerCase()));
@@ -74,17 +75,28 @@ function inferCategory(product: ShopifyProduct): GarmentCategory {
     return metafieldCategory;
   }
 
-  const haystack = `${product.productType} ${product.tags.join(' ')} ${product.title} ${product.handle}`.toLowerCase();
-  if (/\b(pant|pants|trouser|jeans?|chino|shorts|legging|jogger|skirt)\b/.test(haystack)) {
+  const haystack = productHaystack(product).replace(/[-_/]+/g, ' ');
+  if (
+    /\b(pant|pants|trousers?|jeans?|chino|chinos|shorts|leggings?|joggers?|sweatpants|skirt|skirts)\b/.test(
+      haystack,
+    )
+  ) {
     return 'pant';
   }
-  if (/\b(dress|gown|jumpsuit|romper)\b/.test(haystack)) {
+  if (/\b(swim|swimsuit|swimwear|bikini|bikinis|monokini)\b/.test(haystack)) {
+    return 'dress';
+  }
+  if (/\b(dress|gown|jumpsuit|romper|bodysuit|catsuit)\b/.test(haystack)) {
     return 'dress';
   }
   if (/\b(jacket|coat|parka|hoodie|outerwear|blazer|sweater|cardigan)\b/.test(haystack)) {
     return 'outerwear';
   }
-  if (/\b(tee|tees|t-shirts?|tshirts?|tops?|polo|polos|shirts?|blouse|blouses|tanks?)\b/.test(haystack)) {
+  if (
+    /\b(tee|tees|t shirts?|tshirts?|tops?|polo|polos|shirts?|blouse|blouses|tanks?|camisole|vest|crop)\b/.test(
+      haystack,
+    )
+  ) {
     return 'tee';
   }
 
@@ -276,14 +288,6 @@ function sizeInputFromPartial(
   };
 }
 
-function isFullyPublished(
-  measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
-): measurements is Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'> {
-  return [measurements.chestCm, measurements.waistCm, measurements.hipCm, measurements.lengthCm].every(
-    publishedGirth,
-  );
-}
-
 function isCategoryComplete(
   category: GarmentCategory,
   measurements: Partial<Pick<CatalogSizeVariantInput, 'chestCm' | 'waistCm' | 'hipCm' | 'lengthCm'>>,
@@ -291,17 +295,26 @@ function isCategoryComplete(
   switch (category) {
     case 'tee':
     case 'outerwear':
-      return publishedGirth(measurements.chestCm) && publishedGirth(measurements.lengthCm);
-    case 'pant':
       return (
-        publishedGirth(measurements.waistCm)
-        && publishedGirth(measurements.hipCm)
-        && publishedGirth(measurements.lengthCm)
+        publishedGirth(measurements.chestCm)
+        && (publishedGirth(measurements.lengthCm) || publishedGirth(measurements.waistCm))
       );
+    case 'pant':
+      return publishedGirth(measurements.waistCm) && publishedGirth(measurements.hipCm);
     case 'dress':
-      return publishedGirth(measurements.chestCm) && publishedGirth(measurements.lengthCm);
+      return (
+        publishedGirth(measurements.chestCm)
+        && (
+          publishedGirth(measurements.lengthCm)
+          || (publishedGirth(measurements.waistCm) && publishedGirth(measurements.hipCm))
+        )
+      );
     default:
-      return false;
+      return (
+        publishedGirth(measurements.chestCm)
+        || publishedGirth(measurements.waistCm)
+        || publishedGirth(measurements.hipCm)
+      );
   }
 }
 
@@ -320,7 +333,11 @@ export function shouldIngestShopifyProduct(product: ShopifyProduct): boolean {
     return false;
   }
 
-  return inferCategory(product) !== 'other';
+  if (inferCategory(product) !== 'other') {
+    return true;
+  }
+
+  return product.variants.some(variantHasSizeOption);
 }
 
 interface VariantMeasurements {
@@ -350,7 +367,7 @@ function measurementsForVariant(
     hipCm: fromVariant.hipCm ?? jsonMeasurements?.hipCm ?? chart?.hipCm ?? null,
     lengthCm: fromVariant.lengthCm ?? jsonMeasurements?.lengthCm ?? chart?.lengthCm ?? null,
   };
-  const missing = !isFullyPublished(measurements) || !isCategoryComplete(category, measurements);
+  const missing = !isCategoryComplete(category, measurements);
 
   return {
     input: sizeInputFromPartial(
@@ -470,7 +487,7 @@ function draftForVariants(
     }
 
     chartOnly.push(sizeInputFromPartial(sizeCode, partial, null));
-    if (!isFullyPublished(partial) || !isCategoryComplete(category, partial)) {
+    if (!isCategoryComplete(category, partial)) {
       hasMissingMeasurements = true;
     }
   }

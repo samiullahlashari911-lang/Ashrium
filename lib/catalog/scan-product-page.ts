@@ -2,6 +2,10 @@ import { normalizeFiberName } from '@/lib/catalog/kes-lookup';
 import { normalizeSizeCode } from '@/lib/fit/size-recommend';
 import type { CatalogSizeVariantInput, GarmentFiberComposition } from '@/types/garment';
 
+/** Longest tokens first so XS/5XL are not swallowed by S/XL. */
+const LETTER_SIZE_TOKEN =
+  'XXXXL|XXXL|XXS|XXL|7XL|6XL|5XL|4XL|3XL|2XL|XS|XL|S|M|L';
+
 function decodeEntities(text: string): string {
   return text
     .replace(/&nbsp;/gi, ' ')
@@ -65,6 +69,13 @@ function headerGirth(cell: string): GirthKey | 'size' | null {
     return 'size';
   }
 
+  // Sleeve / shoulder / hem are published on brand charts but are not
+  // chest/waist/hip/length. Do not map them and do not let "sleeve length"
+  // overwrite garment length.
+  if (/\b(sleeve|shoulder|collar|cuff|rise|thigh|hem|bicep|armhole)\b/.test(text)) {
+    return null;
+  }
+
   if (/chest|bust/.test(text)) {
     return 'chestCm';
   }
@@ -73,11 +84,17 @@ function headerGirth(cell: string): GirthKey | 'size' | null {
     return 'waistCm';
   }
 
-  if (/hip/.test(text)) {
+  if (/\bhips?\b/.test(text)) {
     return 'hipCm';
   }
 
-  if (/length|inseam|inside\s*leg/.test(text)) {
+  if (
+    /\b(top\s*length|bottom\s*length|body\s*length|garment\s*length|front\s*length|back\s*length|outseam|inseam|inside\s*leg)\b/.test(
+      text,
+    )
+    || /^(length)\b/.test(text)
+    || (/\blength\b/.test(text) && !/\bsleeve\b/.test(text))
+  ) {
     return 'lengthCm';
   }
 
@@ -150,7 +167,7 @@ function parseHtmlTables(
       continue;
     }
 
-    const unit = detectUnit(rows[0].join(' '));
+    const unit = detectUnit(rows[0].join(' ')) ?? detectUnit(html);
     for (const row of rows.slice(1)) {
       const sizeCode = normalizeSizeCode(row[sizeIndex] ?? '').slice(0, 16);
       if (!sizeCode) {
@@ -187,8 +204,10 @@ function parseTripletLines(
   text: string,
 ): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
   const chart = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
-  const lineRe =
-    /\b(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL)\b\s*[:\-–]\s*(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)/gi;
+  const lineRe = new RegExp(
+    `\\b(${LETTER_SIZE_TOKEN})\\b\\s*[:\\-–]\\s*(\\d+(?:\\.\\d+)?)\\s*[-/]\\s*(\\d+(?:\\.\\d+)?)\\s*[-/]\\s*(\\d+(?:\\.\\d+)?)`,
+    'gi',
+  );
   let match = lineRe.exec(text);
   while (match) {
     const sizeCode = normalizeSizeCode(match[1]);
@@ -224,7 +243,10 @@ function parseLabeledGirthRows(
           : label === 'length' || label === 'inseam'
             ? 'lengthCm'
             : 'chestCm';
-    const pairRe = /\b(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL)\b\s*[:\-–]?\s*(\d+(?:\.\d+)?)/gi;
+    const pairRe = new RegExp(
+      `\\b(${LETTER_SIZE_TOKEN})\\b\\s*[:\\-–]?\\s*(\\d+(?:\\.\\d+)?)`,
+      'gi',
+    );
     let pair = pairRe.exec(rowMatch[3]);
     while (pair) {
       const sizeCode = normalizeSizeCode(pair[1]);
@@ -252,24 +274,27 @@ function parseSizeColonGirths(
   text: string,
 ): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
   const chart = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
-  const lineRe =
-    /\b(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL)\b\s*:\s*([^\n]+)/gi;
+  const lineRe = new RegExp(
+    `\\b(${LETTER_SIZE_TOKEN})\\b\\s*:\\s*(.*?)(?=\\s+\\b(?:${LETTER_SIZE_TOKEN})\\b\\s*:|$)`,
+    'gi',
+  );
   let match = lineRe.exec(text);
   while (match) {
     const sizeCode = normalizeSizeCode(match[1]);
     const rest = match[2];
     const unit = detectUnit(rest) ?? detectUnit(text);
     const partial: Partial<Pick<CatalogSizeVariantInput, GirthKey>> = {};
-    const girthRe = /(chest|bust|waist|hip|hips|length|inseam)\s*(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?/gi;
+    const girthRe =
+      /(front\s*length|back\s*length|top\s*length|bottom\s*length|chest|bust|waist|hips?|inseam|length)\s*(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?/gi;
     let girth = girthRe.exec(rest);
     while (girth) {
       const label = girth[1].toLowerCase();
       const key: GirthKey =
         label === 'waist'
           ? 'waistCm'
-          : label === 'hip' || label === 'hips'
+          : label === 'hip' || label === 'hips' || label === 'hip'
             ? 'hipCm'
-            : label === 'length' || label === 'inseam'
+            : /length|inseam/.test(label)
               ? 'lengthCm'
               : 'chestCm';
       const upper = girth[3] ? Number(girth[3]) : Number(girth[2]);

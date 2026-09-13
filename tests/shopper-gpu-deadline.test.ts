@@ -77,7 +77,8 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(sessionGpu, /shopper_gpu_sessions/);
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);
   assert.match(abort, /cancelReplicatePrediction/);
-  assert.match(abort, /fetchReplicatePrediction/);
+  assert.match(abort, /applyHmrPredictionToFitJob/);
+  assert.match(abort, /isTerminalReplicateStatus/);
   assert.match(abort, /SHOPPER_GPU_TIMEOUT_MESSAGE/);
   assert.match(abort, /latest.status !== 'pending'/);
   assert.match(abort, /functionGuardMs/);

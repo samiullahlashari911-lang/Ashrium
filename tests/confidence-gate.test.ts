@@ -74,6 +74,28 @@ test('size recommendation maps tee girths plus ease onto the letter chart', () =
   assert.equal(size.sizeCode, 'L');
 });
 
+test('numeric AU sizes sort in size order even when chest is unpublished', () => {
+  const size = recommendSize(MEASUREMENTS, 'pant', [
+    { id: 'a', sizeCode: '10', chestCm: 0, waistCm: 70, hipCm: 96, lengthCm: 90 },
+    { id: 'b', sizeCode: '4', chestCm: 0, waistCm: 62, hipCm: 88, lengthCm: 88 },
+    { id: 'c', sizeCode: '6', chestCm: 0, waistCm: 66, hipCm: 92, lengthCm: 89 },
+  ]);
+  assert.equal(size.sizeCode, '10');
+});
+
+test('5XL ranks after XL on the letter chart', () => {
+  const size = recommendSize(
+    { chest_cm: 140, waist_cm: 120, hip_cm: 140 },
+    'tee',
+    [
+      { id: 's', sizeCode: 'S', chestCm: 96, waistCm: 80, hipCm: 96, lengthCm: 68 },
+      { id: 'xl', sizeCode: 'XL', chestCm: 120, waistCm: 104, hipCm: 120, lengthCm: 74 },
+      { id: '5xl', sizeCode: '5XL', chestCm: 144, waistCm: 128, hipCm: 144, lengthCm: 80 },
+    ],
+  );
+  assert.equal(size.sizeCode, '5XL');
+});
+
 test('recommendFit never emits high confidence without the full gate', () => {
   const result = recommendFit({
     measurements: MEASUREMENTS,

@@ -158,7 +158,7 @@ const CATALOG_PRODUCTS_QUERY = `query CatalogProducts($cursor: String) {
       metafields(first: 30) {
         nodes { namespace key type value }
       }
-      variants(first: 50) {
+      variants(first: 250) {
         nodes {
           id
           sku
@@ -190,7 +190,7 @@ const PRODUCT_NODE_FIELDS = `
   metafields(first: 30) {
     nodes { namespace key type value }
   }
-  variants(first: 50) {
+  variants(first: 250) {
     nodes {
       id
       sku

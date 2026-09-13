@@ -113,7 +113,17 @@ async function writeSizeVariants(
     }
   }
 
-  for (const variant of draft.sizeVariants) {
+  const ordered = [...draft.sizeVariants].sort((left, right) => {
+    const publishedCount = (variant: CatalogGarmentDraft['sizeVariants'][number]) =>
+      [variant.chestCm, variant.waistCm, variant.hipCm, variant.lengthCm].filter(
+        (value) => typeof value === 'number' && Number.isFinite(value) && value > 0,
+      ).length;
+    return publishedCount(right) - publishedCount(left);
+  });
+
+  let wrote = 0;
+  let firstError: string | null = null;
+  for (const variant of ordered) {
     const { error } = await supabase.from('garment_size_variants').upsert(
       {
         tenant_id: tenantId,
@@ -130,8 +140,15 @@ async function writeSizeVariants(
     );
 
     if (error) {
-      throw new Error(error.message);
+      firstError ??= error.message;
+      continue;
     }
+
+    wrote += 1;
+  }
+
+  if (wrote === 0 && firstError) {
+    throw new Error(firstError);
   }
 }
 

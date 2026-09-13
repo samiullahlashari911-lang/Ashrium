@@ -37,7 +37,7 @@ test('incomplete Shopify chart rows stay approximate and keep published sizes wi
         namespace: 'custom',
         key: 'size_chart',
         type: 'json',
-        value: JSON.stringify({ M: { chest_cm: 104, waist_cm: 88, hip_cm: 104 } }),
+        value: JSON.stringify({ M: { chest_cm: 104 } }),
       },
     ],
     variants: [
@@ -57,8 +57,8 @@ test('incomplete Shopify chart rows stay approximate and keep published sizes wi
   assert.equal(draft.sizeVariants.length, 1);
   assert.equal(draft.sizeVariants[0]?.sizeCode, 'M');
   assert.equal(draft.sizeVariants[0]?.chestCm, 104);
-  assert.equal(draft.sizeVariants[0]?.waistCm, 88);
-  assert.equal(draft.sizeVariants[0]?.hipCm, 104);
+  assert.equal(draft.sizeVariants[0]?.waistCm, null);
+  assert.equal(draft.sizeVariants[0]?.hipCm, null);
   assert.equal(draft.sizeVariants[0]?.lengthCm, null);
 });
 
@@ -207,7 +207,7 @@ test('Legendary inch tables persist category-complete charts without inventing g
   };
   const [camo] = draftsFromShopifyProduct(camoProduct, camoHtml);
   assert.equal(camo.mode, 'B');
-  assert.equal(camo.approximateFit, true);
+  assert.equal(camo.approximateFit, false);
   assert.equal(camo.sizeVariants.length, 1);
   assert.ok((camo.sizeVariants[0]?.chestCm ?? 0) > 0);
   assert.ok((camo.sizeVariants[0]?.lengthCm ?? 0) > 0);
@@ -390,5 +390,198 @@ test('Legendary camo tee Size options ingest S/M/L/XL from the published inch ta
   assert.ok((camo.sizeVariants[0]?.lengthCm ?? 0) > 0);
   assert.equal(camo.sizeVariants[0]?.waistCm, null);
   assert.equal(camo.sizeVariants[0]?.hipCm, null);
+});
+
+test('leggings and joggers ingest as pants with published waist and hip', () => {
+  const html = `
+    <p>Measurements by inches</p>
+    <table>
+      <tr><th>Size</th><th>Waist</th><th>Hip</th><th>Length</th></tr>
+      <tr><td>4</td><td>24</td><td>32</td><td>36</td></tr>
+      <tr><td>6</td><td>25</td><td>33</td><td>36.5</td></tr>
+    </table>
+    80% nylon, 20% elastane
+  `;
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/20',
+    title: 'High Waist Active Leggings',
+    handle: 'high-waist-active-leggings',
+    productType: '',
+    tags: [],
+    description: '',
+    descriptionHtml: html,
+    onlineStoreUrl: 'https://store.example/products/high-waist-active-leggings',
+    imageUrl: null,
+    metafields: [],
+    variants: ['4', '6'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${200 + index}`,
+      sku: `LEG-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.category, 'pant');
+  assert.deepEqual(
+    draft.sizeVariants.map((variant) => variant.sizeCode),
+    ['4', '6'],
+  );
+  assert.ok((draft.sizeVariants[0]?.waistCm ?? 0) > 0);
+  assert.ok((draft.sizeVariants[0]?.hipCm ?? 0) > 0);
+});
+
+test('swim sets ingest from Size options and bust/waist/hip charts', () => {
+  const html = `
+    <table>
+      <tr><th>Size</th><th>US</th><th>Bust</th><th>Waist</th><th>Hip</th></tr>
+      <tr><td>S</td><td>4</td><td>34</td><td>26</td><td>36</td></tr>
+      <tr><td>M</td><td>6</td><td>36</td><td>28</td><td>38</td></tr>
+    </table>
+    82% polyester, 18% elastane
+  `;
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/21',
+    title: 'Cutout Printed Two-Piece Swim Set',
+    handle: 'cutout-printed-two-piece-swim-set',
+    productType: '',
+    tags: [],
+    description: '',
+    descriptionHtml: html,
+    onlineStoreUrl: 'https://store.example/products/cutout-printed-two-piece-swim-set',
+    imageUrl: null,
+    metafields: [],
+    variants: ['S', 'M'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${210 + index}`,
+      sku: `SWIM-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.category, 'dress');
+  assert.equal(draft.sizeVariants.length, 2);
+  assert.ok((draft.sizeVariants[0]?.chestCm ?? 0) > 0);
+  assert.ok((draft.sizeVariants[0]?.waistCm ?? 0) > 0);
+  assert.ok((draft.sizeVariants[0]?.hipCm ?? 0) > 0);
+  assert.equal(draft.sizeVariants[0]?.lengthCm, null);
+});
+
+test('clothing with Size options still ingests when the category is other', () => {
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/22',
+    title: 'Lounge Set',
+    handle: 'lounge-set',
+    productType: '',
+    tags: [],
+    description: '',
+    descriptionHtml: '',
+    onlineStoreUrl: 'https://store.example/products/lounge-set',
+    imageUrl: null,
+    metafields: [],
+    variants: ['S', 'M'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${220 + index}`,
+      sku: `SET-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.category, 'other');
+  assert.deepEqual(
+    draft.sizeVariants.map((variant) => variant.sizeCode),
+    ['S', 'M'],
+  );
+});
+
+test('5XL size codes persist from Shopify Size options', () => {
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/23',
+    title: 'Face Art Print Short Sleeve T-Shirt',
+    handle: 'shirts-for-men-face-art-print-short-sleeve-tshirts-streetwear-mens-navy',
+    productType: '',
+    tags: [],
+    description: '',
+    descriptionHtml: '',
+    onlineStoreUrl: 'https://store.example/products/face-art',
+    imageUrl: null,
+    metafields: [],
+    variants: ['S', 'M', '5XL'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${230 + index}`,
+      sku: `FACE-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.category, 'tee');
+  assert.deepEqual(
+    draft.sizeVariants.map((variant) => variant.sizeCode),
+    ['S', 'M', '5XL'],
+  );
+});
+
+test('unpublished polo S stays in the chart while M keeps published girths', () => {
+  const html = `
+    <p>Measurements by inches</p>
+    <table>
+      <tr><th>Size</th><th>Top Length</th><th>Bust</th></tr>
+      <tr><td>M</td><td>28</td><td>42</td></tr>
+      <tr><td>L</td><td>29</td><td>44</td></tr>
+    </table>
+    100% cotton
+  `;
+  const product: ShopifyProduct = {
+    id: 'gid://shopify/Product/24',
+    title: 'Classic Polo',
+    handle: 'classic-polo',
+    productType: 'Polo',
+    tags: [],
+    description: '',
+    descriptionHtml: html,
+    onlineStoreUrl: 'https://store.example/products/classic-polo',
+    imageUrl: null,
+    metafields: [],
+    variants: ['S', 'M', 'L'].map((size, index) => ({
+      id: `gid://shopify/ProductVariant/${240 + index}`,
+      sku: `POLO-${size}`,
+      title: size,
+      selectedOptions: [{ name: 'Size', value: size }],
+      metafields: [],
+    })),
+  };
+  const [draft] = draftsFromShopifyProduct(product);
+  assert.equal(draft.category, 'tee');
+  assert.equal(draft.approximateFit, true);
+  const byCode = Object.fromEntries(draft.sizeVariants.map((variant) => [variant.sizeCode, variant]));
+  assert.equal(byCode.S?.chestCm, null);
+  assert.equal(byCode.S?.measurementsFromSource, false);
+  assert.ok((byCode.M?.chestCm ?? 0) > 0);
+  assert.ok((byCode.M?.lengthCm ?? 0) > 0);
+});
+
+test('brand prose charts split consecutive sizes on one line', () => {
+  const chart = scanSizeChartFromPage(
+    'XS: front length 55 in, bust 26 in, waist 21 in, hip 29 in S: front length 56 in, bust 28 in, waist 22 in, hip 30 in',
+  );
+  assert.equal(chart.get('XS')?.lengthCm, 55 * 2.54);
+  assert.equal(chart.get('XS')?.chestCm, 26 * 2.54);
+  assert.equal(chart.get('S')?.lengthCm, 56 * 2.54);
+  assert.equal(chart.get('S')?.chestCm, 28 * 2.54);
+});
+
+test('sleeve length does not overwrite garment top length', () => {
+  const chart = scanSizeChartFromPage(`
+    <p>Measurements by inches</p>
+    <table>
+      <tr><th>Size</th><th>Top Length</th><th>Shoulder</th><th>Bust</th><th>Sleeve Length</th></tr>
+      <tr><td>M</td><td>28</td><td>16</td><td>44</td><td>8</td></tr>
+    </table>
+  `);
+  assert.equal(chart.get('M')?.lengthCm, 28 * 2.54);
+  assert.equal(chart.get('M')?.chestCm, 44 * 2.54);
 });
 

@@ -31,6 +31,10 @@ const SIZE_RANK: Record<string, number> = {
   XL: 5,
   XXL: 6,
   XXXL: 7,
+  '4XL': 8,
+  '5XL': 9,
+  '6XL': 10,
+  '7XL': 11,
 };
 
 type GirthKey = 'chestCm' | 'waistCm' | 'hipCm';
@@ -74,15 +78,31 @@ export function normalizeSizeCode(sizeCode: string): string {
     XXLARGE: 'XXL',
     '2XL': 'XXL',
     '3XL': 'XXXL',
+    '4XL': '4XL',
+    XXXXL: '4XL',
+    '5XL': '5XL',
+    XXXXXL: '5XL',
+    '6XL': '6XL',
+    '7XL': '7XL',
     EXTRASMALL: 'XS',
     XSMALL: 'XS',
+    ONESIZE: 'OS',
   };
 
   return aliases[compact] ?? compact;
 }
 
 function sizeRank(sizeCode: string): number {
-  return SIZE_RANK[normalizeSizeCode(sizeCode)] ?? Number.POSITIVE_INFINITY;
+  const normalized = normalizeSizeCode(sizeCode);
+  if (Object.prototype.hasOwnProperty.call(SIZE_RANK, normalized)) {
+    return SIZE_RANK[normalized] ?? Number.POSITIVE_INFINITY;
+  }
+
+  if (/^\d{1,2}$/.test(normalized)) {
+    return Number(normalized);
+  }
+
+  return Number.POSITIVE_INFINITY;
 }
 
 function variantFits(

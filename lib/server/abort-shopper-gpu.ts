@@ -4,6 +4,10 @@ import {
   SHOPPER_GPU_WARMUP_IDLE_MS,
   isShopperInferenceOverdue,
 } from '@/lib/ml/session-gpu';
+import {
+  applyHmrPredictionToFitJob,
+  isTerminalReplicateStatus,
+} from '@/lib/server/apply-hmr-prediction';
 import { purgeBiometricJobImages } from '@/lib/server/biometrics-wipe';
 import {
   releaseGpuHoldForFitJob,
@@ -21,6 +25,7 @@ interface AbortableFitJob {
   replicate_prediction_id: string | null;
   front_image_path: string | null;
   side_image_path: string | null;
+  weight_kg: number | null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -70,26 +75,7 @@ export async function abortShopperFitJob(job: AbortableFitJob): Promise<boolean>
 
   await releaseGpuHoldForFitJob(job.id);
   await sleepGpuIfNoActiveFitJobs();
-  // #region agent log
-  fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'pre-fix',hypothesisId:'H1',location:'lib/server/abort-shopper-gpu.ts:abortShopperFitJob',message:'job aborted at GPU wall',data:{jobId:job.id,ageMs:Date.now()-Date.parse(job.created_at),hadPrediction:Boolean(job.replicate_prediction_id)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   return true;
-}
-
-async function readInferenceStartedAt(predictionId: string | null): Promise<{
-  startedAt: string | null;
-  status: string | null;
-}> {
-  if (!predictionId) {
-    return { startedAt: null, status: null };
-  }
-
-  try {
-    const prediction = await fetchReplicatePrediction(predictionId);
-    return { startedAt: prediction.startedAt, status: prediction.status };
-  } catch {
-    return { startedAt: null, status: null };
-  }
 }
 
 export async function abortOverdueShopperFitJobs(): Promise<number> {
@@ -97,7 +83,7 @@ export async function abortOverdueShopperFitJobs(): Promise<number> {
   const { data, error } = await supabase
     .from('fit_jobs')
     .select(
-      'id, tenant_id, status, created_at, replicate_prediction_id, front_image_path, side_image_path',
+      'id, tenant_id, status, created_at, replicate_prediction_id, front_image_path, side_image_path, weight_kg',
     )
     .in('status', [...ACTIVE_STATUSES])
     .order('created_at', { ascending: true })
@@ -122,7 +108,7 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('fit_jobs')
     .select(
-      'id, tenant_id, status, created_at, replicate_prediction_id, front_image_path, side_image_path',
+      'id, tenant_id, status, created_at, replicate_prediction_id, front_image_path, side_image_path, weight_kg',
     )
     .eq('id', jobId)
     .maybeSingle();
@@ -136,16 +122,25 @@ export async function abortFitJobIfOverdue(jobId: string): Promise<boolean> {
     return false;
   }
 
-  const timing = await readInferenceStartedAt(job.replicate_prediction_id);
-  if (timing.status === 'succeeded' || timing.status === 'failed') {
-    return false;
+  let startedAt: string | null = null;
+  if (job.replicate_prediction_id) {
+    try {
+      const prediction = await fetchReplicatePrediction(job.replicate_prediction_id);
+      startedAt = prediction.startedAt;
+      if (isTerminalReplicateStatus(prediction.status)) {
+        try {
+          await applyHmrPredictionToFitJob(job.id, prediction, job);
+        } catch {
+          // Webhook or status can retry. Never timeout-abort a finished Cog run.
+        }
+        return false;
+      }
+    } catch {
+      // Replicate lookup failed; fall through to the wall-clock check.
+    }
   }
 
-  const overdue = isShopperInferenceOverdue(job.created_at, Date.now(), timing.startedAt);
-  // #region agent log
-  fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'post-fix',hypothesisId:'H1',location:'lib/server/abort-shopper-gpu.ts:abortFitJobIfOverdue',message:'overdue check vs Replicate started_at',data:{jobId:job.id,overdue,predictionStatus:timing.status,hasStartedAt:Boolean(timing.startedAt),ageMs:Date.now()-Date.parse(job.created_at)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-  if (!overdue) {
+  if (!isShopperInferenceOverdue(job.created_at, Date.now(), startedAt)) {
     return false;
   }
 
@@ -184,10 +179,6 @@ export async function watchShopperGpuDeadline(jobId: string): Promise<void> {
       return;
     }
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7718/ingest/5c6f4191-5d6f-487b-adb7-f441fc4ce685',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'06d10c'},body:JSON.stringify({sessionId:'06d10c',runId:'post-fix',hypothesisId:'H1',location:'lib/server/abort-shopper-gpu.ts:watchShopperGpuDeadline',message:'watch ended without aborting queued job',data:{jobId,elapsedMs:Date.now()-watchStarted},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 }
 
 /**
