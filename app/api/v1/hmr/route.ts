@@ -5,12 +5,15 @@ import {
   purgeBiometricJobImages,
 } from '@/lib/server/biometrics-wipe';
 import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
-import { BIOMETRIC_SIGNED_READ_SECONDS } from '@/lib/server/biometric-upload';
 import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/server/hmr-request';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
 import { createServiceClient } from '@/lib/supabase/service';
-import { cancelReplicatePrediction, dispatchAnnyFitPrediction } from '@/lib/ml/replicate';
+import {
+  cancelReplicatePrediction,
+  dispatchAnnyFitPrediction,
+  uploadReplicateInputFile,
+} from '@/lib/ml/replicate';
 import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
 import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
 import {
@@ -96,20 +99,30 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const serviceClient = createServiceClient();
-  const [signedFront, signedSide] = await Promise.all([
-    serviceClient.storage.from('biometrics').createSignedUrl(
-      body.frontImagePath,
-      BIOMETRIC_SIGNED_READ_SECONDS,
-    ),
-    serviceClient.storage.from('biometrics').createSignedUrl(
-      body.sideImagePath,
-      BIOMETRIC_SIGNED_READ_SECONDS,
-    ),
+  const [frontObject, sideObject] = await Promise.all([
+    serviceClient.storage.from('biometrics').download(body.frontImagePath),
+    serviceClient.storage.from('biometrics').download(body.sideImagePath),
   ]);
 
-  if (signedFront.error || !signedFront.data || signedSide.error || !signedSide.data) {
+  if (frontObject.error || !frontObject.data || sideObject.error || !sideObject.data) {
     void sleepGpuIfNoActiveFitJobs();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
+  }
+
+  let frontImageUrl: string;
+  let sideImageUrl: string;
+  try {
+    const [frontBytes, sideBytes] = await Promise.all([
+      frontObject.data.arrayBuffer(),
+      sideObject.data.arrayBuffer(),
+    ]);
+    [frontImageUrl, sideImageUrl] = await Promise.all([
+      uploadReplicateInputFile(frontBytes, 'front.webp'),
+      uploadReplicateInputFile(sideBytes, 'side.webp'),
+    ]);
+  } catch {
+    void sleepGpuIfNoActiveFitJobs();
+    return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 502 });
   }
 
   const { data: job, error: createError } = await serviceClient
@@ -197,8 +210,8 @@ export async function POST(request: Request): Promise<Response> {
     const webhookUrl = new URL('/api/v1/webhooks/replicate', getWebhookBaseUrl());
     webhookUrl.searchParams.set('job_id', job.id);
     const prediction = await dispatchAnnyFitPrediction({
-      frontImageUrl: signedFront.data.signedUrl,
-      sideImageUrl: signedSide.data.signedUrl,
+      frontImageUrl,
+      sideImageUrl,
       heightCm: body.heightCm,
       sex: body.sex,
       weightKg: body.weightKg,

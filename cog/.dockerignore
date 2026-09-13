@@ -2,8 +2,7 @@ __pycache__/
 **/__pycache__/
 *.py[cod]
 .cog/
-checkpoints/
-*.ckpt
-*.pt
 .env
 .env.*
+# Host scratch. Baked HF snapshots live in weights/ and MUST be copied into /src.
+checkpoints/

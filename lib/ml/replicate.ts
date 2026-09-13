@@ -1066,6 +1066,46 @@ async function requestReplicatePrediction(
   return parseReplicatePredictionPayload(await response.json());
 }
 
+const REPLICATE_INPUT_FILE_MAX_BYTES = 20 * 1024 * 1024;
+
+export async function uploadReplicateInputFile(
+  bytes: ArrayBuffer | Uint8Array,
+  filename: string,
+  contentType = 'image/webp',
+): Promise<string> {
+  const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (payload.byteLength === 0 || payload.byteLength > REPLICATE_INPUT_FILE_MAX_BYTES) {
+    throw new Error('Replicate input file is empty or larger than 20MB.');
+  }
+
+  const body = new FormData();
+  body.append(
+    'content',
+    new Blob([Buffer.from(payload)], { type: contentType }),
+    filename,
+  );
+
+  const response = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getReplicateApiToken()}` },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Replicate file upload failed (${response.status}): ${errorBody || response.statusText}`,
+    );
+  }
+
+  const uploaded: unknown = await response.json();
+  if (!isRecord(uploaded) || !isRecord(uploaded.urls) || typeof uploaded.urls.get !== 'string') {
+    throw new Error('Replicate file upload returned no urls.get.');
+  }
+
+  return uploaded.urls.get;
+}
+
 export async function dispatchAnnyFitPrediction(
   input: DispatchAnnyFitPredictionInput,
 ): Promise<ReplicatePredictionReceipt> {
@@ -1112,7 +1152,12 @@ function buildPatternPredictionInput(input: RunPatternInput): Record<string, unk
 }
 
 export function isTerminalReplicatePredictionStatus(status: string): boolean {
-  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+  return (
+    status === 'succeeded'
+    || status === 'failed'
+    || status === 'canceled'
+    || status === 'aborted'
+  );
 }
 
 export async function waitForReplicatePrediction(

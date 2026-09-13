@@ -57,6 +57,7 @@ __pycache__/
 # Cog local weights — never commit gated SAM 3D Body checkpoints
 .cog/
 cog/checkpoints/
+cog/weights/
 cog/**/*.ckpt
 cog/**/*.pt
 cog/requirements-DESKTOP-*.txt
@@ -67,6 +68,9 @@ scripts/verify-auth-create.mjs
 
 # Generated SQL paste dump — source of truth is supabase/migrations/
 supabase/_combined_migrations_for_sql_editor.sql
+
+# Shopify CLI session (never commit tokens)
+.shopify/
 
 # Local Supabase, Vercel, and temp artifacts
 supabase/.temp/

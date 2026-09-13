@@ -14,12 +14,12 @@ import {
 
 test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(SHOPPER_INFERENCE_DEADLINE_MS, 120_000);
-  assert.equal(SHOPPER_GPU_SETUP_BUDGET_MS, 300_000);
-  assert.equal(SHOPPER_AVATAR_WAIT_MS, 420_000);
+  assert.equal(SHOPPER_GPU_SETUP_BUDGET_MS, 900_000);
+  assert.equal(SHOPPER_AVATAR_WAIT_MS, 1_020_000);
   const created = new Date('2026-01-01T00:00:00.000Z').toISOString();
   const started = new Date('2026-01-01T00:02:00.000Z').toISOString();
-  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:04:59.000Z')), false);
-  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:05:00.000Z')), true);
+  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:14:59.000Z')), false);
+  assert.equal(isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:15:00.000Z')), true);
   assert.equal(
     isShopperInferenceOverdue(created, Date.parse('2026-01-01T00:03:59.000Z'), started),
     false,
@@ -55,7 +55,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
     ),
     true,
   );
-  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 210_000);
+  assert.equal(gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:01:30.000Z')), 810_000);
   assert.equal(
     gpuHoldMsUntilDeadline(created, Date.parse('2026-01-01T00:03:30.000Z'), started),
     30_000,
@@ -67,7 +67,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(
     isShopperInferenceOverdue(
       created,
-      Date.parse('2026-01-01T00:04:59.000Z'),
+      Date.parse('2026-01-01T00:14:59.000Z'),
       created,
       'starting',
     ),
@@ -76,7 +76,7 @@ test('shopper GPU wall clock is two minutes after Replicate starts', () => {
   assert.equal(
     isShopperInferenceOverdue(
       created,
-      Date.parse('2026-01-01T00:05:00.000Z'),
+      Date.parse('2026-01-01T00:15:00.000Z'),
       created,
       'starting',
     ),
@@ -111,6 +111,8 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(hmr, /convertWarmupLeaseToJob/);
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
   assert.match(hmr, /watchShopperGpuDeadline/);
+  assert.match(hmr, /uploadReplicateInputFile/);
+  assert.match(hmr, /\.download\(/);
   assert.match(hmr, /maxDuration = 300/);
   assert.match(hmr, /cancelReplicatePrediction/);
   assert.match(hmr, /SESSION_GPU_FAILED|Unable to start the fitting GPU/);
@@ -145,8 +147,10 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(vercel, /0 0 \* \* \*/);
   assert.match(capture, /SHOPPER_AVATAR_WAIT_MS/);
   assert.match(capture, /Keep this screen open/);
+  assert.match(capture, /15 minutes/);
   assert.match(capture, /pagehide/);
   assert.match(capture, /abortShopperGpu/);
+  assert.doesNotMatch(capture, /removeEventListener\('pagehide', onPageHide\);\s*stopGpu\(\);/);
   assert.match(capture, /step !== 'front'/);
   assert.doesNotMatch(capture, /120 - waitSeconds/);
   assert.match(capture, /warmShopperGpu/);
@@ -155,6 +159,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(client, /\/api\/v1\/hmr\/abort/);
   assert.match(applyHmr, /purgeBiometricJobImages/);
   assert.match(applyHmr, /isTerminalReplicateStatus/);
+  assert.match(applyHmr, /aborted/);
   assert.match(applyHmr, /prediction\.startedAt/);
   assert.match(status, /fetchReplicatePrediction/);
   assert.match(status, /abortFitJobIfOverdue/);
@@ -176,9 +181,21 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(cogTopology, /MHR_SKELETON_POS_START = 0/);
   assert.match(cogTopology, /MHR_SKELETON_QUAT_START = 3/);
   assert.match(cogTopology, /MHR_JOINT_QUAT_DIM = MHR_JOINT_COUNT \* 4/);
+  assert.match(cogTopology, /MOGE_HF_REPO = "Ruicheng\/moge-2-vitl-normal"/);
   assert.match(cogInit, /SAM3D_INFERENCE_TYPE = "body"/);
   assert.match(cogInit, /inference_type=SAM3D_INFERENCE_TYPE/);
   assert.match(cogInit, /extract_loaded_mhr/);
+  assert.match(cogInit, /sam3d_snapshot_ready/);
+  assert.match(cogPredict, /configure_hf_cache/);
+  assert.match(cogYaml, /python -m body.prefetch_weights/);
+  const dockerignore = readFileSync(path.join(process.cwd(), 'cog/.dockerignore'), 'utf8');
+  const prefetch = readFileSync(path.join(process.cwd(), 'cog/body/prefetch_weights.py'), 'utf8');
+  assert.doesNotMatch(dockerignore, /^\*\.pt$/m);
+  assert.doesNotMatch(dockerignore, /^\*\.ckpt$/m);
+  assert.match(prefetch, /SAM3D_HF_REPO/);
+  assert.match(prefetch, /SAM2_HF_ID/);
+  assert.match(prefetch, /MOGE_HF_REPO/);
+  assert.match(prefetch, /include_gated/);
   assert.match(
     cogYaml,
     /--no-build-isolation --no-deps "git\+https:\/\/github.com\/facebookresearch\/sam2.git@/,

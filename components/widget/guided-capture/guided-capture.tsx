@@ -210,8 +210,9 @@ export function GuidedCapture({
           failCapture(job.error_message ?? 'Avatar inference failed.', job.id);
         }
       },
-      (watchError) => {
-        failCapture(watchError.message);
+      () => {
+        // Status polls can flake while Replicate is still starting the Cog.
+        // Keep waiting until the job row is terminal or the wait budget ends.
       },
     );
   }, [embedToken, failCapture, frontGate, intake, jobId, onComplete, sideGate, step, tenantId]);
@@ -243,7 +244,6 @@ export function GuidedCapture({
     window.addEventListener('pagehide', onPageHide);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
-      stopGpu();
     };
   }, [stopGpu]);
 
@@ -343,7 +343,7 @@ export function GuidedCapture({
         <p className="max-w-sm text-sm text-obsidian-muted">
           {step === 'uploading'
             ? uploadCopy
-            : 'Keep this screen open. The fitting GPU may still be starting, then it builds your 3D avatar from the two photos.'}
+            : 'Keep this screen open. The first GPU start can take up to 15 minutes while the body model loads. Do not close Try On.'}
         </p>
         <p className="font-mono text-xs text-obsidian-subtle">
           {step === 'inferring'

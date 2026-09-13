@@ -53,6 +53,15 @@ class Predictor(BasePredictor):
 
         self.device = torch.device("cuda")
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        from body.prefetch_weights import configure_hf_cache, sam3d_snapshot_ready
+
+        configure_hf_cache()
+        baked = sam3d_snapshot_ready()
+        print(
+            "Ashrium Cog setup starting "
+            f"(sam3d_baked={'yes' if baked else 'no'}).",
+            flush=True,
+        )
         self.setup_ms = 0.0
         setup_started = time.perf_counter()
         try:

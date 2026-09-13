@@ -25,8 +25,9 @@ test('Replicate biometric read URLs outlive an A100 cold start', () => {
   assert.equal(BIOMETRIC_SIGNED_READ_SECONDS, 15 * 60);
 
   const hmr = readFileSync(path.join(process.cwd(), 'app/api/v1/hmr/route.ts'), 'utf8');
-  assert.match(hmr, /BIOMETRIC_SIGNED_READ_SECONDS/);
-  assert.doesNotMatch(hmr, /createSignedUrl\([^,]+,\s*60\s*\)/);
+  assert.match(hmr, /uploadReplicateInputFile/);
+  assert.match(hmr, /\.download\(/);
+  assert.doesNotMatch(hmr, /createSignedUrl/);
   assert.match(hmr, /convertWarmupLeaseToJob/);
   assert.match(hmr, /settleWarmReplicaIfNeeded/);
   assert.match(hmr, /const prediction = await dispatchAnnyFitPrediction/);

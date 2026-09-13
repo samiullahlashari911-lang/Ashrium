@@ -36,6 +36,7 @@ test('status-route reconcile only writes terminal Replicate predictions', () => 
   assert.equal(isTerminalReplicateStatus('succeeded'), true);
   assert.equal(isTerminalReplicateStatus('failed'), true);
   assert.equal(isTerminalReplicateStatus('canceled'), true);
+  assert.equal(isTerminalReplicateStatus('aborted'), true);
   assert.equal(isTerminalReplicateStatus('processing'), false);
   assert.equal(isTerminalReplicateStatus('starting'), false);
 });

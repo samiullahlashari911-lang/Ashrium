@@ -12,11 +12,11 @@ export const SHOPPER_GPU_WARMUP_IDLE_MS = 3 * 60 * 1000;
 
 /**
  * Max time a prediction may stay queued/starting before we abort. Cold A100
- * image pull + Cog `setup()` (SAM 2 + SAM 3D Body) is often ~2 minutes and
- * can exceed the 3-minute capture idle. Aborting at boot-complete is why
- * shoppers never received an avatar.
+ * image pull + Cog `setup()` (SAM 2 + SAM 3D Body, including a first-time
+ * HuggingFace fetch when the image is not baked) often exceeds five minutes.
+ * Aborting during `starting` is why shoppers never received an avatar.
  */
-export const SHOPPER_GPU_SETUP_BUDGET_MS = 5 * 60 * 1000;
+export const SHOPPER_GPU_SETUP_BUDGET_MS = 15 * 60 * 1000;
 
 /** Widget / occupancy lookback covering setup plus the inference wall. */
 export const SHOPPER_AVATAR_WAIT_MS =
@@ -60,7 +60,7 @@ export function readShopperGpuMaxInstances(raw = process.env.ASHRIUM_GPU_MAX_INS
 export const REPLICATE_A100_USD_PER_SEC = 0.0014;
 
 export const SHOPPER_GPU_TIMEOUT_MESSAGE =
-  'Sorry — the fitting GPU stopped so you are not billed further. Please try again.';
+  'Sorry — the fitting GPU stopped so you are not billed further. Please try again and keep Try On open until the avatar appears.';
 
 export type SessionGpuAction = 'warm' | 'sleep' | 'status';
 

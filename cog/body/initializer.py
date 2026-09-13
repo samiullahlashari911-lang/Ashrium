@@ -35,18 +35,16 @@ class Sam3dAccessError(RuntimeError):
     """Raised when gated SAM 3D Body weights cannot be loaded."""
 
 
-def huggingface_token() -> str:
-    token = (
-        os.environ.get("HF_TOKEN")
-        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-        or ""
-    ).strip()
-    if not token:
+def huggingface_token(*, required: bool = True) -> str:
+    from .prefetch_weights import read_hf_token
+
+    token = read_hf_token()
+    if not token and required:
         raise Sam3dAccessError(
             "HuggingFace access to SAM 3D Body is required. "
             "Set HF_TOKEN as a Replicate secret after accepting "
-            "facebook/sam-3d-body-dinov3. Do not stub the initializer."
+            "facebook/sam-3d-body-dinov3, or bake the snapshot into "
+            "cog/weights before cog push. Do not stub the initializer."
         )
     return token
 
@@ -125,9 +123,16 @@ def load_sam3d_estimator(device: Any) -> tuple[Any, Any]:
     Returns (estimator, mhr_module). The MHR module is the instance already
     loaded by SAM 3D Body — do not jit-load a second copy on the happy path.
     """
-    token = huggingface_token()
-    os.environ.setdefault("HF_TOKEN", token)
-    os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", token)
+    from .prefetch_weights import configure_hf_cache, sam3d_snapshot_ready
+
+    configure_hf_cache()
+    baked = sam3d_snapshot_ready()
+    token = huggingface_token(required=not baked)
+    if token:
+        os.environ.setdefault("HF_TOKEN", token)
+        os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", token)
+    if baked:
+        os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
     ensure_sam3d_on_path()
     pin_dinov3_torch_hub()

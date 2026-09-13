@@ -39,7 +39,12 @@ export class HmrJobApplyError extends Error {
 }
 
 export function isTerminalReplicateStatus(status: string): boolean {
-  return status === 'succeeded' || status === 'failed' || status === 'canceled';
+  return (
+    status === 'succeeded'
+    || status === 'failed'
+    || status === 'canceled'
+    || status === 'aborted'
+  );
 }
 
 function toJson(value: MhrParametricVector): Json {

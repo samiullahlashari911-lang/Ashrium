@@ -3,8 +3,10 @@
 # + GarmentCode / PyGarment MIT 2D pattern ingest (task=pattern).
 # on gpu-a100-large. Never NvidiaWarp-GarmentCode (no Warp sim from that fork).
 # Pattern style is HTML/product-text parse, not Qwen3-VL (too heavy for the trial A100).
-# Set HF_TOKEN as a Replicate secret after gated access to
-# facebook/sam-3d-body-dinov3 is granted. Do not stub that step.
+# Bake SAM 3D Body + SAM 2 + MoGe-2 into cog/weights before `cog push`
+# (`cd cog && python -m body.prefetch_weights`). HF_TOKEN is required for
+# gated facebook/sam-3d-body-dinov3. Also set HF_TOKEN as a Replicate
+# runtime secret so an unbaked image can still load. Do not stub that step.
 build:
   gpu: true
   cuda: "12.4"

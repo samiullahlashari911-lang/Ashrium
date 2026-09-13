@@ -40,3 +40,4 @@ MHR_SKELETON_SCALE_INDEX = 7
 MHR_JOINT_QUAT_DIM = MHR_JOINT_COUNT * 4
 SAM3D_HF_REPO = "facebook/sam-3d-body-dinov3"
 SAM2_HF_ID = "facebook/sam2.1-hiera-large"
+MOGE_HF_REPO = "Ruicheng/moge-2-vitl-normal"
