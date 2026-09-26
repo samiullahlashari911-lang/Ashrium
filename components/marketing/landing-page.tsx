@@ -130,9 +130,9 @@ export function MarketingHome(): JSX.Element {
       </header>
 
       <main id="main">
-        <section className="marketing-wrap grid items-start gap-16 py-16 sm:py-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] lg:gap-20 lg:py-28">
+        <section className="marketing-wrap relative grid items-center gap-14 py-16 sm:py-20 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.85fr)] lg:gap-16 lg:py-24">
           <div className="min-w-0 max-w-xl">
-            <h1 className="text-balance text-[2.5rem] font-medium leading-[1.08] tracking-[-0.02em] sm:text-6xl">
+            <h1 className="text-balance text-[2.75rem] font-medium leading-[1.02] tracking-[-0.03em] sm:text-6xl lg:text-[4.25rem]">
               Fewer returns, guaranteed.
             </h1>
             <p className="mt-6 text-pretty text-[17px] leading-7 text-obsidian-muted">
@@ -188,24 +188,25 @@ export function MarketingHome(): JSX.Element {
             <h2 className="text-balance text-3xl font-medium tracking-[-0.02em]">
               From consent to the cart.
             </h2>
-            <ol className="mt-12 max-w-3xl">
+            <ol className="mt-12 grid gap-px overflow-hidden rounded-3xl border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
               {STEPS.map((step, index) => (
-                <li key={step.title} className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-4 border-t border-white/10 py-6">
-                  <span className="pt-0.5 text-sm tabular-nums text-obsidian-subtle">{index + 1}</span>
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-medium text-obsidian-ink">{step.title}</h3>
-                    <p className="mt-1 text-pretty text-[17px] leading-7 text-obsidian-muted">{step.detail}</p>
-                  </div>
+                <li key={step.title} className="min-w-0 bg-obsidian-canvas px-5 py-6">
+                  <span className="text-sm tabular-nums text-obsidian-subtle">{index + 1}</span>
+                  <h3 className="mt-4 text-lg font-medium text-obsidian-ink">{step.title}</h3>
+                  <p className="mt-2 text-pretty text-[15px] leading-6 text-obsidian-muted">{step.detail}</p>
                 </li>
               ))}
             </ol>
           </div>
         </section>
 
-        <section id="guarantee" className="marketing-anchor border-t border-white/10 bg-obsidian-lift/50">
-          <div className="marketing-wrap grid gap-10 py-20 sm:py-24 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start lg:gap-20">
+        <section id="guarantee" className="marketing-anchor border-t border-white/10 bg-[#141428]">
+          <div className="marketing-wrap grid items-end gap-12 py-20 sm:py-28 lg:grid-cols-2 lg:gap-20">
             <div>
-              <h2 className="text-balance text-3xl font-medium tracking-[-0.02em]">
+              <p className="text-[clamp(5rem,14vw,8rem)] font-medium leading-[0.85] tracking-[-0.05em] tabular-nums">
+                15%
+              </p>
+              <h2 className="mt-6 max-w-sm text-balance text-3xl font-medium tracking-[-0.02em]">
                 Fewer returns, guaranteed.
               </h2>
               <p className="mt-4 max-w-md text-pretty text-[17px] leading-7 text-obsidian-muted">
@@ -224,8 +225,8 @@ export function MarketingHome(): JSX.Element {
         </section>
 
         <section className="border-t border-white/10">
-          <div className="marketing-wrap grid gap-6 py-20 sm:py-24 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-20">
-            <h2 className="text-balance text-3xl font-medium tracking-[-0.02em]">
+          <div className="marketing-wrap grid items-end gap-6 py-20 sm:py-24 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.1fr)] lg:gap-16">
+            <h2 className="text-balance text-[clamp(2.5rem,6vw,4.5rem)] font-medium leading-[0.95] tracking-[-0.04em]">
               Up to 20% higher conversion.
             </h2>
             <p className="text-pretty text-[17px] leading-7 text-obsidian-muted">
@@ -244,14 +245,12 @@ export function MarketingHome(): JSX.Element {
                 Shopify only. Connect the store, ingest the garment, and place Try on on the product page.
               </p>
             </div>
-            <ol className="mt-12 max-w-3xl">
+            <ol className="mt-12 grid gap-px overflow-hidden rounded-3xl border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
               {SHOPIFY_STEPS.map((step, index) => (
-                <li key={step.title} className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-4 border-t border-white/10 py-6">
-                  <span className="pt-0.5 text-sm tabular-nums text-obsidian-subtle">{index + 1}</span>
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-medium">{step.title}</h3>
-                    <p className="mt-1 text-pretty text-[17px] leading-7 text-obsidian-muted">{step.detail}</p>
-                  </div>
+                <li key={step.title} className="min-w-0 bg-obsidian-canvas px-5 py-6">
+                  <span className="text-sm tabular-nums text-obsidian-subtle">{index + 1}</span>
+                  <h3 className="mt-4 text-lg font-medium">{step.title}</h3>
+                  <p className="mt-2 text-pretty text-[15px] leading-6 text-obsidian-muted">{step.detail}</p>
                 </li>
               ))}
             </ol>

@@ -55,10 +55,9 @@ export async function POST(request: Request): Promise<Response> {
     }, 502);
   }
 
-  const eventUrl = process.env.NEXT_PUBLIC_CALENDLY_EVENT_URL ?? '';
-  const calendlyUrl = eventUrl.length > 0
-    ? buildCalendlyEmbedUrl(eventUrl, parsed.lead)
-    : null;
+  const eventUrl = process.env.NEXT_PUBLIC_CALENDLY_EVENT_URL?.trim()
+    || 'https://calendly.com/samiullahlashari911/30min';
+  const calendlyUrl = buildCalendlyEmbedUrl(eventUrl, parsed.lead);
 
   return json({ ok: true, calendlyUrl }, 200);
 }
