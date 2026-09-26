@@ -102,10 +102,12 @@ export function AtmosphereBackdrop({
 }
 
 export function ThemeShell({
+  atmosphere = true,
   children,
   intensity = 'subtle',
   surface = 'marketing',
 }: {
+  atmosphere?: boolean;
   children: ReactNode;
   intensity?: AtmosphereIntensity;
   surface?: ThemeSurface;
@@ -115,11 +117,12 @@ export function ThemeShell({
       className={[
         'relative min-h-screen bg-obsidian-canvas text-obsidian-ink',
         surface === 'dashboard' ? 'dashboard-surface' : '',
+        atmosphere ? '' : 'marketing-flat',
       ]
         .filter(Boolean)
         .join(' ')}
     >
-      <AtmosphereBackdrop intensity={intensity} surface={surface} />
+      {atmosphere ? <AtmosphereBackdrop intensity={intensity} surface={surface} /> : null}
       <div className="relative z-10">{children}</div>
     </div>
   );

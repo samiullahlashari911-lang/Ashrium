@@ -19,6 +19,10 @@
   --strain-loose: #38bdf8;
 }
 
+html {
+  color-scheme: dark;
+}
+
 html,
 body {
   min-height: 100%;
@@ -33,7 +37,9 @@ body {
 }
 
 html:has(.dashboard-surface),
-html:has(.dashboard-surface) body {
+html:has(.dashboard-surface) body,
+html:has(.marketing-flat),
+html:has(.marketing-flat) body {
   background-image: none;
 }
 
@@ -90,6 +96,11 @@ html:has(.dashboard-surface) body {
     filter: none;
   }
 
+  .obsidian-cta:focus-visible {
+    outline: 2px solid #f8fafc;
+    outline-offset: 3px;
+  }
+
   .obsidian-input {
     width: 100%;
     border-radius: 9999px;
@@ -108,6 +119,11 @@ html:has(.dashboard-surface) body {
 
   .obsidian-input:focus {
     border-color: rgba(255, 255, 255, 0.28);
+  }
+
+  .obsidian-input:focus-visible {
+    outline: 2px solid #c4b5fd;
+    outline-offset: 2px;
   }
 
   .obsidian-input-box {
@@ -158,5 +174,32 @@ html:has(.dashboard-surface) body {
 
   .capture-height-dial::-webkit-scrollbar {
     display: none;
+  }
+
+  .marketing-dialog {
+    width: min(36rem, calc(100vw - 1.5rem));
+    max-height: min(44rem, calc(100dvh - 1.5rem));
+    margin: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--obsidian-ink);
+    color-scheme: dark;
+    overscroll-behavior: contain;
+  }
+
+  .marketing-dialog::backdrop {
+    background: rgba(6, 5, 18, 0.78);
+  }
+
+  .marketing-anchor {
+    scroll-margin-top: 6.5rem;
+  }
+
+  .marketing-wrap {
+    width: min(68rem, 100%);
+    margin-inline: auto;
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
   }
 }

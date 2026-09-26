@@ -29,6 +29,7 @@ export const RATE_LIMITS = {
   fitRecommend: 60,
   fitResolve: 20,
   catalogSync: 10,
+  marketingLead: 8,
 } as const;
 
 const rateLimitWindows = new Map<string, RateLimitWindow>();
