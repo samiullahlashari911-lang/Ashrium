@@ -524,3 +524,15 @@ and ANNY topology versions, never let a raw biometric photo or a face pixel
 outlive its TTL, never leave `min_containers=1` overnight, and ask before
 adding a package, changing locked product decisions, or touching a file
 outside the current phase's map.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues on samiullahlashari911-lang/Ashrium (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
