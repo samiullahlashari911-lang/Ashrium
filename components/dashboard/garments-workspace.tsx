@@ -64,8 +64,8 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
       <header>
-        <h1 className="text-2xl font-bold text-obsidian-ink">CAD garment manager</h1>
-        <p className="mt-1 text-sm text-obsidian-muted">
+        <h1 className="text-2xl font-bold text-ash-ink">CAD garment manager</h1>
+        <p className="mt-1 text-sm text-ash-muted">
           Test one Shopify SKU, review ingest tier / GSM / composition, and keep charts honest.
         </p>
       </header>
@@ -104,12 +104,12 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
             onEditProfile={setEditingProfile}
             onDeleted={refreshProfiles}
           />
-          <section className="obsidian-glass p-5">
-            <h2 className="text-lg font-semibold text-obsidian-ink">Selected size variants</h2>
+          <section className="ash-card p-5">
+            <h2 className="text-lg font-semibold text-ash-ink">Selected size variants</h2>
             {selectedProfile && selectedVariants.length > 0 ? (
               <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full text-left text-sm text-obsidian-ink">
-                  <thead className="border-b border-white/10 text-xs uppercase tracking-wide text-obsidian-muted">
+                <table className="min-w-full text-left text-sm text-ash-ink">
+                  <thead className="border-b border-ash-line text-xs uppercase tracking-wide text-ash-muted">
                     <tr>
                       <th className="px-2 py-2">Size</th>
                       <th className="px-2 py-2">Chest</th>
@@ -122,14 +122,14 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
                   </thead>
                   <tbody>
                     {selectedVariants.map((variant) => (
-                      <tr key={variant.id} className="border-b border-white/10">
+                      <tr key={variant.id} className="border-b border-ash-line">
                         <td className="px-2 py-2 font-mono text-xs">{variant.size_code}</td>
                         <td className="px-2 py-2">{variant.chest_cm && variant.chest_cm > 0 ? variant.chest_cm.toFixed(1) : '—'}</td>
                         <td className="px-2 py-2">{variant.waist_cm && variant.waist_cm > 0 ? variant.waist_cm.toFixed(1) : '—'}</td>
                         <td className="px-2 py-2">{variant.hip_cm && variant.hip_cm > 0 ? variant.hip_cm.toFixed(1) : '—'}</td>
                         <td className="px-2 py-2">{variant.length_cm && variant.length_cm > 0 ? variant.length_cm.toFixed(1) : '—'}</td>
                         <td className="px-2 py-2 font-mono text-xs">{variant.external_sku ?? '—'}</td>
-                        <td className="px-2 py-2 text-xs text-obsidian-muted">
+                        <td className="px-2 py-2 text-xs text-ash-muted">
                           {variant.rest_length_path ? 'GarmentCode' : '—'}
                         </td>
                       </tr>
@@ -138,7 +138,7 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
                 </table>
               </div>
             ) : (
-              <p className="mt-2 text-sm text-obsidian-muted">
+              <p className="mt-2 text-sm text-ash-muted">
                 {selectedProfile
                   ? 'This garment has no size variants yet.'
                   : 'Select a garment to inspect size variants.'}
@@ -147,9 +147,9 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
           </section>
         </div>
 
-        <section className="obsidian-glass relative min-h-[320px] p-5">
-          <h2 className="text-lg font-semibold text-obsidian-ink">Product image</h2>
-          <p className="text-sm text-obsidian-muted">
+        <section className="ash-card relative min-h-[320px] p-5">
+          <h2 className="text-lg font-semibold text-ash-ink">Product image</h2>
+          <p className="text-sm text-ash-muted">
             {selectedProfile
               ? `${selectedProfile.name} (${selectedProfile.sku})`
               : 'Select a garment'}
@@ -162,7 +162,7 @@ export const GarmentsWorkspace: FC<GarmentsWorkspaceProps> = ({
               className="mt-4 max-h-[420px] w-full rounded-2xl object-contain"
             />
           ) : (
-            <div className="mt-4 flex h-[240px] items-center justify-center rounded-2xl bg-obsidian-canvas/60 text-sm text-obsidian-subtle">
+            <div className="mt-4 flex h-[240px] items-center justify-center rounded-2xl bg-ash-canvas/60 text-sm text-ash-subtle">
               No product image yet
             </div>
           )}

@@ -40,7 +40,7 @@ export const VFRCanvas: FC<VFRCanvasProps> = ({
   garment,
   config,
   avatar = DEFAULT_AVATAR,
-  className = 'w-full h-[560px] relative overflow-hidden rounded-xl bg-obsidian-canvas',
+  className = 'w-full h-[560px] relative overflow-hidden rounded-xl bg-ash-canvas',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const configRef = useRef<ViewportConfig>(config);

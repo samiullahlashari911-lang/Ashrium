@@ -26,12 +26,12 @@ export default function PrivacyPage(): React.JSX.Element {
           <Link href="/" className="inline-flex">
             <AshriumWordmark
               markClassName="h-8 w-8 shrink-0"
-              wordClassName="text-base font-semibold tracking-[0.04em] text-obsidian-ink"
+              wordClassName="text-base font-semibold tracking-[0.04em] text-ash-ink"
             />
           </Link>
           <Link
             href="/sign-in"
-            className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-obsidian-ink transition hover:border-obsidian-accent hover:bg-white/5"
+            className="rounded-full border border-ash-line px-4 py-2 text-sm font-semibold text-ash-ink transition hover:border-ash-accent hover:bg-ash-raised"
           >
             Merchant sign in
           </Link>
@@ -39,52 +39,52 @@ export default function PrivacyPage(): React.JSX.Element {
 
         <article className="flex flex-col gap-8 py-16">
           <header className="flex flex-col gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-accent-muted">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ash-accent">
               Privacy
             </p>
-            <h1 className="text-4xl font-bold tracking-tight text-obsidian-ink">
+            <h1 className="text-4xl font-bold tracking-tight text-ash-ink">
               Fitting consent
             </h1>
-            <p className="text-base text-obsidian-muted">
+            <p className="text-base text-ash-muted">
               Ashrium is a virtual fitting room. A shopper session is a short-lived
               measurement, not an account. Merchants see aggregated return-rate
               telemetry, not your photos.
             </p>
           </header>
 
-          <section className="obsidian-glass p-6">
-            <h2 className="text-lg font-semibold text-obsidian-ink">The fitting checkbox</h2>
-            <p className="mt-2 text-sm leading-relaxed text-obsidian-muted">
+          <section className="ash-card p-6">
+            <h2 className="text-lg font-semibold text-ash-ink">The fitting checkbox</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ash-muted">
               {CONSENT_CHECKBOX_LABEL}
             </p>
-            <p className="mt-2 text-sm leading-relaxed text-obsidian-muted">{CONSENT_SUMMARY}</p>
+            <p className="mt-2 text-sm leading-relaxed text-ash-muted">{CONSENT_SUMMARY}</p>
           </section>
 
-          <section className="obsidian-glass p-6">
-            <h2 className="text-lg font-semibold text-obsidian-ink">Age</h2>
-            <p className="mt-2 text-sm leading-relaxed text-obsidian-muted">
+          <section className="ash-card p-6">
+            <h2 className="text-lg font-semibold text-ash-ink">Age</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ash-muted">
               {AGE_ATTESTATION_LABEL} {UNDER_16_REFUSAL}
             </p>
           </section>
 
-          <section className="obsidian-glass p-6">
-            <h2 className="text-lg font-semibold text-obsidian-ink">Fitted clothing</h2>
-            <p className="mt-2 text-sm leading-relaxed text-obsidian-muted">
+          <section className="ash-card p-6">
+            <h2 className="text-lg font-semibold text-ash-ink">Fitted clothing</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ash-muted">
               {FITTED_CLOTHING_COPY}
             </p>
           </section>
 
           {PRIVACY_SECTIONS.map((section) => (
-            <section key={section.title} className="obsidian-glass p-6">
-              <h2 className="text-lg font-semibold text-obsidian-ink">{section.title}</h2>
-              <p className="mt-2 text-sm leading-relaxed text-obsidian-muted">{section.body}</p>
+            <section key={section.title} className="ash-card p-6">
+              <h2 className="text-lg font-semibold text-ash-ink">{section.title}</h2>
+              <p className="mt-2 text-sm leading-relaxed text-ash-muted">{section.body}</p>
             </section>
           ))}
         </article>
 
-        <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 py-6 text-sm text-obsidian-subtle">
+        <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-ash-line py-6 text-sm text-ash-subtle">
           <span>© {new Date().getFullYear()} Ashrium</span>
-          <Link href="/" className="hover:text-obsidian-ink">
+          <Link href="/" className="hover:text-ash-ink">
             Home
           </Link>
         </footer>

@@ -8,7 +8,7 @@ interface ConfidenceBadgeProps {
 export function ConfidenceBadge({ sizeCode, gate }: ConfidenceBadgeProps): React.JSX.Element {
   if (!gate || !sizeCode) {
     return (
-      <div className="rounded-full border border-dashed border-white/20 px-3 py-1.5 text-xs text-obsidian-subtle">
+      <div className="rounded-full border border-dashed border-ash-line px-3 py-1.5 text-xs text-ash-subtle">
         No size result yet
       </div>
     );
@@ -24,10 +24,10 @@ export function ConfidenceBadge({ sizeCode, gate }: ConfidenceBadgeProps): React
 
   return (
     <div className="inline-flex flex-col items-end gap-1">
-      <div className="rounded-full border border-white/35 bg-transparent px-3 py-1.5 text-xs font-semibold text-obsidian-muted">
+      <div className="rounded-full border border-ash-line bg-transparent px-3 py-1.5 text-xs font-semibold text-ash-muted">
         Approximate fit
       </div>
-      <p className="max-w-[14rem] text-right text-[11px] leading-snug text-obsidian-subtle">
+      <p className="max-w-[14rem] text-right text-[11px] leading-snug text-ash-subtle">
         Suggested {sizeCode} — not a size claim until capture, ingest, and drape all pass.
       </p>
     </div>

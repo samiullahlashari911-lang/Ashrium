@@ -1,71 +1,74 @@
 /**
- * Obsidian design system — single source of truth for merchant UI,
- * widget chrome, WebGL strain heatmaps, and 8px spatial rhythm.
+ * Ashrium design system — single source of truth for the marketing site,
+ * merchant dashboard, storefront widget, WebGL scene colours, and the 8px
+ * spatial rhythm.
  *
- * Palette: glass indigo / magenta merchant portal (deep canvas, frosted
- * panels, purple→magenta CTAs). Strain heatmap swatches stay independent
- * of the UI accent so cloth visualization is unchanged.
+ * Palette (from the owner's reference board): warm off-white canvas, white
+ * cards on hairline borders, near-black ink, one violet accent for calls to
+ * action. Fit heatmap swatches stay independent of the UI accent so cloth
+ * visualization never reads as "brand colour".
+ *
+ * Tailwind exposes these as `ash-*` colours through CSS variables declared in
+ * `app/globals.css`; keep the three in sync.
  */
 
 export const SPATIAL_GRID_PX = 8 as const;
 
-export const obsidianTitanium = {
-  canvas: '#0B0B1E',
-  canvasLift: '#1A1A2E',
-  card: '#16162B',
-  hairline: '#2A2A48',
-  accent: '#6A32C9',
-  accentEnd: '#B52286',
-  success: '#10B981',
-  tension: '#F43F5E',
-  ink: '#F8FAFC',
-  muted: '#A1A1B8',
-  subtle: '#7B7B96',
-  accentMuted: '#C4B5FD',
-  successMuted: '#6EE7B7',
-  tensionMuted: '#FDA4AF',
+export const ashrium = {
+  canvas: '#F4F1EC',
+  raised: '#FAF8F5',
+  surface: '#FFFFFF',
+  line: '#E6E1D9',
+  ink: '#1D1B22',
+  muted: '#6B6775',
+  subtle: '#9A96A1',
+  accent: '#6A4CF5',
+  accentStrong: '#5536E0',
+  accentSoft: '#EEEAFE',
+  success: '#1F9D63',
+  successSoft: '#E3F4EA',
+  tension: '#DC3D4A',
+  tensionSoft: '#FCE7E9',
+  /** Faceless mannequin albedo: neutral stone, deliberately not a skin tone (AGENTS.md §8). */
+  mannequin: '#CFCDC9',
 } as const;
 
-export type ObsidianTitaniumColor = (typeof obsidianTitanium)[keyof typeof obsidianTitanium];
+export type AshriumColor = (typeof ashrium)[keyof typeof ashrium];
 
-/** Frosted-glass recipe used by `.obsidian-glass` in globals.css. */
-export const glassTokens = {
-  fill: 'rgba(255, 255, 255, 0.07)',
-  border: 'rgba(255, 255, 255, 0.12)',
-  blurPx: 20,
-  /** Dashboard sets `backdrop-filter: none` via `.dashboard-surface`. */
+/** Card recipe used by `.ash-card` in globals.css. */
+export const cardTokens = {
+  radiusPx: 24,
+  borderWidthPx: 1,
+  /** Dashboard cards never use backdrop-filter (sticky nav scroll cost). */
   dashboardBlurPx: 0,
-  radiusPx: 28,
-} as const;
-
-export const gradientTokens = {
-  cta: `linear-gradient(90deg, ${obsidianTitanium.accent} 0%, ${obsidianTitanium.accentEnd} 100%)`,
-  canvas: `linear-gradient(180deg, ${obsidianTitanium.canvas} 0%, ${obsidianTitanium.canvasLift} 100%)`,
 } as const;
 
 /**
  * CSS class names owned by this token module (`app/globals.css`).
- * Prefer these over raw slate/sky utilities.
+ * Prefer these over raw white/slate utilities.
  */
 export const themeClasses = {
-  glass: 'obsidian-glass',
-  cta: 'obsidian-cta',
-  input: 'obsidian-input',
-  inputBox: 'obsidian-input-box',
+  card: 'ash-card',
+  cta: 'ash-cta',
+  ctaSecondary: 'ash-cta-secondary',
+  input: 'ash-input',
+  inputBox: 'ash-input-box',
 } as const;
 
-/** Kept as sky blue so strain viz does not follow the purple UI accent. */
+/** Kept as sky blue so loose regions read as "room", never as the accent. */
 const STRAIN_LOOSE_HEX = '#38BDF8';
 const STRAIN_SNUG_HEX = '#F59E0B';
+const STRAIN_IDEAL_HEX = '#10B981';
+const STRAIN_CONSTRICTED_HEX = '#F43F5E';
 
 /**
- * WebGL strain heatmap vertex colors (AGENTS.md §7):
+ * WebGL clearance / strain heatmap vertex colors (AGENTS.md §7):
  * blue / green / amber / red.
  */
 export const strainHeatmap = {
-  constricted: obsidianTitanium.tension,
+  constricted: STRAIN_CONSTRICTED_HEX,
   snug: STRAIN_SNUG_HEX,
-  ideal: obsidianTitanium.success,
+  ideal: STRAIN_IDEAL_HEX,
   loose: STRAIN_LOOSE_HEX,
   constrictedThreshold: 0.15,
 } as const;
@@ -76,7 +79,7 @@ export const typography = {
   sansFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
   monoFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace',
   metricClassName: 'font-mono tabular-nums',
-  labelClassName: 'text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle',
+  labelClassName: 'text-[11px] font-semibold uppercase tracking-[0.12em] text-ash-subtle',
 } as const;
 
 export const spatialScale = {

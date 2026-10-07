@@ -93,11 +93,11 @@ export const CatalogSyncBar: FC<CatalogSyncBarProps> = ({ connected, shopDomain 
   };
 
   return (
-    <section className="obsidian-glass flex flex-col gap-4 p-5">
+    <section className="ash-card flex flex-col gap-4 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-obsidian-ink">Test one SKU</h2>
-          <p className="mt-1 text-sm text-obsidian-muted">
+          <h2 className="text-lg font-semibold text-ash-ink">Test one SKU</h2>
+          <p className="mt-1 text-sm text-ash-muted">
             {connected && shopDomain
               ? `Connected to ${shopDomain}. Ingest a single product — not the whole catalog — then map KES and grade rest lengths.`
               : 'Add the shop domain and Admin API token in Settings → Integrations. Do not paste secrets here.'}
@@ -106,7 +106,7 @@ export const CatalogSyncBar: FC<CatalogSyncBarProps> = ({ connected, shopDomain 
         {!connected ? (
           <Link
             href="/settings/integrations"
-            className="obsidian-cta inline-flex shrink-0 items-center justify-center no-underline"
+            className="ash-cta inline-flex shrink-0 items-center justify-center no-underline"
           >
             Connect Shopify
           </Link>
@@ -115,7 +115,7 @@ export const CatalogSyncBar: FC<CatalogSyncBarProps> = ({ connected, shopDomain 
 
       {connected ? (
         <form onSubmit={handleTestSku} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium text-obsidian-ink">
+          <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium text-ash-ink">
             Product URL, ID, variant ID, or SKU
             <input
               value={selector}
@@ -123,26 +123,26 @@ export const CatalogSyncBar: FC<CatalogSyncBarProps> = ({ connected, shopDomain 
               placeholder="https://brand.myshopify.com/products/essential-tee"
               autoComplete="off"
               spellCheck={false}
-              className="obsidian-input-box font-mono text-sm"
+              className="ash-input-box font-mono text-sm"
             />
           </label>
-          <button type="submit" disabled={isPending} className="obsidian-cta shrink-0 disabled:cursor-not-allowed">
+          <button type="submit" disabled={isPending} className="ash-cta shrink-0 disabled:cursor-not-allowed">
             {isPending ? 'Testing…' : 'Test this SKU'}
           </button>
         </form>
       ) : null}
 
       {message ? (
-        <p className={`text-sm ${isError ? 'text-red-400' : 'text-emerald-400'}`}>{message}</p>
+        <p className={`text-sm ${isError ? 'text-ash-tension' : 'text-ash-success'}`}>{message}</p>
       ) : null}
 
       {connected ? (
-        <div className="border-t border-white/10 pt-3">
+        <div className="border-t border-ash-line pt-3">
           <button
             type="button"
             onClick={() => runSync(undefined)}
             disabled={isPending}
-            className="text-sm text-obsidian-muted underline-offset-2 hover:text-obsidian-ink hover:underline disabled:cursor-not-allowed"
+            className="text-sm text-ash-muted underline-offset-2 hover:text-ash-ink hover:underline disabled:cursor-not-allowed"
           >
             Sync full catalog instead
           </button>

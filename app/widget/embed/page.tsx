@@ -70,7 +70,7 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
 
 function renderEmbedError(message: string): React.JSX.Element {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-obsidian-canvas p-6 text-center text-sm text-obsidian-muted">
+    <main className="flex min-h-screen items-center justify-center bg-ash-canvas p-6 text-center text-sm text-ash-muted">
       {message}
     </main>
   );

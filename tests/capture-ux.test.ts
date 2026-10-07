@@ -11,6 +11,12 @@ import {
   formatHeight,
   heightDialValues,
 } from '@/lib/widget/height-units';
+import {
+  WEIGHT_KG_DEFAULT,
+  formatWeight,
+  lbToKg,
+  weightWheelValues,
+} from '@/lib/widget/weight-units';
 
 const intakeSource = readFileSync(
   path.join(process.cwd(), 'components/widget/guided-capture/capture-intake.tsx'),
@@ -25,12 +31,14 @@ const overlaySource = readFileSync(
   'utf8',
 );
 
-test('capture flow reports completed steps on each screen', () => {
-  assert.equal(captureFlowProgress('consent').statusLine, '0 of 5 steps complete · Consent');
-  assert.equal(captureFlowProgress('height').completed, 1);
-  assert.equal(captureFlowProgress('profile').current, 3);
-  assert.match(captureFlowProgress('front').statusLine, /3 of 5 steps complete/);
-  assert.match(captureFlowProgress('side').statusLine, /4 of 5 steps complete/);
+test('progress line counts five steps after consent and fills on each Next', () => {
+  assert.equal(captureFlowProgress('consent').current, 0);
+  assert.equal(captureFlowProgress('consent').fraction, 0);
+  assert.equal(captureFlowProgress('height').statusLine, 'Step 1 of 5 · Height');
+  assert.equal(captureFlowProgress('sex').current, 2);
+  assert.equal(captureFlowProgress('weight').current, 3);
+  assert.match(captureFlowProgress('front').statusLine, /Step 4 of 5/);
+  assert.equal(captureFlowProgress('side').fraction, 1);
 });
 
 test('height dial covers centimetres and feet-inches around the default', () => {
@@ -43,20 +51,30 @@ test('height dial covers centimetres and feet-inches around the default', () => 
   assert.ok(heightDialValues('ft_in').includes(170));
 });
 
-test('intake uses a height dial with Next on the right and vertical sex options', () => {
+test('intake walks consent, height wheel, body profile, optional weight wheel', () => {
   assert.match(intakeSource, /HeightDial/);
-  assert.match(intakeSource, /NextCircleButton/);
-  assert.match(intakeSource, /setPage\('profile'\)/);
-  assert.doesNotMatch(intakeSource, /grid-cols-3/);
-  assert.match(intakeSource, /flex min-w-0 flex-1 flex-col gap-2/);
-  assert.match(intakeSource, /Weight <span className="font-normal text-obsidian-subtle">optional/);
+  assert.match(intakeSource, /WeightDial/);
+  assert.match(intakeSource, /setPage\('sex'\)/);
+  assert.match(intakeSource, /setPage\('weight'\)/);
+  assert.match(intakeSource, /Prefer not to say/);
+  assert.match(intakeSource, /Why we ask/);
+  assert.match(intakeSource, /finish\(false\)/, 'weight can be skipped');
   assert.match(intakeSource, /CaptureFlowMeter/);
   assert.match(intakeSource, /onConsentPassed/);
 });
 
+test('weight wheel stores kilograms for both units', () => {
+  assert.equal(formatWeight(70, 'kg'), '70 kg');
+  assert.equal(formatWeight(70, 'lb'), '154 lb');
+  assert.equal(lbToKg(154), 69.9);
+  assert.ok(weightWheelValues('kg').includes(WEIGHT_KG_DEFAULT));
+  assert.equal(new Set(weightWheelValues('lb')).size, weightWheelValues('lb').length);
+});
+
 test('live capture passes the last gate into pose evaluation and tints the outline', () => {
   assert.match(viewportSource, /evaluatePoseGate\(pose, view, lastGateRef\.current\)/);
-  assert.match(viewportSource, /<SilhouetteOverlay view=\{view\} gate=\{gate\} \/>/);
+  assert.match(viewportSource, /<SilhouetteOverlay view=\{view\} sex=\{sex\} gate=\{gate\} holdProgress=\{holdProgress\} \/>/);
   assert.match(overlaySource, /gate = 'not_detected'/);
-  assert.match(overlaySource, /strokeDasharray/);
+  assert.match(overlaySource, /CAPTURE_OUTLINES\[sex\]\[view\]/);
+  assert.match(overlaySource, /strokeDashoffset/);
 });

@@ -46,7 +46,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
   }, [result]);
 
   return (
-    <main className="relative min-h-screen bg-obsidian-canvas text-obsidian-ink">
+    <main className="relative min-h-screen bg-ash-canvas text-ash-ink">
       {result && recommendation ? (
         <div className="flex min-h-screen flex-col">
           <AnnyCanvas
@@ -62,7 +62,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
             className="min-h-[520px] flex-1 w-full"
           />
           <div className="flex items-start justify-between gap-3 px-5 py-4">
-            <p className="text-sm text-obsidian-muted">
+            <p className="text-sm text-ash-muted">
               Live Cog body result. Size is girth plus the published chart.
             </p>
             <div className="flex flex-col items-end gap-3">
@@ -73,7 +73,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
               <button
                 type="button"
                 onClick={() => setResult(null)}
-                className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
+                className="rounded-full border border-ash-line px-3 py-1.5 text-xs text-ash-muted"
               >
                 Recapture
               </button>

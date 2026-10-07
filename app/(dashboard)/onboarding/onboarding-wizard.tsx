@@ -38,23 +38,23 @@ function StepShell({
           className={[
             'flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-mono text-sm tabular-nums',
             complete
-              ? 'bg-emerald-500/20 text-emerald-200'
-              : 'border border-white/15 text-obsidian-muted',
+              ? 'bg-ash-success-soft text-ash-success'
+              : 'border border-ash-line text-ash-muted',
           ].join(' ')}
           aria-hidden="true"
         >
           {complete ? '✓' : index}
         </span>
         <div>
-          <h2 className="text-xl font-semibold text-obsidian-ink">{title}</h2>
-          <p className="text-sm text-obsidian-muted">{description}</p>
+          <h2 className="text-xl font-semibold text-ash-ink">{title}</h2>
+          <p className="text-sm text-ash-muted">{description}</p>
         </div>
         <span
           className={[
             'ml-auto rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em]',
             complete
-              ? 'bg-emerald-500/15 text-emerald-200'
-              : 'border border-white/15 text-obsidian-subtle',
+              ? 'bg-ash-success-soft text-ash-success'
+              : 'border border-ash-line text-ash-subtle',
           ].join(' ')}
         >
           {complete ? 'Done' : 'Pending'}
@@ -105,14 +105,14 @@ export function OnboardingWizard({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-10 p-6">
       <header>
-        <p className="text-sm font-medium text-obsidian-accent-muted">Getting started</p>
-        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Set up your fitting room</h1>
-        <p className="mt-2 text-sm text-obsidian-muted">
+        <p className="text-sm font-medium text-ash-accent">Getting started</p>
+        <h1 className="mt-1 text-3xl font-bold text-ash-ink">Set up your fitting room</h1>
+        <p className="mt-2 text-sm text-ash-muted">
           Four steps to a live Try On. Sandbox preview is not storefront go-live. You can leave
           and come back — progress is saved as you go.
         </p>
         <div
-          className="mt-5 h-2 overflow-hidden rounded-full bg-white/10"
+          className="mt-5 h-2 overflow-hidden rounded-full bg-ash-raised"
           role="progressbar"
           aria-label="Onboarding progress"
           aria-valuemin={0}
@@ -120,11 +120,11 @@ export function OnboardingWizard({
           aria-valuenow={completedSteps}
         >
           <div
-            className="h-full rounded-full bg-gradient-to-r from-obsidian-accent to-obsidian-accent-end transition-[width]"
+            className="h-full rounded-full bg-gradient-to-r from-ash-accent to-ash-accent-strong transition-[width]"
             style={{ width: `${(completedSteps / 4) * 100}%` }}
           />
         </div>
-        <p className="mt-2 text-sm text-obsidian-muted">{completedSteps} of 4 steps complete.</p>
+        <p className="mt-2 text-sm text-ash-muted">{completedSteps} of 4 steps complete.</p>
       </header>
 
       <StepShell
@@ -133,8 +133,8 @@ export function OnboardingWizard({
         title="Confirm your company"
         description="This name appears on your dashboard and in merchant records."
       >
-        <form onSubmit={handleCompanySubmit} className="obsidian-glass flex flex-col gap-4 p-6">
-          <label className="flex flex-col gap-2 text-sm font-medium text-obsidian-ink">
+        <form onSubmit={handleCompanySubmit} className="ash-card flex flex-col gap-4 p-6">
+          <label className="flex flex-col gap-2 text-sm font-medium text-ash-ink">
             Company name
             <input
               value={name}
@@ -142,13 +142,13 @@ export function OnboardingWizard({
               required
               maxLength={160}
               placeholder="Brand Co"
-              className="obsidian-input-box text-sm"
+              className="ash-input-box text-sm"
             />
           </label>
           {message ? (
-            <p className={`text-sm ${isError ? 'text-rose-300' : 'text-emerald-300'}`}>{message}</p>
+            <p className={`text-sm ${isError ? 'text-ash-tension' : 'text-ash-success'}`}>{message}</p>
           ) : null}
-          <button type="submit" disabled={isPending} className="obsidian-cta self-start">
+          <button type="submit" disabled={isPending} className="ash-cta self-start">
             {isPending ? 'Saving…' : 'Save company name'}
           </button>
         </form>
@@ -169,21 +169,21 @@ export function OnboardingWizard({
         title="Connect Shopify and enable Try On"
         description="Authorize the Ashrium VFR Partner app once; catalog ingest runs server-side."
       >
-        <div className="obsidian-glass flex flex-col gap-4 p-6">
-          <p className="text-sm text-obsidian-muted">
+        <div className="ash-card flex flex-col gap-4 p-6">
+          <p className="text-sm text-ash-muted">
             {shopifyConnected && shopDomain
               ? `Connected to ${shopDomain}. In the published theme, open Theme settings → App embeds, enable “Ashrium Try On”, and set the platform URL below. Do not also add the “Virtual fitting room” section block unless the embed cannot find Add to cart.`
               : 'Connect Shopify with OAuth, then enable Theme settings → App embeds → Ashrium Try On on the published theme.'}
           </p>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ash-subtle">
               Ashrium platform URL for the embed
             </p>
-            <p className="mt-1 break-all font-mono text-sm text-obsidian-ink">
+            <p className="mt-1 break-all font-mono text-sm text-ash-ink">
               {platformUrl || 'Set APP_BASE_URL to display your platform URL.'}
             </p>
           </div>
-          <Link href="/settings/integrations" className="obsidian-cta self-start no-underline">
+          <Link href="/settings/integrations" className="ash-cta self-start no-underline">
             {shopifyConnected ? 'Review Shopify connection' : 'Connect Shopify'}
           </Link>
         </div>
@@ -195,19 +195,19 @@ export function OnboardingWizard({
         title="Add your first garment"
         description="Sync from Shopify or create a CAD profile by hand."
       >
-        <div className="obsidian-glass flex flex-col gap-4 p-6">
-          <p className="text-sm text-obsidian-muted">
+        <div className="ash-card flex flex-col gap-4 p-6">
+          <p className="text-sm text-ash-muted">
             {garmentsComplete
               ? `${garmentCount} garment${garmentCount === 1 ? '' : 's'} in your library. Sandbox can preview capture — that is not live storefront Try On.`
               : 'Your garment library is empty. Sync your catalog to grade sizes and materials.'}
           </p>
           <div className="flex flex-wrap gap-3">
-            <Link href="/dashboard/garments" className="obsidian-cta no-underline">
+            <Link href="/dashboard/garments" className="ash-cta no-underline">
               {garmentsComplete ? 'Open garment library' : 'Add a garment'}
             </Link>
             <Link
               href="/merchant/dashboard"
-              className="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-obsidian-ink transition hover:border-obsidian-accent hover:bg-white/5"
+              className="rounded-full border border-ash-line px-5 py-3 text-sm font-semibold text-ash-ink transition hover:border-ash-accent hover:bg-ash-raised"
             >
               Go to dashboard
             </Link>

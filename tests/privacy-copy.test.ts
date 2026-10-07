@@ -26,6 +26,7 @@ const intake = readFileSync(
 test('checkbox copy names the photos, on-device head crop, and 15-minute wipe', () => {
   assert.match(CONSENT_CHECKBOX_LABEL, /two photos of my body/i);
   assert.match(CONSENT_CHECKBOX_LABEL, /head is cropped on this device/i);
+  assert.ok(CONSENT_CHECKBOX_LABEL.length < 220, 'checkbox label stays one short sentence');
   assert.match(CONSENT_CHECKBOX_LABEL, /height, sex, and optional weight/i);
   assert.match(CONSENT_SUMMARY, /Face pixels never leave this device/i);
   assert.match(CONSENT_SUMMARY, /15 minutes/);

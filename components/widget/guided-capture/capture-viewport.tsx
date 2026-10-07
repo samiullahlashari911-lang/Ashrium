@@ -12,13 +12,15 @@ import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
 import { encodeImageFileToWebp, encodeVideoFrameToWebp } from '@/lib/widget/webp-encode';
-import type { CaptureView, PoseGateStatus } from '@/types/hmr';
+import type { CaptureSex, CaptureView, PoseGateStatus } from '@/types/hmr';
 
 const ALIGNED_HOLD_MS = 1200;
 const POSE_DETECT_INTERVAL_MS = 66;
 
 interface CaptureViewportProps {
   view: CaptureView;
+  /** Picks the female / male / neutral outline. */
+  sex: CaptureSex;
   onCaptured: (blob: Blob, gate: PoseGateStatus) => void;
   onBack: () => void;
   allowGallery?: boolean;
@@ -40,6 +42,7 @@ function stopStream(stream: MediaStream | null): void {
 
 export function CaptureViewport({
   view,
+  sex,
   onCaptured,
   onBack,
   allowGallery = false,
@@ -68,6 +71,7 @@ export function CaptureViewport({
   const [galleryBusy, setGalleryBusy] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
   const [pending, setPending] = useState<PendingCapture | null>(null);
+  const [flash, setFlash] = useState(false);
 
   sourceRef.current = source;
   viewportActiveRef.current = viewportActive;
@@ -233,7 +237,7 @@ export function CaptureViewport({
 
         const elapsed = now - alignedSinceRef.current;
         const progress = Math.min(1, elapsed / ALIGNED_HOLD_MS);
-        const holdBucket = Math.floor(progress * 10);
+        const holdBucket = Math.floor(progress * 30);
         if (holdBucket !== lastHoldBucketRef.current) {
           lastHoldBucketRef.current = holdBucket;
           setHoldProgress(progress);
@@ -256,8 +260,9 @@ export function CaptureViewport({
 
               capturingRef.current = true;
               alignedSinceRef.current = null;
-              setHoldProgress(0);
-              onCaptured(blob, 'aligned');
+              setHoldProgress(1);
+              setFlash(true);
+              window.setTimeout(() => onCaptured(blob, 'aligned'), 420);
             })
             .catch(() => {
               capturingRef.current = false;
@@ -284,11 +289,11 @@ export function CaptureViewport({
     return () => cancelAnimationFrame(frameId);
   }, [landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
 
-  const title = view === 'front' ? 'Front, A-pose' : 'Side profile';
+  const title = view === 'front' ? 'Front photo' : 'Side photo';
   const hint =
     view === 'front'
-      ? 'Fit your body inside the outline, arms slightly open. Hold still — we capture automatically.'
-      : 'Turn to your side, match the outline, and lift your wrists to the shoulder rings. Hold still to capture.';
+      ? 'Prop your phone up, step back until your whole body fits the outline, arms slightly open. We take the photo for you.'
+      : 'Turn sideways and hold both arms straight out in front of you at shoulder height. Hold still for a moment.';
 
   const chooseLive = (): void => {
     if (pending) {
@@ -374,26 +379,28 @@ export function CaptureViewport({
   return (
     <div
       ref={viewportRef}
-      className="flex h-[100dvh] max-h-[100dvh] flex-col bg-obsidian-canvas text-obsidian-ink"
+      className="mx-auto flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col bg-ash-canvas text-ash-ink"
     >
-      <header className="flex flex-col gap-2 px-5 pt-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <CaptureFlowMeter step={flowStep} />
-          </div>
+      <header className="flex shrink-0 flex-col gap-4 px-6 pt-6">
+        <div className="flex h-10 items-center justify-between">
           <button
             type="button"
             onClick={onBack}
-            className="shrink-0 rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
+            aria-label="Back"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-ash-line bg-ash-surface text-ash-ink transition hover:border-ash-subtle active:scale-95"
           >
-            Back
+            <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+              <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
+          <h1 className="text-base font-semibold tracking-tight">{title}</h1>
+          <span className="h-10 w-10" />
         </div>
-        <h1 className="text-xl font-semibold">{title}</h1>
-        <p className="text-sm text-obsidian-muted">{hint}</p>
+        <CaptureFlowMeter step={flowStep} />
+        <p className="text-[13px] leading-relaxed text-ash-muted">{hint}</p>
       </header>
 
-      <div className="relative mx-5 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-2xl bg-black">
+      <div className="relative mx-4 mb-2 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift">
         {pending ? (
           <div
             role="img"
@@ -412,52 +419,60 @@ export function CaptureViewport({
                 source === 'gallery' ? 'invisible' : '',
               ].join(' ')}
             />
-            <SilhouetteOverlay view={view} gate={gate} />
+            <div aria-hidden="true" className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 to-transparent" />
+            <SilhouetteOverlay view={view} sex={sex} gate={gate} holdProgress={holdProgress} />
           </>
         )}
-        <div className="absolute left-3 top-3">
+        <div
+          aria-hidden="true"
+          className={[
+            'pointer-events-none absolute inset-0 bg-white transition-opacity duration-300',
+            flash ? 'opacity-80' : 'opacity-0',
+          ].join(' ')}
+        />
+        <div className="absolute inset-x-0 top-4 flex justify-center px-4">
           <span
             aria-live="polite"
-            className={[
-              'rounded-full px-3 py-1 text-xs font-semibold',
-              gate === 'aligned'
-                ? 'bg-emerald-500 text-obsidian-canvas'
-                : 'border border-white/20 bg-obsidian-canvas/70 text-obsidian-ink',
-            ].join(' ')}
+            className="inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-[13px] font-semibold text-ash-ink shadow-card"
           >
-            {pending ? 'Pose verified' : gateStatusCopy(gate, view)}
+            <span
+              aria-hidden="true"
+              className={[
+                'h-2.5 w-2.5 rounded-full transition-colors',
+                gate === 'aligned' || pending ? 'bg-[#22C77A]' : 'bg-[#F0444F]',
+              ].join(' ')}
+            />
+            {pending
+              ? 'Pose verified'
+              : flash
+                ? 'Got it'
+                : gate === 'aligned'
+                  ? 'Perfect, hold still'
+                  : gateStatusCopy(gate, view)}
           </span>
         </div>
-        {!pending ? (
-          <div className="absolute inset-x-8 bottom-4 h-1 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full bg-gradient-to-r from-obsidian-accent to-obsidian-accent-end transition-[width] duration-100"
-              style={{ width: `${Math.round(holdProgress * 100)}%` }}
-            />
-          </div>
-        ) : null}
       </div>
 
-      <div className="flex shrink-0 flex-col gap-3 px-5 py-4">
-        {cameraError && source === 'live' ? <p className="text-sm text-rose-300">{cameraError}</p> : null}
-        {encodeError ? <p className="text-sm text-rose-300">{encodeError}</p> : null}
-        {galleryError ? <p className="text-sm text-rose-300">{galleryError}</p> : null}
+      <div className="flex shrink-0 flex-col gap-3 px-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3">
+        {cameraError && source === 'live' ? <p className="text-sm text-ash-tension">{cameraError}</p> : null}
+        {encodeError ? <p className="text-sm text-ash-tension">{encodeError}</p> : null}
+        {galleryError ? <p className="text-sm text-ash-tension">{galleryError}</p> : null}
         {poseError ? (
-          <p className="text-sm text-obsidian-muted">
+          <p className="text-[13px] text-ash-muted">
             Pose guidance is required so we can crop your head on this device. Face pixels are
             never uploaded. Refresh and allow the camera to try again.
           </p>
         ) : !ready ? (
-          <p className="text-sm text-obsidian-subtle">Loading pose guidance…</p>
+          <p className="text-center text-[13px] text-ash-subtle">Loading pose guidance…</p>
         ) : pending ? (
-          <p className="text-sm text-obsidian-subtle">
+          <p className="text-center text-[13px] text-ash-subtle">
             {view === 'front'
               ? 'Front pose passed. Tap Next for the side pose.'
-              : 'Side pose passed. We will start the live body fit next.'}
+              : 'Side pose passed. We will build your avatar next.'}
           </p>
         ) : (
-          <p className="text-sm text-obsidian-subtle">
-            We capture automatically after a 1.2s hold when you are aligned.
+          <p className="text-center text-[13px] text-ash-subtle">
+            The outline turns green when you are in place. Your head is removed on this phone before upload.
           </p>
         )}
 
@@ -467,10 +482,10 @@ export function CaptureViewport({
               type="button"
               onClick={chooseLive}
               className={[
-                'rounded-full border px-3 py-2 text-xs font-medium',
+                'rounded-full border px-3 py-2 text-xs font-semibold transition',
                 source === 'live'
-                  ? 'border-obsidian-accent bg-obsidian-accent/15 text-obsidian-ink'
-                  : 'border-white/15 text-obsidian-muted',
+                  ? 'border-ash-accent bg-ash-accent-soft text-ash-accent'
+                  : 'border-ash-line bg-ash-surface text-ash-muted',
               ].join(' ')}
             >
               Take photo now
@@ -480,10 +495,10 @@ export function CaptureViewport({
               disabled={!ready || galleryBusy}
               onClick={() => fileInputRef.current?.click()}
               className={[
-                'rounded-full border px-3 py-2 text-xs font-medium disabled:opacity-50',
+                'rounded-full border px-3 py-2 text-xs font-semibold transition disabled:opacity-50',
                 source === 'gallery'
-                  ? 'border-obsidian-accent bg-obsidian-accent/15 text-obsidian-ink'
-                  : 'border-white/15 text-obsidian-muted',
+                  ? 'border-ash-accent bg-ash-accent-soft text-ash-accent'
+                  : 'border-ash-line bg-ash-surface text-ash-muted',
               ].join(' ')}
             >
               {galleryBusy ? 'Checking pose…' : 'Import from gallery'}
@@ -501,7 +516,7 @@ export function CaptureViewport({
         {pending && requireConfirm ? (
           <button
             type="button"
-            className="obsidian-cta"
+            className="ash-cta py-4"
             onClick={() => onCaptured(pending.blob, pending.gate)}
           >
             Next

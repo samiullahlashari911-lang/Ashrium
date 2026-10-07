@@ -269,8 +269,8 @@ export function StorefrontViewport({
       ref={rootRef}
       className={
         result
-          ? 'relative min-h-[520px] overflow-x-hidden overflow-y-auto bg-obsidian-canvas text-obsidian-ink'
-          : 'relative h-[100dvh] overflow-hidden bg-obsidian-canvas text-obsidian-ink'
+          ? 'relative min-h-[520px] overflow-x-hidden overflow-y-auto bg-ash-canvas text-ash-ink'
+          : 'relative h-[100dvh] overflow-hidden bg-ash-canvas text-ash-ink'
       }
     >
       {result ? (
@@ -288,12 +288,12 @@ export function StorefrontViewport({
               <AshriumWordmark
                 className="mb-2"
                 markClassName="h-5 w-5 shrink-0"
-                wordClassName="text-xs font-medium tracking-[0.04em] text-obsidian-ink"
+                wordClassName="text-xs font-medium tracking-[0.04em] text-ash-ink"
               />
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ash-subtle">
                 Your avatar
               </p>
-              <p className="mt-1 text-sm text-obsidian-muted">
+              <p className="mt-1 text-sm text-ash-muted">
                 Rotate and zoom.
                 {!printQaPassed
                   ? ' 3D garment is off until print QA passes. Size is still from girths plus the published chart.'
@@ -318,7 +318,7 @@ export function StorefrontViewport({
                   setClientPrintQaPassed(null);
                   emittedSizeRef.current = null;
                 }}
-                className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-obsidian-muted"
+                className="rounded-full border border-ash-line px-3 py-1.5 text-xs text-ash-muted"
               >
                 Recapture
               </button>

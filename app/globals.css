@@ -4,25 +4,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Ashrium tokens — keep in sync with lib/design-tokens.ts (RGB triplets for Tailwind alpha). */
 :root {
-  --obsidian-canvas: #0b0b1e;
-  --obsidian-lift: #1a1a2e;
-  --obsidian-card: #16162b;
-  --obsidian-hairline: #2a2a48;
-  --obsidian-accent: #6a32c9;
-  --obsidian-accent-end: #b52286;
-  --obsidian-success: #10b981;
-  --obsidian-tension: #f43f5e;
-  --obsidian-ink: #f8fafc;
-  --obsidian-muted: #a1a1b8;
-  --obsidian-subtle: #7b7b96;
+  --ash-canvas: 244 241 236;
+  --ash-raised: 250 248 245;
+  --ash-surface: 255 255 255;
+  --ash-line: 230 225 217;
+  --ash-ink: 29 27 34;
+  --ash-muted: 107 103 117;
+  --ash-subtle: 154 150 161;
+  --ash-accent: 106 76 245;
+  --ash-accent-strong: 85 54 224;
+  --ash-accent-soft: 238 234 254;
+  --ash-success: 31 157 99;
+  --ash-success-soft: 227 244 234;
+  --ash-tension: 220 61 74;
+  --ash-tension-soft: 252 231 233;
+  --ash-mannequin: 207 205 201;
   --strain-constricted: #f43f5e;
   --strain-ideal: #10b981;
   --strain-loose: #38bdf8;
+  --ash-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -31,116 +37,114 @@ body {
 }
 
 body {
-  @apply font-sans text-obsidian-ink antialiased;
-  background-color: var(--obsidian-canvas);
-  background-image:
-    radial-gradient(ellipse 80% 55% at 50% 42%, rgba(106, 50, 201, 0.28), transparent 58%),
-    linear-gradient(180deg, var(--obsidian-canvas) 0%, var(--obsidian-lift) 100%);
+  @apply font-sans text-ash-ink antialiased;
+  background-color: rgb(var(--ash-canvas));
 }
 
-html:has(.dashboard-surface),
-html:has(.dashboard-surface) body,
-html:has(.marketing-flat),
-html:has(.marketing-flat) body {
-  background-image: none;
+::selection {
+  background: rgb(var(--ash-accent) / 0.18);
 }
 
 @layer components {
-  .obsidian-glass {
-    border-radius: 1.75rem;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(22, 22, 43, 0.72);
-    box-shadow: 0 24px 80px rgba(8, 6, 28, 0.48);
+  .ash-card {
+    border-radius: 1.5rem;
+    border: 1px solid rgb(var(--ash-line));
+    background: rgb(var(--ash-surface));
+    box-shadow:
+      0 1px 2px rgba(29, 27, 34, 0.04),
+      0 12px 32px rgba(29, 27, 34, 0.06);
   }
 
-  @supports ((-webkit-backdrop-filter: blur(20px)) or (backdrop-filter: blur(20px))) {
-    .obsidian-glass {
-      background: rgba(255, 255, 255, 0.07);
-      -webkit-backdrop-filter: blur(20px);
-      backdrop-filter: blur(20px);
-    }
-  }
-
-  /* Dashboard scroll: skip backdrop-filter so sticky nav + glass panels do not
-     re-composite a blur layer on every frame. Widget / marketing glass is unchanged. */
-  .dashboard-surface .obsidian-glass {
-    background: rgba(22, 22, 43, 0.88);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-
-  .obsidian-cta {
+  .ash-cta,
+  .ash-cta-secondary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 9999px;
-    background-image: linear-gradient(
-      90deg,
-      var(--obsidian-accent) 0%,
-      var(--obsidian-accent-end) 100%
-    );
-    padding: 0.75rem 1.25rem;
+    gap: 0.5rem;
+    border-radius: 0.875rem;
+    padding: 0.8rem 1.35rem;
     font-size: 0.875rem;
     font-weight: 600;
     line-height: 1.25;
+    letter-spacing: 0.01em;
+    transition:
+      background-color 160ms var(--ash-ease),
+      transform 160ms var(--ash-ease),
+      box-shadow 160ms var(--ash-ease),
+      opacity 160ms var(--ash-ease);
+  }
+
+  .ash-cta {
+    background: rgb(var(--ash-accent));
     color: #ffffff;
-    box-shadow: 0 12px 32px rgba(106, 50, 201, 0.35);
-    transition: filter 150ms ease;
+    box-shadow: 0 8px 24px rgb(var(--ash-accent) / 0.28);
   }
 
-  .obsidian-cta:hover {
-    filter: brightness(1.08);
+  .ash-cta:hover {
+    background: rgb(var(--ash-accent-strong));
   }
 
-  .obsidian-cta:disabled {
+  .ash-cta-secondary {
+    border: 1px solid rgb(var(--ash-line));
+    background: rgb(var(--ash-surface));
+    color: rgb(var(--ash-ink));
+  }
+
+  .ash-cta-secondary:hover {
+    border-color: rgb(var(--ash-subtle));
+  }
+
+  .ash-cta:active,
+  .ash-cta-secondary:active {
+    transform: scale(0.98);
+  }
+
+  .ash-cta:disabled,
+  .ash-cta-secondary:disabled {
     cursor: not-allowed;
-    opacity: 0.6;
-    filter: none;
+    opacity: 0.45;
+    box-shadow: none;
+    transform: none;
   }
 
-  .obsidian-cta:focus-visible {
-    outline: 2px solid #f8fafc;
+  .ash-cta:focus-visible,
+  .ash-cta-secondary:focus-visible {
+    outline: 2px solid rgb(var(--ash-accent));
     outline-offset: 3px;
   }
 
-  .obsidian-input {
+  .ash-input,
+  .ash-input-box {
     width: 100%;
-    border-radius: 9999px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(11, 11, 30, 0.78);
-    padding: 0.85rem 1.25rem;
+    border: 1px solid rgb(var(--ash-line));
+    background: rgb(var(--ash-surface));
+    color: rgb(var(--ash-ink));
+    outline: none;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .ash-input {
+    border-radius: 0.875rem;
+    padding: 0.8rem 1rem;
     font-size: 0.875rem;
-    color: var(--obsidian-ink);
-    outline: none;
-    transition: border-color 150ms ease;
   }
 
-  .obsidian-input::placeholder {
-    color: rgba(255, 255, 255, 0.35);
-  }
-
-  .obsidian-input:focus {
-    border-color: rgba(255, 255, 255, 0.28);
-  }
-
-  .obsidian-input:focus-visible {
-    outline: 2px solid #c4b5fd;
-    outline-offset: 2px;
-  }
-
-  .obsidian-input-box {
-    width: 100%;
-    border-radius: 0.9rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(11, 11, 30, 0.7);
+  .ash-input-box {
+    border-radius: 0.75rem;
     padding: 0.5rem 0.75rem;
-    color: var(--obsidian-ink);
-    outline: none;
-    transition: border-color 150ms ease;
   }
 
-  .obsidian-input-box:focus {
-    border-color: rgba(255, 255, 255, 0.28);
+  .ash-input::placeholder,
+  .ash-input-box::placeholder {
+    color: rgb(var(--ash-subtle));
+  }
+
+  .ash-input:focus,
+  .ash-input-box:focus {
+    border-color: rgb(var(--ash-accent));
+    box-shadow: 0 0 0 4px rgb(var(--ash-accent) / 0.12);
   }
 
   @keyframes capture-guide-pulse {
@@ -159,6 +163,24 @@ html:has(.marketing-flat) body {
 
   .capture-guide-aligned {
     opacity: 1;
+  }
+
+  .ash-wheel {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%);
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      #000 22%,
+      #000 78%,
+      transparent 100%
+    );
+  }
+
+  .ash-wheel::-webkit-scrollbar {
+    display: none;
   }
 
   .capture-height-dial {
@@ -185,13 +207,14 @@ html:has(.marketing-flat) body {
     padding: 0;
     border: 0;
     background: transparent;
-    color: var(--obsidian-ink);
-    color-scheme: dark;
+    color: rgb(var(--ash-ink));
     overscroll-behavior: contain;
   }
 
   .marketing-dialog::backdrop {
-    background: rgba(6, 5, 18, 0.78);
+    background: rgba(29, 27, 34, 0.45);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
   }
 
   .marketing-anchor {
@@ -210,6 +233,75 @@ html:has(.marketing-flat) body {
       padding-left: max(1.75rem, env(safe-area-inset-left));
       padding-right: max(1.75rem, env(safe-area-inset-right));
     }
+  }
+}
+
+/* Widget motion — page enter, CTA reveal, progress line. */
+@keyframes ash-page-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ash-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ash-tip-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgb(var(--ash-accent) / 0.18), 0 0 12px rgb(var(--ash-accent) / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(var(--ash-accent) / 0.1), 0 0 18px rgb(var(--ash-accent) / 0.75);
+  }
+}
+
+.ash-page-in {
+  animation: ash-page-in 460ms var(--ash-ease) both;
+}
+
+.ash-rise {
+  animation: ash-rise 380ms var(--ash-ease) both;
+}
+
+.ash-progress-fill {
+  background: linear-gradient(90deg, rgb(var(--ash-accent) / 0.55), rgb(var(--ash-accent)));
+  transition: width 720ms var(--ash-ease);
+}
+
+.ash-progress-tip {
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  height: 9px;
+  width: 9px;
+  border-radius: 9999px;
+  background: rgb(var(--ash-surface));
+  border: 2px solid rgb(var(--ash-accent));
+  transform: translateY(-50%);
+  animation: ash-tip-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

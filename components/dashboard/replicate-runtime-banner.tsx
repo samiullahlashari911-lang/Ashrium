@@ -62,15 +62,15 @@ export const GpuRuntimeBanner: FC<GpuRuntimeBannerProps> = ({ config }) => {
   return (
     <section
       className={[
-        'obsidian-glass p-5',
-        blocked ? 'border border-amber-500/40' : '',
+        'ash-card p-5',
+        blocked ? 'border border-amber-300' : '',
       ].join(' ')}
     >
-      <h2 className="text-lg font-semibold text-obsidian-ink">Live Modal GPU</h2>
+      <h2 className="text-lg font-semibold text-ash-ink">Live Modal GPU</h2>
       {blocked ? (
-        <p className="mt-2 text-sm text-amber-200">{config.operatorMessage}</p>
+        <p className="mt-2 text-sm text-amber-800">{config.operatorMessage}</p>
       ) : (
-        <p className="mt-2 text-sm text-obsidian-muted">
+        <p className="mt-2 text-sm text-ash-muted">
           Modal A100-80GB is configured at{' '}
           <span className="font-mono text-xs">{config.gpuUrl}</span>
           {config.hardware.deployment ? ` (${config.hardware.deployment})` : ''}.
@@ -80,7 +80,7 @@ export const GpuRuntimeBanner: FC<GpuRuntimeBannerProps> = ({ config }) => {
         </p>
       )}
       {!blocked && minContainers !== null ? (
-        <p className="mt-2 font-mono text-xs text-obsidian-accent-muted">
+        <p className="mt-2 font-mono text-xs text-ash-accent">
           min_containers={minContainers} · hardware={hardwareSku}
         </p>
       ) : null}

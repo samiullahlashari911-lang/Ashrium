@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { isViewportRenderActive } from '@/lib/graphics/viewport-activity';
-import { glassTokens } from '@/lib/design-tokens';
+import { cardTokens } from '@/lib/design-tokens';
 
 const root = process.cwd();
 
@@ -67,18 +67,17 @@ test('sandbox Try On uses a product-page launcher instead of a deferred iframe',
   assert.doesNotMatch(sandbox, /widgetHostVisible/);
 });
 
-test('dashboard glass and sticky nav do not use backdrop-filter', () => {
+test('dashboard cards and sticky nav do not use backdrop-filter', () => {
   const css = readSource('app/globals.css');
   const nav = readSource('app/(dashboard)/dashboard-navigation.tsx');
   const layout = readSource('app/(dashboard)/layout.tsx');
   const atmosphere = readSource('components/theme/atmosphere-backdrop.tsx');
+  const cardRule = /\.ash-card \{[^}]*\}/.exec(css)?.[0] ?? '';
 
-  assert.equal(glassTokens.dashboardBlurPx, 0);
+  assert.equal(cardTokens.dashboardBlurPx, 0);
   assert.match(layout, /surface="dashboard"/);
-  assert.match(css, /\.dashboard-surface \.obsidian-glass/);
-  assert.match(css, /backdrop-filter:\s*none/);
-  assert.match(css, /html:has\(\.dashboard-surface\)/);
+  assert.ok(cardRule.length > 0);
+  assert.doesNotMatch(cardRule, /backdrop-filter/);
   assert.doesNotMatch(nav, /backdrop-blur/);
-  assert.match(atmosphere, /if \(isDashboard\)/);
-  assert.match(atmosphere, /h-\[240px\]/);
+  assert.doesNotMatch(atmosphere, /blur\(/);
 });

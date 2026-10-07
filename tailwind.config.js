@@ -7,21 +7,22 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        obsidian: {
-          canvas: '#0B0B1E',
-          lift: '#1A1A2E',
-          card: '#16162B',
-          hairline: '#2A2A48',
-          accent: '#6A32C9',
-          'accent-end': '#B52286',
-          success: '#10B981',
-          tension: '#F43F5E',
-          ink: '#F8FAFC',
-          muted: '#A1A1B8',
-          subtle: '#7B7B96',
-          'accent-muted': '#C4B5FD',
-          'success-muted': '#6EE7B7',
-          'tension-muted': '#FDA4AF',
+        ash: {
+          'canvas': 'rgb(var(--ash-canvas) / <alpha-value>)',
+          'raised': 'rgb(var(--ash-raised) / <alpha-value>)',
+          'surface': 'rgb(var(--ash-surface) / <alpha-value>)',
+          'line': 'rgb(var(--ash-line) / <alpha-value>)',
+          'ink': 'rgb(var(--ash-ink) / <alpha-value>)',
+          'muted': 'rgb(var(--ash-muted) / <alpha-value>)',
+          'subtle': 'rgb(var(--ash-subtle) / <alpha-value>)',
+          'accent': 'rgb(var(--ash-accent) / <alpha-value>)',
+          'accent-strong': 'rgb(var(--ash-accent-strong) / <alpha-value>)',
+          'accent-soft': 'rgb(var(--ash-accent-soft) / <alpha-value>)',
+          'success': 'rgb(var(--ash-success) / <alpha-value>)',
+          'success-soft': 'rgb(var(--ash-success-soft) / <alpha-value>)',
+          'tension': 'rgb(var(--ash-tension) / <alpha-value>)',
+          'tension-soft': 'rgb(var(--ash-tension-soft) / <alpha-value>)',
+          'mannequin': 'rgb(var(--ash-mannequin) / <alpha-value>)',
         },
         strain: {
           constricted: '#F43F5E',
@@ -41,7 +42,9 @@ module.exports = {
         ],
       },
       boxShadow: {
-        card: '0 24px 80px rgba(8, 6, 28, 0.45)',
+        card: '0 1px 2px rgba(29, 27, 34, 0.04), 0 12px 32px rgba(29, 27, 34, 0.06)',
+        lift: '0 2px 6px rgba(29, 27, 34, 0.06), 0 24px 60px rgba(29, 27, 34, 0.10)',
+        cta: '0 8px 24px rgba(106, 76, 245, 0.28)',
       },
     },
   },

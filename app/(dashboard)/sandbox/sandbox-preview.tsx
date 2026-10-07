@@ -86,10 +86,10 @@ const MeasurementSlider: FC<MeasurementSliderProps> = ({
   };
 
   return (
-    <label className="flex flex-col gap-2 text-sm text-obsidian-muted">
+    <label className="flex flex-col gap-2 text-sm text-ash-muted">
       <span className="flex items-center justify-between">
         <span>{label}</span>
-        <span className="font-mono text-obsidian-accent-muted">
+        <span className="font-mono text-ash-accent">
           {value} {unit}
         </span>
       </span>
@@ -99,7 +99,7 @@ const MeasurementSlider: FC<MeasurementSliderProps> = ({
         max={max}
         value={value}
         onChange={handleChange}
-        className="accent-obsidian-accent"
+        className="accent-ash-accent"
       />
     </label>
   );
@@ -116,17 +116,17 @@ export const SandboxPreview: FC = () => {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-obsidian-accent-muted">Merchant VFR Sandbox</p>
-        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Interactive fit preview</h1>
-        <p className="mt-2 text-sm text-obsidian-muted">
+        <p className="text-sm font-medium text-ash-accent">Merchant VFR Sandbox</p>
+        <h1 className="mt-1 text-3xl font-bold text-ash-ink">Interactive fit preview</h1>
+        <p className="mt-2 text-sm text-ash-muted">
           Test demo garments against adjustable body measurements and inspect live strain.
         </p>
       </header>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-6">
-          <section className="obsidian-glass p-5">
-            <h2 className="text-lg font-semibold text-obsidian-ink">Demo garments</h2>
+          <section className="ash-card p-5">
+            <h2 className="text-lg font-semibold text-ash-ink">Demo garments</h2>
             <div className="mt-4 flex flex-col gap-3">
               {DEMO_GARMENTS.map((garment) => {
                 const isSelected = garment.sku === selectedSku;
@@ -139,21 +139,21 @@ export const SandboxPreview: FC = () => {
                     className={[
                       'rounded-lg border p-4 text-left transition',
                       isSelected
-                        ? 'border-obsidian-accent/70 bg-obsidian-accent/15'
-                        : 'border-white/10 bg-obsidian-canvas/60 hover:border-white/25',
+                        ? 'border-ash-accent/70 bg-ash-accent/15'
+                        : 'border-ash-line bg-ash-canvas/60 hover:border-ash-line',
                     ].join(' ')}
                   >
-                    <span className="block font-semibold text-obsidian-ink">{garment.name}</span>
-                    <span className="mt-1 block text-xs text-obsidian-muted">{garment.description}</span>
+                    <span className="block font-semibold text-ash-ink">{garment.name}</span>
+                    <span className="mt-1 block text-xs text-ash-muted">{garment.description}</span>
                   </button>
                 );
               })}
             </div>
           </section>
 
-          <section className="obsidian-glass p-5">
-            <h2 className="text-lg font-semibold text-obsidian-ink">Body avatar</h2>
-            <p className="mt-1 text-sm text-obsidian-muted">
+          <section className="ash-card p-5">
+            <h2 className="text-lg font-semibold text-ash-ink">Body avatar</h2>
+            <p className="mt-1 text-sm text-ash-muted">
               Measurements update the collision body used by the live drape preview.
             </p>
             <div className="mt-5 flex flex-col gap-5">
@@ -185,10 +185,10 @@ export const SandboxPreview: FC = () => {
           </section>
         </aside>
 
-        <section className="obsidian-glass relative min-h-[650px] p-3">
+        <section className="ash-card relative min-h-[650px] p-3">
           <div className="mb-3 px-2">
-            <p className="font-mono text-xs text-obsidian-accent-muted">{selectedGarment.sku}</p>
-            <h2 className="text-lg font-semibold text-obsidian-ink">{selectedGarment.name}</h2>
+            <p className="font-mono text-xs text-ash-accent">{selectedGarment.sku}</p>
+            <h2 className="text-lg font-semibold text-ash-ink">{selectedGarment.name}</h2>
           </div>
           <VFRCanvas
             garment={selectedGarment.garment}

@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { RadialHeatmapLegend } from '@/components/vfr/radial-heatmap-legend';
-import { obsidianTitanium } from '@/lib/design-tokens';
+import { ashrium } from '@/lib/design-tokens';
 import {
   applyFacelessMannequin,
   applyMannequinMaterial,
@@ -155,7 +155,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     let albedoTexture: THREE.Texture | null = null;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(obsidianTitanium.canvas);
+    scene.background = new THREE.Color(ashrium.raised);
 
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
     camera.position.set(0, 0.85, 3.1);
@@ -184,13 +184,13 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     keyLight.castShadow = true;
     scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(obsidianTitanium.accent, 0.32);
+    const fillLight = new THREE.DirectionalLight(0xfff4ea, 0.45);
     fillLight.position.set(-2.2, 1.4, -2.4);
     scene.add(fillLight);
 
     const floorGeometry = new THREE.CircleGeometry(1.5, 48);
     const floorMaterial = new THREE.MeshStandardMaterial({
-      color: obsidianTitanium.card,
+      color: ashrium.canvas,
       roughness: 0.95,
       metalness: 0,
     });
@@ -435,7 +435,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
           type="button"
           aria-pressed={showClearanceHeatmap}
           onClick={() => setShowClearanceHeatmap((value) => !value)}
-          className="absolute right-4 top-4 z-10 rounded-full border border-white/15 bg-obsidian-canvas/70 px-3 py-1.5 text-xs text-obsidian-muted backdrop-blur-md"
+          className="absolute right-4 top-4 z-10 rounded-full border border-ash-line bg-ash-canvas/70 px-3 py-1.5 text-xs text-ash-muted backdrop-blur-md"
         >
           {showClearanceHeatmap ? 'Hide clearance' : 'Show clearance'}
         </button>

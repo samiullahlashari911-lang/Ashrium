@@ -66,10 +66,10 @@ export function DomainAllowlistForm({
   };
 
   return (
-    <section className="obsidian-glass p-6">
-      <header className="border-b border-white/10 pb-4">
-        <h2 className="text-lg font-semibold text-obsidian-ink">Storefront domain allowlist</h2>
-        <p className="mt-1 text-sm text-obsidian-muted">
+    <section className="ash-card p-6">
+      <header className="border-b border-ash-line pb-4">
+        <h2 className="text-lg font-semibold text-ash-ink">Storefront domain allowlist</h2>
+        <p className="mt-1 text-sm text-ash-muted">
           Only these origins can mint a widget embed token. Use the exact storefront origin,
           including https.
         </p>
@@ -87,14 +87,14 @@ export function DomainAllowlistForm({
           {domains.map((origin) => (
             <li
               key={origin}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-obsidian-canvas/50 px-4 py-3"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ash-line bg-ash-canvas/50 px-4 py-3"
             >
-              <span className="font-mono text-sm text-obsidian-ink">{origin}</span>
+              <span className="font-mono text-sm text-ash-ink">{origin}</span>
               <button
                 type="button"
                 disabled={isPending}
                 onClick={() => handleRemove(origin)}
-                className="rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-obsidian-muted transition hover:border-obsidian-tension hover:text-obsidian-tension-muted disabled:opacity-60"
+                className="rounded-full border border-ash-line px-3 py-1 text-xs font-semibold text-ash-muted transition hover:border-ash-tension hover:text-ash-tension disabled:opacity-60"
               >
                 Remove
               </button>
@@ -104,7 +104,7 @@ export function DomainAllowlistForm({
       )}
 
       <form onSubmit={handleAdd} className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
-        <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium text-obsidian-ink">
+        <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium text-ash-ink">
           Add origin
           <input
             value={draft}
@@ -112,16 +112,16 @@ export function DomainAllowlistForm({
             spellCheck={false}
             autoComplete="off"
             placeholder="https://brand.myshopify.com"
-            className="obsidian-input-box font-mono text-sm"
+            className="ash-input-box font-mono text-sm"
           />
         </label>
-        <button type="submit" disabled={isPending} className="obsidian-cta shrink-0">
+        <button type="submit" disabled={isPending} className="ash-cta shrink-0">
           {isPending ? 'Saving…' : 'Add origin'}
         </button>
       </form>
 
       {message ? (
-        <p className={`mt-4 text-sm ${isError ? 'text-rose-300' : 'text-emerald-300'}`}>{message}</p>
+        <p className={`mt-4 text-sm ${isError ? 'text-ash-tension' : 'text-ash-success'}`}>{message}</p>
       ) : null}
     </section>
   );

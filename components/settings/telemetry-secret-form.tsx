@@ -53,19 +53,19 @@ export function TelemetrySecretForm({
   };
 
   return (
-    <section className="obsidian-glass p-6">
-      <header className="border-b border-white/10 pb-4">
-        <h2 className="text-lg font-semibold text-obsidian-ink">Telemetry webhook</h2>
-        <p className="mt-1 text-sm text-obsidian-muted">
+    <section className="ash-card p-6">
+      <header className="border-b border-ash-line pb-4">
+        <h2 className="text-lg font-semibold text-ash-ink">Telemetry webhook</h2>
+        <p className="mt-1 text-sm text-ash-muted">
           Post order and return events to this URL with the tenant id and HMAC secret. Rotating
           the secret immediately invalidates the previous one.
         </p>
       </header>
 
       {webhookUrl ? (
-        <p className="mt-5 font-mono text-xs text-obsidian-accent-muted break-all">{webhookUrl}</p>
+        <p className="mt-5 font-mono text-xs text-ash-accent break-all">{webhookUrl}</p>
       ) : (
-        <p className="mt-5 text-sm text-obsidian-muted">
+        <p className="mt-5 text-sm text-ash-muted">
           Set <span className="font-mono text-xs">APP_BASE_URL</span> to display the public webhook
           endpoint.
         </p>
@@ -81,16 +81,16 @@ export function TelemetrySecretForm({
       ) : null}
 
       {secret ? (
-        <p className="mt-5 break-all rounded-2xl border border-white/10 bg-obsidian-canvas/60 px-4 py-3 font-mono text-sm text-obsidian-ink">
+        <p className="mt-5 break-all rounded-2xl border border-ash-line bg-ash-canvas/60 px-4 py-3 font-mono text-sm text-ash-ink">
           {secret}
         </p>
       ) : null}
 
       {message ? (
-        <p className={`mt-4 text-sm ${isError ? 'text-rose-300' : 'text-emerald-300'}`}>{message}</p>
+        <p className={`mt-4 text-sm ${isError ? 'text-ash-tension' : 'text-ash-success'}`}>{message}</p>
       ) : null}
 
-      <button type="button" disabled={isPending} onClick={handleRotate} className="obsidian-cta mt-5">
+      <button type="button" disabled={isPending} onClick={handleRotate} className="ash-cta mt-5">
         {isPending ? 'Issuing…' : configured ? 'Rotate webhook secret' : 'Create webhook secret'}
       </button>
     </section>

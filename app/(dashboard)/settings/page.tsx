@@ -28,7 +28,7 @@ export default async function SettingsPage() {
   if (!tenantId) {
     return (
       <main className="mx-auto flex min-h-screen max-w-3xl items-center p-6">
-        <p className="rounded-xl border border-amber-700/50 bg-amber-950/30 p-6 text-sm text-amber-100">
+        <p className="rounded-xl border border-amber-700/50 bg-amber-950/30 p-6 text-sm text-amber-800">
           Tenant authentication is required to view usage settings.
         </p>
       </main>
@@ -73,24 +73,24 @@ export default async function SettingsPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-obsidian-accent-muted">Merchant Settings</p>
-        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Workspace settings</h1>
-        <p className="mt-2 text-sm text-obsidian-muted">
+        <p className="text-sm font-medium text-ash-accent">Merchant Settings</p>
+        <h1 className="mt-1 text-3xl font-bold text-ash-ink">Workspace settings</h1>
+        <p className="mt-2 text-sm text-ash-muted">
           Usage, storefront allowlist, and telemetry credentials for this merchant workspace.
         </p>
       </header>
 
-      <section className="obsidian-glass p-6">
+      <section className="ash-card p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm text-obsidian-muted">Current subscription</p>
-            <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
+            <p className="text-sm text-ash-muted">Current subscription</p>
+            <h2 className="mt-1 text-2xl font-semibold text-ash-ink">
               {merchant ? formatPlanTier(merchant.plan_tier) : 'Plan unavailable'}
             </h2>
           </div>
           <Link
             href="/settings/integrations"
-            className="rounded-full border border-obsidian-accent/50 bg-obsidian-accent/15 px-4 py-2 text-sm font-semibold text-obsidian-accent-muted transition hover:border-obsidian-accent hover:bg-obsidian-accent/25"
+            className="rounded-full border border-ash-accent/50 bg-ash-accent/15 px-4 py-2 text-sm font-semibold text-ash-accent transition hover:border-ash-accent hover:bg-ash-accent/25"
           >
             Manage integrations
           </Link>
@@ -99,23 +99,23 @@ export default async function SettingsPage() {
         <div className="mt-8">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-sm text-obsidian-muted">Fit sessions used this month</p>
-              <p className="mt-1 text-3xl font-semibold text-obsidian-ink">
+              <p className="text-sm text-ash-muted">Fit sessions used this month</p>
+              <p className="mt-1 text-3xl font-semibold text-ash-ink">
                 {sessionsUsed.toLocaleString()}
-                <span className="ml-2 text-base font-medium text-obsidian-muted">
+                <span className="ml-2 text-base font-medium text-ash-muted">
                   / {isEnterprise ? 'Unlimited with BYOK' : quota.toLocaleString()}
                 </span>
               </p>
             </div>
             {!isEnterprise && merchant?.overage_allowed ? (
-              <span className="rounded-full border border-emerald-700/60 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-200">
+              <span className="rounded-full border border-emerald-700/60 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-ash-success">
                 Overage enabled
               </span>
             ) : null}
           </div>
 
           <div
-            className="mt-4 h-3 overflow-hidden rounded-full bg-white/10"
+            className="mt-4 h-3 overflow-hidden rounded-full bg-ash-raised"
             role="progressbar"
             aria-label="Monthly fit-session usage"
             aria-valuemin={0}
@@ -123,12 +123,12 @@ export default async function SettingsPage() {
             aria-valuenow={sessionsUsed}
           >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-obsidian-accent to-obsidian-accent-end transition-[width]"
+              className="h-full rounded-full bg-gradient-to-r from-ash-accent to-ash-accent-strong transition-[width]"
               style={{ width: `${usagePercentage}%` }}
             />
           </div>
 
-          <p className="mt-3 text-sm text-obsidian-muted">
+          <p className="mt-3 text-sm text-ash-muted">
             {sessionsUsed === 0
               ? 'No fit sessions recorded yet this billing period.'
               : `Billing period began ${new Date(`${billingPeriodStart}T00:00:00Z`).toLocaleDateString()}.`}

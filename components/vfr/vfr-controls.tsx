@@ -30,12 +30,12 @@ const ToggleButton: FC<ToggleButtonProps> = ({
     className={[
       'flex w-full flex-col rounded-lg border px-3 py-2 text-left transition-colors',
       isActive
-        ? 'border-obsidian-accent/70 bg-obsidian-accent/15 text-obsidian-ink'
-        : 'border-white/10 bg-obsidian-canvas/70 text-obsidian-ink hover:border-white/25',
+        ? 'border-ash-accent/70 bg-ash-accent/15 text-ash-ink'
+        : 'border-ash-line bg-ash-canvas/70 text-ash-ink hover:border-ash-line',
     ].join(' ')}
   >
     <span className="text-sm font-semibold">{label}</span>
-    <span className="text-xs text-obsidian-muted">{description}</span>
+    <span className="text-xs text-ash-muted">{description}</span>
   </button>
 );
 
@@ -50,11 +50,11 @@ export const VFRControls: FC<VFRControlsProps> = ({
 
   return (
     <aside
-      className={`${className} obsidian-glass p-4`}
+      className={`${className} ash-card p-4`}
     >
-      <header className="mb-3 border-b border-white/10 pb-2">
-        <h2 className="text-sm font-semibold text-obsidian-ink">Viewport Controls</h2>
-        <p className="text-xs text-obsidian-muted">Garment drape & strain visualization</p>
+      <header className="mb-3 border-b border-ash-line pb-2">
+        <h2 className="text-sm font-semibold text-ash-ink">Viewport Controls</h2>
+        <p className="text-xs text-ash-muted">Garment drape & strain visualization</p>
       </header>
 
       <div className="flex flex-col gap-2">
@@ -80,8 +80,8 @@ export const VFRControls: FC<VFRControlsProps> = ({
         />
       </div>
 
-      <div className="mt-4 rounded-lg border border-white/10 bg-obsidian-canvas/70 p-3 text-xs text-obsidian-muted">
-        <p className="mb-2 font-semibold text-obsidian-ink">Strain Legend</p>
+      <div className="mt-4 rounded-lg border border-ash-line bg-ash-canvas/70 p-3 text-xs text-ash-muted">
+        <p className="mb-2 font-semibold text-ash-ink">Strain Legend</p>
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-full bg-red-500" />

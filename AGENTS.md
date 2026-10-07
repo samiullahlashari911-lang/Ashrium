@@ -81,7 +81,7 @@ block.
 | Pose capture | MediaPipe Pose (`@mediapipe/tasks-vision`) — already in the stack |
 | ML / GPU | Modal **A100-80GB**, via `fetch` in `lib/ml/gpu.ts`. Not ANNY-Fit. Not Replicate. |
 | Storefront Integration | Shopify Liquid block + `public/vfr-widget.js` iframe |
-| Styling | Design tokens in `lib/design-tokens.ts` ("Obsidian") |
+| Styling | Design tokens in `lib/design-tokens.ts` ("Ashrium" light: warm canvas, white cards, violet accent) |
 
 **Do not** introduce any other major library without approval. See Section 10.
 
@@ -137,8 +137,9 @@ block.
   `lib/catalog/shopify-selector.ts`), operator GPU banner
   (`components/dashboard/replicate-runtime-banner.tsx`)
 - **Biometrics wipe:** `lib/server/biometrics-wipe.ts`
-- **Design tokens:** `lib/design-tokens.ts` (Obsidian — indigo canvas, glass
-  panels, purple→magenta CTAs); do not introduce a new UI kit unless asked.
+- **Design tokens:** `lib/design-tokens.ts` (Ashrium — warm off-white canvas,
+  white cards on hairlines, one violet accent; Tailwind `ash-*` via CSS
+  variables in `app/globals.css`); do not introduce a new UI kit unless asked.
 
 Session GPU warm uses Modal `min_containers=1` when the shopper
 passes age + privacy consent so `@modal.enter` overlaps height and photos.
@@ -223,10 +224,10 @@ Shopify Admin directly.
 | Area | Files |
 |---|---|
 | Types | `types/hmr.ts` (`MhrParametricVector`; stop writing new ANNY rows), `types/graphics.ts`, `types/garment.ts`, `types/database.ts` |
-| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/height-units.ts`, `lib/widget/capture-progress.ts`, `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
+| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/height-units.ts`, `lib/widget/weight-units.ts`, `lib/widget/capture-progress.ts`, `lib/widget/capture-outlines.ts` (generated), `components/widget/ui/*` (wheel picker, segmented toggle), `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
 | Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (faceless mannequin, undergarment, GarmentCode UVs), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
-| GPU (Python) | `gpu/pipeline.py`, `gpu/modal_app.py` + `gpu/body/pins.py` (git sources pinned to reviewed SHAs), `gpu/requirements.txt`, `gpu/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, joint-informed ISO girths, stage timings / fit diagnostics), `gpu/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `gpu/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject). Never `NvidiaWarp-GarmentCode`. |
+| GPU (Python) | `gpu/pipeline.py`, `gpu/modal_app.py` + `gpu/body/pins.py` (git sources pinned to reviewed SHAs), `gpu/requirements.txt`, `gpu/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, joint-informed ISO girths, stage timings / fit diagnostics), `gpu/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `gpu/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject), `gpu/tools/build_outlines.py` (offline: capture outlines from the MHR mesh). Never `NvidiaWarp-GarmentCode`. |
 | ML | `lib/ml/gpu.ts` (Modal HMAC fetch; parse MHR output; warm/sleep `min_containers`), `lib/ml/session-gpu.ts` (5-minute shopper wait; 2-minute inference after `started_at`) |
 | API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/warmup/route.ts` (embed-token capture warm), `app/api/v1/hmr/status/route.ts` (job poll + 5-minute session abort), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper capture/submit warms), `app/api/v1/cron/ttl-sweep/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/abort-shopper-gpu.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/server/widget-cors.ts` (widget `/api/v1/widget/*` HTTPS preflight; tenant allowlist remains the authz gate), `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Modal `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
 | Merchant UI | `app/page.tsx`, `app/privacy/page.tsx`, `lib/privacy/consent-copy.ts`, `lib/privacy/illinois-bipa.ts` (BIPA geofence ship flag; off until counsel), `app/(dashboard)/dashboard-navigation.tsx`, `app/(dashboard)/onboarding/page.tsx`, `app/(dashboard)/onboarding/onboarding-wizard.tsx`, `app/(dashboard)/settings/page.tsx`, `app/(dashboard)/settings/integrations/shopify-form.tsx`, `components/settings/domain-allowlist-form.tsx`, `components/settings/telemetry-secret-form.tsx`, `components/dashboard/empty-state.tsx`, `components/dashboard/catalog-sync-bar.tsx`, `components/dashboard/replicate-runtime-banner.tsx`, `components/dashboard/storefront-golive-banner.tsx` (Sandbox is not storefront go-live), `lib/onboarding.ts`, `lib/server/storefront-golive.ts`, `lib/server/tenant-settings.ts` |
@@ -284,10 +285,22 @@ patterns to replicate, not copy pixel-for-pixel:
   `POST /api/v1/hmr/keepalive`). Do **not** run 24/7 Vercel cron keep-alive.
   Idle billing is `$0.000694/s` (~7,205s per $5). Ingest (`task=pattern`)
   may cold-start; do not hold `min_containers` for catalog.
-- Use the existing **Obsidian design tokens** (`lib/design-tokens.ts`) for
-  the widget, dashboard, and auth chrome: deep indigo canvas, glass panels,
-  and purple-to-magenta CTAs. Do not add a component/UI kit unless
-  explicitly approved.
+- Use the **Ashrium design tokens** (`lib/design-tokens.ts`, from the
+  owner's reference board) for the landing page, widget, dashboard, and auth
+  chrome: warm off-white canvas, white cards, near-black ink, a single violet
+  accent. Do not add a component/UI kit unless explicitly approved.
+- **Shopper intake:** short consent (bullets + 16+ and agree checkboxes
+  pinned above the CTA, full text behind "Full details") → height wheel
+  (cm | ft/in) → body profile (Female / Male / Prefer not to say, "Why we
+  ask") → optional weight wheel (kg | lb, Skip). Next appears only after a
+  choice. An animated progress line counts the 5 steps after consent. Copy
+  about sex or weight improving the fit stays gated on
+  `SEX_SHAPE_PRIOR_LIVE` / `WEIGHT_PRIOR_LIVE` until the GPU uses them.
+- **Capture outlines** are generated from the MHR mean mesh
+  (`gpu/tools/build_outlines.py` → `lib/widget/capture-outlines.ts`):
+  female / male / neutral, front A-pose and side with arms forward at
+  shoulder height. Red until the gate passes, green while aligned, a trace
+  around the outline during the 1.2s hold.
 - Replicate any attached design exactly: spacing, type hierarchy, corner
   radius, and color. Do not "simplify" or approximate a provided design.
 - Empty states are required everywhere data can be absent (no garments yet,

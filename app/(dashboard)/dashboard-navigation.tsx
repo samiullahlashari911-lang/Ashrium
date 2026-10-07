@@ -29,7 +29,7 @@ export function DashboardNavigation() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/10 bg-obsidian-canvas/95">
+    <header className="sticky top-0 z-30 border-b border-ash-line bg-ash-canvas/95">
       <nav
         aria-label="Dashboard navigation"
         className="mx-auto flex w-full max-w-7xl items-center gap-4 px-6 py-4"
@@ -37,7 +37,7 @@ export function DashboardNavigation() {
         <Link href="/merchant/dashboard" className="mr-auto">
           <AshriumWordmark
             markClassName="h-8 w-8 shrink-0"
-            wordClassName="text-lg font-bold tracking-tight text-obsidian-ink"
+            wordClassName="text-lg font-bold tracking-tight text-ash-ink"
           />
         </Link>
         <div className="flex flex-wrap items-center justify-end gap-1">
@@ -52,13 +52,13 @@ export function DashboardNavigation() {
                 className={[
                   'relative rounded-full px-3 py-2 text-sm font-semibold transition-colors',
                   isActive
-                    ? 'bg-obsidian-accent/20 text-white'
-                    : 'text-obsidian-muted hover:bg-white/5 hover:text-obsidian-ink',
+                    ? 'bg-ash-accent-soft text-ash-accent'
+                    : 'text-ash-muted hover:bg-ash-raised hover:text-ash-ink',
                 ].join(' ')}
               >
                 {item.label}
                 {isActive ? (
-                  <span className="absolute inset-x-3 -bottom-1 h-0.5 rounded-full bg-gradient-to-r from-obsidian-accent to-obsidian-accent-end" />
+                  <span className="absolute inset-x-3 -bottom-1 h-0.5 rounded-full bg-gradient-to-r from-ash-accent to-ash-accent-strong" />
                 ) : null}
               </Link>
             );

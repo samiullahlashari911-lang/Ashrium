@@ -16,7 +16,7 @@ export interface AshriumMarkProps {
 export function AshriumMark({
   className,
   title,
-  variant = 'metallic',
+  variant = 'currentColor',
 }: AshriumMarkProps): JSX.Element {
   const reactId = useId().replace(/:/g, '');
   const metalId = `ashrium-mark-metal-${reactId}`;
@@ -81,7 +81,7 @@ export function AshriumWordmark({
 }: AshriumWordmarkProps): JSX.Element {
   return (
     <span className={['inline-flex items-center gap-2.5', className].filter(Boolean).join(' ')}>
-      <AshriumMark className={markClassName ?? 'h-7 w-7 shrink-0'} />
+      <AshriumMark className={markClassName ?? 'h-7 w-7 shrink-0 text-ash-accent'} />
       <span className={wordClassName ?? 'text-sm font-medium tracking-[0.04em]'}>Ashrium</span>
     </span>
   );

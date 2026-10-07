@@ -43,11 +43,11 @@ export default async function MerchantDashboardPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-obsidian-accent-muted">Merchant workspace</p>
-        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">
+        <p className="text-sm font-medium text-ash-accent">Merchant workspace</p>
+        <h1 className="mt-1 text-3xl font-bold text-ash-ink">
           Welcome{tenant ? `, ${tenant.company_name}` : ''}
         </h1>
-        <p className="mt-2 text-sm text-obsidian-muted">
+        <p className="mt-2 text-sm text-ash-muted">
           Monitor fit adoption and return-rate performance across your storefront.
         </p>
       </header>
@@ -57,16 +57,16 @@ export default async function MerchantDashboardPage() {
           <section
             className={`rounded-xl border p-5 ${
               analytics.guaranteeAchieved
-                ? 'border-emerald-400/50 bg-emerald-500/10'
-                : 'border-obsidian-accent/30 bg-obsidian-accent/10'
+                ? 'border-ash-success/30 bg-ash-success-soft'
+                : 'border-ash-accent/30 bg-ash-accent/10'
             }`}
           >
-            <p className="text-sm font-semibold text-obsidian-ink">
+            <p className="text-sm font-semibold text-ash-ink">
               {analytics.guaranteeAchieved
                 ? '20% size-related return reduction achieved'
                 : 'Return-reduction guarantee in progress'}
             </p>
-            <p className="mt-1 text-sm text-obsidian-muted">
+            <p className="mt-1 text-sm text-ash-muted">
               {analytics.sizeRelatedReductionPercentage === null
                 ? 'More baseline and VFR order data is required to evaluate the guarantee.'
                 : `${analytics.sizeRelatedReductionPercentage.toFixed(2)}% size-related return reduction measured.`}
@@ -109,26 +109,26 @@ export default async function MerchantDashboardPage() {
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <Link
           href="/sandbox"
-          className="obsidian-glass p-5 transition hover:border-obsidian-accent/60 hover:bg-white/[0.09]"
+          className="ash-card p-5 transition hover:border-ash-accent/60 hover:bg-white/[0.09]"
         >
-          <h2 className="font-semibold text-obsidian-ink">3D Sandbox</h2>
-          <p className="mt-2 text-sm text-obsidian-muted">
+          <h2 className="font-semibold text-ash-ink">3D Sandbox</h2>
+          <p className="mt-2 text-sm text-ash-muted">
             First-party capture preview. Not storefront go-live.
           </p>
         </Link>
         <Link
           href="/dashboard/garments"
-          className="obsidian-glass p-5 transition hover:border-obsidian-accent/60 hover:bg-white/[0.09]"
+          className="ash-card p-5 transition hover:border-ash-accent/60 hover:bg-white/[0.09]"
         >
-          <h2 className="font-semibold text-obsidian-ink">Garment library</h2>
-          <p className="mt-2 text-sm text-obsidian-muted">Manage tenant-scoped CAD profiles.</p>
+          <h2 className="font-semibold text-ash-ink">Garment library</h2>
+          <p className="mt-2 text-sm text-ash-muted">Manage tenant-scoped CAD profiles.</p>
         </Link>
         <Link
           href="/settings"
-          className="obsidian-glass p-5 transition hover:border-obsidian-accent/60 hover:bg-white/[0.09]"
+          className="ash-card p-5 transition hover:border-ash-accent/60 hover:bg-white/[0.09]"
         >
-          <h2 className="font-semibold text-obsidian-ink">Usage & settings</h2>
-          <p className="mt-2 text-sm text-obsidian-muted">
+          <h2 className="font-semibold text-ash-ink">Usage & settings</h2>
+          <p className="mt-2 text-sm text-ash-muted">
             Review consumption, storefront domains, and telemetry.
           </p>
         </Link>
@@ -139,9 +139,9 @@ export default async function MerchantDashboardPage() {
 
 function MetricCard({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
-    <article className="obsidian-glass p-5">
-      <p className="text-sm font-medium text-obsidian-muted">{label}</p>
-      <p className="mt-2 text-3xl font-bold text-obsidian-ink">{value}</p>
+    <article className="ash-card p-5">
+      <p className="text-sm font-medium text-ash-muted">{label}</p>
+      <p className="mt-2 text-3xl font-bold text-ash-ink">{value}</p>
     </article>
   );
 }

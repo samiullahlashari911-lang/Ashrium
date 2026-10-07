@@ -14,7 +14,7 @@ export default async function WidgetVfrPage({ searchParams }: WidgetVfrPageProps
 
   if (!claims || !token) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-obsidian-canvas p-6 text-sm text-red-300">
+      <main className="flex min-h-screen items-center justify-center bg-ash-canvas p-6 text-sm text-ash-tension">
         Invalid or expired widget token.
       </main>
     );

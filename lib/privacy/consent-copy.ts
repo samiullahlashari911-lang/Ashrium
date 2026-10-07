@@ -5,12 +5,50 @@
 export const PRIVACY_PAGE_PATH = '/privacy';
 
 export const CONSENT_CHECKBOX_LABEL =
-  'I agree that Ashrium may process two photos of my body (the head is cropped on this device before upload), plus the height, sex, and optional weight I enter, to build a temporary 3D avatar for this fitting.';
+  'I agree Ashrium may process two photos of my body (the head is cropped on this device before upload) and the height, sex, and optional weight I enter, to build a temporary 3D avatar.';
 
 export const CONSENT_SUMMARY =
   'Face pixels never leave this device. Headless WebP photos are uploaded only to run this fitting, then deleted as soon as inference finishes or fails, and in any case within 15 minutes. A derived body vector is kept for at most 15 minutes, then wiped.';
 
 export const AGE_ATTESTATION_LABEL = 'I confirm I am 16 years of age or older.';
+
+/** One-line bullets on the short consent screen; the full text sits behind "Full details". */
+export const CONSENT_BULLETS: ReadonlyArray<{ title: string; body: string }> = [
+  {
+    title: 'Two photos, no face',
+    body: 'A front and a side photo. Your head is cropped on this device before anything is sent.',
+  },
+  {
+    title: 'Gone in 15 minutes',
+    body: 'Photos are deleted the moment your avatar is built, and never kept longer than 15 minutes.',
+  },
+  {
+    title: 'Never sold, never trained on',
+    body: 'Your photos are not sold and are never used to train models.',
+  },
+  {
+    title: 'Fitted clothes work best',
+    body: 'Skip coats and hoodies so the outline is you, not your jacket.',
+  },
+];
+
+/**
+ * Flip to true only in the release where `gpu/body/mhr_fit.py` actually
+ * conditions the starting body shape on sex. Until then the explainer must
+ * not claim it.
+ */
+export const SEX_SHAPE_PRIOR_LIVE = false;
+
+export const SEX_WHY_COPY = SEX_SHAPE_PRIOR_LIVE
+  ? 'We start your 3D body from a closer average shape and show you the matching capture outline. Your measurements still come from your photos.'
+  : 'It picks the capture outline that matches your body, so lining up for your photos is easier. Your measurements come from your photos.';
+
+/** Same rule as sex: only claim weight improves the fit once the GPU uses it. */
+export const WEIGHT_PRIOR_LIVE = false;
+
+export const WEIGHT_WHY_COPY = WEIGHT_PRIOR_LIVE
+  ? 'We use it to cross-check your body volume so the avatar is closer to you.'
+  : 'It is kept only with this fitting and deleted with it.';
 
 export const UNDER_16_REFUSAL =
   'Ashrium fittings are not available if you are under 16. We do not collect photos, height, sex, or weight from children (COPPA).';

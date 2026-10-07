@@ -138,47 +138,47 @@ export const GarmentForm: FC<GarmentFormProps> = ({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="obsidian-glass p-5">
-      <header className="mb-4 border-b border-white/10 pb-3">
-        <h2 className="text-lg font-semibold text-obsidian-ink">
+    <form onSubmit={handleSubmit} className="ash-card p-5">
+      <header className="mb-4 border-b border-ash-line pb-3">
+        <h2 className="text-lg font-semibold text-ash-ink">
           {editingProfile ? 'Edit CAD garment profile' : 'New CAD garment profile'}
         </h2>
-        <p className="text-sm text-obsidian-muted">
+        <p className="text-sm text-ash-muted">
           Composition and GSM map to KES mechanical targets. Size rows are Laplacian-graded on save.
         </p>
       </header>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           SKU
           <input
             required
             value={formValues.sku}
             onChange={(event) => updateField('sku', event.target.value)}
-            className="obsidian-input-box"
+            className="ash-input-box"
             placeholder="GAR-001"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           Name
           <input
             required
             value={formValues.name}
             onChange={(event) => updateField('name', event.target.value)}
-            className="obsidian-input-box"
+            className="ash-input-box"
             placeholder="Merino Wool Tee"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           Category
           <select
             value={formValues.category}
             onChange={(event) =>
               updateField('category', event.target.value as GarmentFormInput['category'])
             }
-            className="obsidian-input-box"
+            className="ash-input-box"
           >
             <option value="">Unspecified</option>
             {GARMENT_CATEGORIES.map((category) => (
@@ -189,7 +189,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           GSM
           <input
             type="number"
@@ -200,22 +200,22 @@ export const GarmentForm: FC<GarmentFormProps> = ({
             onChange={(event) =>
               updateField('gsm', event.target.value === '' ? '' : Number(event.target.value))
             }
-            className="obsidian-input-box"
+            className="ash-input-box"
             placeholder="180"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted md:col-span-2">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted md:col-span-2">
           Composition
           <input
             value={formValues.compositionText}
             onChange={(event) => updateField('compositionText', event.target.value)}
-            className="obsidian-input-box"
+            className="ash-input-box"
             placeholder="95% cotton, 5% elastane"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           Tensile stiffness S_t (N/m)
           <input
             required
@@ -224,11 +224,11 @@ export const GarmentForm: FC<GarmentFormProps> = ({
             min="0"
             value={formValues.tensileStiffness}
             onChange={(event) => updateField('tensileStiffness', Number(event.target.value))}
-            className="obsidian-input-box"
+            className="ash-input-box"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           Bending rigidity B_r (N*m)
           <input
             required
@@ -237,11 +237,11 @@ export const GarmentForm: FC<GarmentFormProps> = ({
             min="0"
             value={formValues.bendingRigidity}
             onChange={(event) => updateField('bendingRigidity', Number(event.target.value))}
-            className="obsidian-input-box"
+            className="ash-input-box"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           Shear stiffness S_s (N/m)
           <input
             required
@@ -250,11 +250,11 @@ export const GarmentForm: FC<GarmentFormProps> = ({
             min="0"
             value={formValues.shearStiffness}
             onChange={(event) => updateField('shearStiffness', Number(event.target.value))}
-            className="obsidian-input-box"
+            className="ash-input-box"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted">
           Area density rho_a (kg/m^2)
           <input
             required
@@ -263,25 +263,25 @@ export const GarmentForm: FC<GarmentFormProps> = ({
             min="0"
             value={formValues.areaDensity}
             onChange={(event) => updateField('areaDensity', Number(event.target.value))}
-            className="obsidian-input-box"
+            className="ash-input-box"
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-obsidian-muted md:col-span-2">
+        <label className="flex flex-col gap-1 text-sm text-ash-muted md:col-span-2">
           CAD pattern URL
           <input
             type="url"
             value={formValues.cadPatternUrl}
             onChange={(event) => updateField('cadPatternUrl', event.target.value)}
-            className="obsidian-input-box"
+            className="ash-input-box"
             placeholder="https://cdn.example.com/patterns/tee-fabric.png"
           />
         </label>
       </div>
 
-      <div className="mt-5 border-t border-white/10 pt-4">
+      <div className="mt-5 border-t border-ash-line pt-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-obsidian-ink">Size variants</h3>
+          <h3 className="text-sm font-semibold text-ash-ink">Size variants</h3>
           <div className="flex gap-2">
             <button
               type="button"
@@ -298,14 +298,14 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                   })),
                 )
               }
-              className="rounded-md border border-white/15 px-2 py-1 text-xs font-semibold text-obsidian-ink hover:border-obsidian-accent"
+              className="rounded-md border border-ash-line px-2 py-1 text-xs font-semibold text-ash-ink hover:border-ash-accent"
             >
               Add S–XL chart
             </button>
             <button
               type="button"
               onClick={() => updateField('sizeVariants', [...formValues.sizeVariants, EMPTY_SIZE])}
-              className="rounded-md border border-white/15 px-2 py-1 text-xs font-semibold text-obsidian-ink hover:border-obsidian-accent"
+              className="rounded-md border border-ash-line px-2 py-1 text-xs font-semibold text-ash-ink hover:border-ash-accent"
             >
               Add size
             </button>
@@ -313,7 +313,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
         </div>
 
         {formValues.sizeVariants.length === 0 ? (
-          <p className="text-sm text-obsidian-muted">No size variants yet.</p>
+          <p className="text-sm text-ash-muted">No size variants yet.</p>
         ) : (
           <div className="flex flex-col gap-3">
             {formValues.sizeVariants.map((variant, index) => (
@@ -322,7 +322,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                   required
                   value={variant.sizeCode}
                   onChange={(event) => updateSize(index, { sizeCode: event.target.value })}
-                  className="obsidian-input-box"
+                  className="ash-input-box"
                   placeholder="M"
                 />
                 <input
@@ -332,7 +332,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                   step="0.1"
                   value={variant.chestCm || ''}
                   onChange={(event) => updateSize(index, { chestCm: Number(event.target.value) })}
-                  className="obsidian-input-box"
+                  className="ash-input-box"
                   placeholder="Chest cm"
                 />
                 <input
@@ -342,7 +342,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                   step="0.1"
                   value={variant.waistCm || ''}
                   onChange={(event) => updateSize(index, { waistCm: Number(event.target.value) })}
-                  className="obsidian-input-box"
+                  className="ash-input-box"
                   placeholder="Waist cm"
                 />
                 <input
@@ -352,7 +352,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                   step="0.1"
                   value={variant.hipCm || ''}
                   onChange={(event) => updateSize(index, { hipCm: Number(event.target.value) })}
-                  className="obsidian-input-box"
+                  className="ash-input-box"
                   placeholder="Hip cm"
                 />
                 <input
@@ -362,7 +362,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                   step="0.1"
                   value={variant.lengthCm || ''}
                   onChange={(event) => updateSize(index, { lengthCm: Number(event.target.value) })}
-                  className="obsidian-input-box"
+                  className="ash-input-box"
                   placeholder="Length cm"
                 />
                 <button
@@ -373,7 +373,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
                       formValues.sizeVariants.filter((_, cursor) => cursor !== index),
                     )
                   }
-                  className="rounded-md border border-red-900/60 px-2 py-1 text-xs font-semibold text-red-300 hover:border-red-500"
+                  className="rounded-md border border-red-900/60 px-2 py-1 text-xs font-semibold text-ash-tension hover:border-red-500"
                 >
                   Remove
                 </button>
@@ -384,13 +384,13 @@ export const GarmentForm: FC<GarmentFormProps> = ({
       </div>
 
       {statusMessage ? (
-        <p className={`mt-4 text-sm ${isError ? 'text-red-400' : 'text-emerald-400'}`}>
+        <p className={`mt-4 text-sm ${isError ? 'text-ash-tension' : 'text-ash-success'}`}>
           {statusMessage}
         </p>
       ) : null}
 
       <div className="mt-5 flex flex-wrap gap-3">
-        <button type="submit" disabled={isPending} className="obsidian-cta disabled:cursor-not-allowed">
+        <button type="submit" disabled={isPending} className="ash-cta disabled:cursor-not-allowed">
           {isPending ? 'Saving...' : editingProfile ? 'Update profile' : 'Create profile'}
         </button>
 
@@ -398,7 +398,7 @@ export const GarmentForm: FC<GarmentFormProps> = ({
           <button
             type="button"
             onClick={onCancelEdit}
-            className="rounded-full border border-white/15 px-4 py-2 text-sm font-semibold text-obsidian-ink transition hover:border-white/30"
+            className="rounded-full border border-ash-line px-4 py-2 text-sm font-semibold text-ash-ink transition hover:border-ash-line"
           >
             Cancel edit
           </button>

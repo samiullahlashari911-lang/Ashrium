@@ -78,25 +78,25 @@ export function AuthForm({ initialError }: AuthFormProps) {
       <AtmosphereBackdrop intensity="hero" />
 
       <AshriumWordmark
-        className="absolute left-8 top-7 z-20 text-white"
+        className="absolute left-8 top-7 z-20 text-ash-ink"
         markClassName="h-8 w-8 shrink-0"
-        wordClassName="text-sm font-medium tracking-[0.04em] text-white"
+        wordClassName="text-sm font-medium tracking-[0.04em] text-ash-ink"
       />
 
-      <section className="obsidian-glass relative z-10 w-full max-w-[400px] px-8 py-8">
+      <section className="ash-card relative z-10 w-full max-w-[400px] px-8 py-8">
         <div className="pointer-events-none mb-8 flex gap-1.5" aria-hidden="true">
           <span className="h-2.5 w-2.5 rounded-full bg-[#4A2880]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
-          <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
+          <span className="h-2.5 w-2.5 rounded-full bg-ash-line" />
+          <span className="h-2.5 w-2.5 rounded-full bg-ash-line" />
         </div>
 
-        <h1 className="text-[2rem] font-bold tracking-tight text-white">Merchant Portal</h1>
-        <p className="mt-2 text-base font-normal text-white/80">Sign in to your account</p>
+        <h1 className="text-[2rem] font-bold tracking-tight text-ash-ink">Merchant Portal</h1>
+        <p className="mt-2 text-base font-normal text-ash-ink">Sign in to your account</p>
 
         {message ? (
           <p
             role="status"
-            className={`mt-4 text-sm ${isError ? 'text-rose-300' : 'text-emerald-300'}`}
+            className={`mt-4 text-sm ${isError ? 'text-ash-tension' : 'text-ash-success'}`}
           >
             {message}
           </p>
@@ -115,7 +115,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
             autoComplete="email"
             placeholder="Email Address"
             aria-invalid={isError}
-            className="obsidian-input"
+            className="ash-input"
           />
 
           <label className="sr-only" htmlFor="merchant-password">
@@ -130,16 +130,16 @@ export function AuthForm({ initialError }: AuthFormProps) {
             onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
             autoComplete="current-password"
             placeholder="Password"
-            className="obsidian-input"
+            className="ash-input"
           />
 
-          <button type="submit" disabled={isPending} className="obsidian-cta mt-2 w-full">
+          <button type="submit" disabled={isPending} className="ash-cta mt-2 w-full">
             {isPending ? 'Signing in…' : 'Log In'}
           </button>
         </form>
       </section>
 
-      <p className="absolute bottom-6 z-20 text-[11px] tracking-wide text-white/35">
+      <p className="absolute bottom-6 z-20 text-[11px] tracking-wide text-ash-subtle">
         Authorized by Ashrium
       </p>
     </main>

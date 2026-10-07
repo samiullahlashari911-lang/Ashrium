@@ -4,23 +4,23 @@ import { useMemo, useState } from 'react';
 
 import { SegmentedToggle } from '@/components/widget/ui/segmented-toggle';
 import { WheelPicker } from '@/components/widget/ui/wheel-picker';
-import { formatHeight, heightDialValues, type HeightUnit } from '@/lib/widget/height-units';
+import { formatWeight, weightWheelValues, type WeightUnit } from '@/lib/widget/weight-units';
 
-interface HeightDialProps {
-  heightCm: number;
-  onChange: (heightCm: number) => void;
+interface WeightDialProps {
+  weightKg: number;
+  onChange: (weightKg: number) => void;
   onInteract?: () => void;
 }
 
-const HEIGHT_UNITS = [
-  { value: 'cm', label: 'cm' },
-  { value: 'ft_in', label: 'ft / in' },
+const WEIGHT_UNITS = [
+  { value: 'kg', label: 'kg' },
+  { value: 'lb', label: 'lb' },
 ] as const;
 
-export function HeightDial({ heightCm, onChange, onInteract }: HeightDialProps): React.JSX.Element {
-  const [unit, setUnit] = useState<HeightUnit>('cm');
+export function WeightDial({ weightKg, onChange, onInteract }: WeightDialProps): React.JSX.Element {
+  const [unit, setUnit] = useState<WeightUnit>('kg');
   const items = useMemo(
-    () => heightDialValues(unit).map((value) => ({ value, label: formatHeight(value, unit) })),
+    () => weightWheelValues(unit).map((value) => ({ value, label: formatWeight(value, unit) })),
     [unit],
   );
 
@@ -28,17 +28,17 @@ export function HeightDial({ heightCm, onChange, onInteract }: HeightDialProps):
     <div className="flex flex-col items-center gap-6">
       <div className="w-48">
         <SegmentedToggle
-          ariaLabel="Height unit"
-          options={HEIGHT_UNITS}
+          ariaLabel="Weight unit"
+          options={WEIGHT_UNITS}
           value={unit}
           onChange={setUnit}
         />
       </div>
       <div className="w-full max-w-[260px]">
         <WheelPicker
-          ariaLabel="Height"
+          ariaLabel="Weight"
           items={items}
-          value={heightCm}
+          value={weightKg}
           onChange={onChange}
           onInteract={onInteract}
         />

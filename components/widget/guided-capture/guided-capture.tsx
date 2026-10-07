@@ -257,12 +257,31 @@ export function GuidedCapture({
     setGpuArmed(false);
   };
 
+  useEffect(() => {
+    if (!warmupError) {
+      return;
+    }
+    // The 45s warm loop keeps retrying; the notice only needs a moment.
+    const timeoutId = window.setTimeout(() => setWarmupError(null), 7_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [warmupError]);
+
   const warmupBanner = warmupError ? (
-    <div className="mx-4 mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-left">
-      <p className="text-sm text-amber-100">{warmupError}</p>
+    <div
+      role="status"
+      className="ash-rise fixed inset-x-3 top-3 z-50 mx-auto flex max-w-md items-start gap-3 rounded-2xl border border-ash-line bg-ash-surface/95 px-4 py-3 text-left shadow-lift"
+      title={warmupError}
+    >
+      <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-[13px] font-semibold text-ash-ink">The fitting studio is still starting</p>
+        <p className="text-xs leading-relaxed text-ash-muted">
+          Keep going. We will try again when you take your photos.
+        </p>
+      </div>
       <button
         type="button"
-        className="mt-2 text-xs font-semibold uppercase tracking-wide text-amber-200 underline"
+        className="shrink-0 rounded-full px-2 py-1 text-xs font-semibold text-ash-accent hover:bg-ash-accent-soft"
         onClick={() => {
           setWarmupError(null);
           void warmShopperGpu(embedToken, gpuSessionKeyRef.current).catch((caught: unknown) => {
@@ -272,7 +291,7 @@ export function GuidedCapture({
           });
         }}
       >
-        Retry GPU warmup
+        Retry
       </button>
     </div>
   ) : null;
@@ -301,6 +320,7 @@ export function GuidedCapture({
         <CaptureViewport
           key={step}
           view={view}
+          sex={intake.sex}
           allowGallery={allowGallery}
           flowStep={step}
           onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
@@ -329,19 +349,19 @@ export function GuidedCapture({
             ? 'Starting live body inference…'
             : 'Preparing a secure upload…';
     return (
-      <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center text-obsidian-ink">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-obsidian-subtle">
+      <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center text-ash-ink">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ash-subtle">
           Building your avatar
         </p>
         <h1 className="text-2xl font-semibold">
           {step === 'uploading' ? 'Uploading photos' : 'Running live MHR fit'}
         </h1>
-        <p className="max-w-sm text-sm text-obsidian-muted">
+        <p className="max-w-sm text-sm text-ash-muted">
           {step === 'uploading'
             ? uploadCopy
             : 'Keep this screen open. Usually under two minutes on a warm GPU. First start of a session can take up to five minutes. Closing Try On stops billing.'}
         </p>
-        <p className="font-mono text-xs text-obsidian-subtle">
+        <p className="font-mono text-xs text-ash-subtle">
           {step === 'inferring'
             ? `${waitSeconds}s elapsed · ${Math.max(0, Math.ceil(SHOPPER_AVATAR_WAIT_MS / 1000) - waitSeconds)}s remaining`
             : `${waitSeconds}s elapsed`}
@@ -351,13 +371,13 @@ export function GuidedCapture({
   }
 
   return (
-    <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 px-6 text-center text-obsidian-ink">
+    <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 px-6 text-center text-ash-ink">
       <h1 className="text-2xl font-semibold">{captureErrorTitle(error)}</h1>
-      <p className="max-w-sm text-sm text-rose-300">{error ?? 'Something went wrong.'}</p>
+      <p className="max-w-sm text-sm text-ash-tension">{error ?? 'Something went wrong.'}</p>
       <button
         type="button"
         onClick={reset}
-        className="obsidian-cta"
+        className="ash-cta"
       >
         Try again
       </button>

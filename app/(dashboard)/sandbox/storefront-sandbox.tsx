@@ -144,9 +144,9 @@ export function StorefrontSandbox({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 p-6">
       <header>
-        <p className="text-sm font-medium text-obsidian-accent-muted">Legendary store mock</p>
-        <h1 className="mt-1 text-3xl font-bold text-obsidian-ink">Product page</h1>
-        <p className="mt-2 text-sm text-obsidian-muted">
+        <p className="text-sm font-medium text-ash-accent">Legendary store mock</p>
+        <h1 className="mt-1 text-3xl font-bold text-ash-ink">Product page</h1>
+        <p className="mt-2 text-sm text-ash-muted">
           Switch garments, then tap Try On above Add to cart. Phone camera only on the live
           storefront; gallery stays sandbox-only. A successful sandbox session is not storefront go-live.
         </p>
@@ -161,12 +161,12 @@ export function StorefrontSandbox({
           action={{ href: '/dashboard/garments', label: 'Open Garments' }}
         />
       ) : (
-        <section className="obsidian-glass overflow-hidden p-0">
-          <div className="border-b border-white/10 bg-obsidian-canvas/40 px-6 py-4">
-            <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-obsidian-subtle">
+        <section className="ash-card overflow-hidden p-0">
+          <div className="border-b border-ash-line bg-ash-canvas/40 px-6 py-4">
+            <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ash-subtle">
               Garment
               <select
-                className="mt-2 block w-full rounded-xl border border-white/10 bg-obsidian-canvas px-3 py-2 text-sm text-obsidian-ink"
+                className="mt-2 block w-full rounded-xl border border-ash-line bg-ash-canvas px-3 py-2 text-sm text-ash-ink"
                 value={selectedSku}
                 onChange={(event) => {
                   setRecommendedSize(null);
@@ -183,30 +183,30 @@ export function StorefrontSandbox({
           </div>
 
           <div className="grid gap-8 px-6 py-8 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            <div className="flex min-h-[320px] items-center justify-center rounded-2xl bg-gradient-to-br from-[#1B1538] to-[#0B0B1E] text-sm text-obsidian-subtle">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl bg-gradient-to-br from-[#1B1538] to-[#0B0B1E] text-sm text-ash-subtle">
               Product photo
             </div>
             <div>
-              <p className="font-mono text-xs text-obsidian-accent-muted">{selectedGarment?.sku}</p>
-              <h2 className="mt-1 text-2xl font-semibold text-obsidian-ink">
+              <p className="font-mono text-xs text-ash-accent">{selectedGarment?.sku}</p>
+              <h2 className="mt-1 text-2xl font-semibold text-ash-ink">
                 {selectedGarment?.name}
               </h2>
               {selectedGarment ? (
-                <p className="mt-1 text-xs text-obsidian-muted">{ingestLabel(selectedGarment)}</p>
+                <p className="mt-1 text-xs text-ash-muted">{ingestLabel(selectedGarment)}</p>
               ) : null}
-              <p className="mt-4 text-sm text-obsidian-muted">
+              <p className="mt-4 text-sm text-ash-muted">
                 Size charts come from the product page. Try On opens a camera overlay — not a gallery.
               </p>
               <div ref={scriptMountRef} className="mt-5" />
               <button
                 type="button"
-                className="mt-2 w-full rounded-full border border-white/15 px-4 py-3 text-sm font-semibold text-obsidian-ink"
+                className="mt-2 w-full rounded-full border border-ash-line px-4 py-3 text-sm font-semibold text-ash-ink"
               >
                 Add to cart
               </button>
               <div className="mt-4 flex items-center gap-3">
-                <span className="text-sm text-obsidian-muted">Recommended size</span>
-                <span className="rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-sm font-semibold text-emerald-200">
+                <span className="text-sm text-ash-muted">Recommended size</span>
+                <span className="rounded-full border border-ash-success/30 bg-ash-success-soft px-3 py-1 text-sm font-semibold text-ash-success">
                   {recommendedSize ?? 'Complete Try On first'}
                 </span>
               </div>
@@ -216,25 +216,25 @@ export function StorefrontSandbox({
       )}
 
       <details
-        className="obsidian-glass p-4 text-sm text-obsidian-muted"
+        className="ash-card p-4 text-sm text-ash-muted"
         open={showLog}
         onToggle={(event) => setShowLog(event.currentTarget.open)}
       >
-        <summary className="cursor-pointer font-semibold text-obsidian-ink">Developer log</summary>
+        <summary className="cursor-pointer font-semibold text-ash-ink">Developer log</summary>
         <ol className="mt-4 flex max-h-[360px] flex-col gap-3 overflow-y-auto pr-1">
           {events.length === 0 ? (
-            <li className="rounded-lg border border-dashed border-white/15 p-4 text-sm text-obsidian-subtle">
+            <li className="rounded-lg border border-dashed border-ash-line p-4 text-sm text-ash-subtle">
               Widget events appear here after Try On.
             </li>
           ) : (
             events.map((event) => (
-              <li key={event.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+              <li key={event.id} className="rounded-lg border border-ash-line bg-white/[0.04] p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-mono text-xs text-obsidian-accent-muted">{event.direction}</span>
-                  <time className="text-xs text-obsidian-subtle">{event.timestamp}</time>
+                  <span className="font-mono text-xs text-ash-accent">{event.direction}</span>
+                  <time className="text-xs text-ash-subtle">{event.timestamp}</time>
                 </div>
-                <p className="mt-2 text-sm font-semibold text-obsidian-ink">{event.type}</p>
-                <pre className="mt-2 overflow-x-auto rounded bg-obsidian-canvas p-2 text-xs text-obsidian-muted">
+                <p className="mt-2 text-sm font-semibold text-ash-ink">{event.type}</p>
+                <pre className="mt-2 overflow-x-auto rounded bg-ash-canvas p-2 text-xs text-ash-muted">
                   {JSON.stringify(event.payload, null, 2)}
                 </pre>
               </li>

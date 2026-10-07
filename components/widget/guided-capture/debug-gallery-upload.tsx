@@ -94,12 +94,12 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
     : null;
 
   return (
-    <section className="rounded-xl border border-dashed border-white/15 bg-obsidian-canvas/40 p-5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-300">
+    <section className="rounded-xl border border-dashed border-ash-line bg-ash-canvas/40 p-5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800">
         Debug only
       </p>
-      <h2 className="mt-1 text-lg font-semibold text-obsidian-ink">Gallery upload</h2>
-      <p className="mt-1 text-sm text-obsidian-muted">
+      <h2 className="mt-1 text-lg font-semibold text-ash-ink">Gallery upload</h2>
+      <p className="mt-1 text-sm text-ash-muted">
         Merchant sandbox only. Storefront capture stays live-camera.
       </p>
 
@@ -112,8 +112,8 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
         />
       ) : (
         <div className="mt-4 flex flex-col gap-4">
-          <p className="text-xs text-obsidian-subtle">Tenant {tenantId}</p>
-          <label className="flex flex-col gap-2 text-sm text-obsidian-muted">
+          <p className="text-xs text-ash-subtle">Tenant {tenantId}</p>
+          <label className="flex flex-col gap-2 text-sm text-ash-muted">
             Front photo
             <input
               type="file"
@@ -121,7 +121,7 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
               onChange={(event) => setFrontFile(event.target.files?.[0] ?? null)}
             />
           </label>
-          <label className="flex flex-col gap-2 text-sm text-obsidian-muted">
+          <label className="flex flex-col gap-2 text-sm text-ash-muted">
             Side photo
             <input
               type="file"
@@ -129,14 +129,14 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
               onChange={(event) => setSideFile(event.target.files?.[0] ?? null)}
             />
           </label>
-          {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+          {error ? <p className="text-sm text-ash-tension">{error}</p> : null}
           <button
             type="button"
             disabled={busy}
             onClick={() => {
               void handleSubmit();
             }}
-            className="obsidian-cta disabled:opacity-50"
+            className="ash-cta disabled:opacity-50"
           >
             {busy ? 'Running live MHR fit…' : 'Upload and infer'}
           </button>
