@@ -269,6 +269,12 @@ def api():
 
     web = FastAPI(title="Ashrium VFR GPU")
 
+    @web.exception_handler(Exception)
+    async def surface_gpu_error(_request: Request, error: Exception) -> JSONResponse:
+        # Surface the real pipeline error to the app (fit_jobs.error_message),
+        # not a bare "Internal Server Error". HTTPException keeps its own handler.
+        return JSONResponse({"detail": f"{type(error).__name__}: {error}"}, status_code=500)
+
     def authorize(request: Request, raw: bytes) -> None:
         try:
             _verify_hmac(
