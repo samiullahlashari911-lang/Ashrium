@@ -42,6 +42,8 @@ hmac_secret = modal.Secret.from_name("ASHRIUM_GPU_HMAC")
 image = (
     modal.Image.from_registry("pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime")
     .apt_install(
+        # gcc/g++ for detectron2's C++ ops (the runtime base image has no compiler).
+        "build-essential",
         "git",
         "wget",
         "libgl1",
