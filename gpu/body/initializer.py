@@ -51,8 +51,18 @@ def huggingface_token(*, required: bool = True) -> str:
 
 def ensure_sam3d_on_path() -> None:
     root = os.environ.get("SAM3D_BODY_ROOT", "/src/sam-3d-body")
-    if os.path.isdir(root) and root not in sys.path:
-        sys.path.insert(0, root)
+    if not os.path.isdir(root):
+        return
+    # The image's sam3dbody.pth appends the root after site-packages, where a
+    # wheel ships its own top-level `tools` package that shadows SAM 3D Body's
+    # tools/ (build_fov_estimator). Put the root first and drop a foreign `tools`.
+    if root in sys.path:
+        sys.path.remove(root)
+    sys.path.insert(0, root)
+    loaded = sys.modules.get("tools")
+    if loaded is not None and not str(getattr(loaded, "__file__", "") or "").startswith(root):
+        for name in [n for n in sys.modules if n == "tools" or n.startswith("tools.")]:
+            del sys.modules[name]
 
 
 def pin_dinov3_torch_hub() -> None:

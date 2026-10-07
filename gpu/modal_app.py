@@ -4,8 +4,8 @@ Weights live in a Volume (not a 37GB Docker image). Next.js calls the HMAC
 HTTP app with fetch. Python inference is gpu/pipeline.py — not Cog.
 """
 
-from __future__ import annotations
-
+# No `from __future__ import annotations`: FastAPI must resolve the
+# function-local `Request` annotation in api(), or it becomes a query param (422).
 import base64
 import hashlib
 import hmac
@@ -69,6 +69,10 @@ image = (
         f"git clone https://github.com/facebookresearch/dinov3.git /src/dinov3 && git -C /src/dinov3 checkout --detach {DINOV3_GIT_SHA}",
         f"git clone https://github.com/maria-korosteleva/GarmentCode.git {GARMENTCODE_ROOT} && git -C {GARMENTCODE_ROOT} checkout --detach {GARMENTCODE_GIT_SHA}",
     )
+    # MoGe pulls a newer huggingface_hub whose HTTP client needs Brotli 1.2
+    # (Decompressor.process(output_buffer_limit=)); the conda base ships older.
+    # braceexpand: SAM 3D Body imports it at module level (sam_3d_body/data/utils/io.py).
+    .pip_install("brotli==1.2.0", "braceexpand==0.1.7")
     .env(
         {
             "ASHRIUM_WEIGHTS_ROOT": WEIGHTS_MOUNT,
