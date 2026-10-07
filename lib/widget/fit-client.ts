@@ -304,6 +304,7 @@ export async function fetchFitJobStatus(
     status,
     parametric_result: readFitParametricVector(record.parametric_result),
     error_message: typeof record.error_message === 'string' ? record.error_message : null,
+    stage: typeof record.stage === 'string' ? record.stage : null,
   };
 }
 
@@ -469,7 +470,7 @@ function isFitResolveResponse(value: unknown): value is FitResolveResponse {
 
 export async function fetchFitDrapeResolve(
   embedToken: string | null,
-  input: { jobId: string; sku: string; allowXpbd?: boolean },
+  input: { jobId: string; sku: string; allowXpbd?: boolean; sizeCode?: string },
 ): Promise<FitResolveResponse> {
   const response = await fetch('/api/v1/fit/resolve', {
     method: 'POST',

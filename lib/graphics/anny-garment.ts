@@ -1,253 +1,12 @@
 import * as THREE from 'three';
 
 import { albedoHexToRgbInteger } from '@/lib/graphics/print-qa';
-import { computeRadialHeatmapColors } from '@/lib/graphics/radial-heatmap';
 
-export type AnnyGarmentKind = 'tee' | 'pant' | 'dress';
-
-/** Cool stone, not skin. GDPR Art. 9 — do not infer a shopper's complexion. */
-export const MANNEQUIN_COLOR = 0x8a90a3;
+/** Porcelain gallery white, not skin. GDPR Art. 9 — do not infer a shopper's complexion. */
+export const MANNEQUIN_COLOR = 0xe8e8ec;
 /** Neutral charcoal undergarment so the body is not a nude grey mesh. */
-export const UNDERGARMENT_COLOR = 0x2a2d38;
+export const UNDERGARMENT_COLOR = 0x3a3c46;
 export const MANNEQUIN_HEAD_START_T = 0.84;
-const UNDERGARMENT_THICKNESS_M = 0.004;
-
-export interface AnnyGarmentSize {
-  chestCm: number;
-  waistCm: number;
-  hipCm: number;
-}
-
-const SLICE_BINS = 48;
-const FABRIC_THICKNESS_M = 0.006;
-
-function girthRadiusM(circumferenceCm: number): number {
-  return circumferenceCm / 100 / (2 * Math.PI);
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-function vertexInRegion(t: number, kind: AnnyGarmentKind): boolean {
-  if (kind === 'pant') {
-    return t >= 0.02 && t <= 0.58;
-  }
-
-  if (kind === 'dress') {
-    return t >= 0.18 && t <= 0.86;
-  }
-
-  return t >= 0.47 && t <= 0.86;
-}
-
-function sizeRadiusAtT(t: number, size: AnnyGarmentSize): number {
-  const chestT = 0.72;
-  const waistT = 0.58;
-  const hipT = 0.5;
-  const chestR = girthRadiusM(size.chestCm);
-  const waistR = girthRadiusM(size.waistCm);
-  const hipR = girthRadiusM(size.hipCm);
-  const ankleR = hipR * 0.55;
-
-  if (t >= chestT) {
-    return lerp(chestR, chestR * 0.72, Math.min((t - chestT) / 0.14, 1));
-  }
-
-  if (t >= waistT) {
-    return lerp(waistR, chestR, (t - waistT) / (chestT - waistT));
-  }
-
-  if (t >= hipT) {
-    return lerp(hipR, waistR, (t - hipT) / (waistT - hipT));
-  }
-
-  return lerp(ankleR, hipR, t / hipT);
-}
-
-function median(values: number[]): number {
-  if (values.length === 0) {
-    return 0;
-  }
-
-  const sorted = [...values].sort((left, right) => left - right);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 0) {
-    return (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
-  return sorted[mid];
-}
-
-function readIndexArray(geometry: THREE.BufferGeometry): Uint32Array {
-  const index = geometry.getIndex();
-  if (!index) {
-    const count = geometry.getAttribute('position').count;
-    const sequential = new Uint32Array(count);
-    for (let cursor = 0; cursor < count; cursor += 1) {
-      sequential[cursor] = cursor;
-    }
-    return sequential;
-  }
-
-  const source = index.array;
-  const copy = new Uint32Array(source.length);
-  for (let cursor = 0; cursor < source.length; cursor += 1) {
-    copy[cursor] = source[cursor];
-  }
-  return copy;
-}
-
-/**
- * Builds a tee, pant, or dress shell from the deformed ANNY hull.
- * Vertices stay bound to hull topology; radial offset follows recommended girths.
- */
-export function buildAnnyGarmentGeometry(
-  hullMesh: THREE.Mesh,
-  kind: AnnyGarmentKind,
-  size: AnnyGarmentSize,
-  easeCm: number,
-): THREE.BufferGeometry | null {
-  const positionAttr = hullMesh.geometry.getAttribute('position');
-  if (!positionAttr || positionAttr.count < 3) {
-    return null;
-  }
-
-  const vertexCount = positionAttr.count;
-  const world = new Float32Array(vertexCount * 3);
-  const scratch = new THREE.Vector3();
-
-  for (let index = 0; index < vertexCount; index += 1) {
-    hullMesh.getVertexPosition(index, scratch);
-    if (hullMesh instanceof THREE.SkinnedMesh) {
-      hullMesh.applyBoneTransform(index, scratch);
-    }
-    hullMesh.localToWorld(scratch);
-    const base = index * 3;
-    world[base] = scratch.x;
-    world[base + 1] = scratch.y;
-    world[base + 2] = scratch.z;
-  }
-
-  let yMin = Number.POSITIVE_INFINITY;
-  let yMax = Number.NEGATIVE_INFINITY;
-  for (let index = 0; index < vertexCount; index += 1) {
-    const y = world[index * 3 + 1];
-    yMin = Math.min(yMin, y);
-    yMax = Math.max(yMax, y);
-  }
-
-  const height = yMax - yMin;
-  if (height <= 1e-4) {
-    return null;
-  }
-
-  const radii = new Float32Array(vertexCount);
-  const ts = new Float32Array(vertexCount);
-  for (let index = 0; index < vertexCount; index += 1) {
-    const base = index * 3;
-    const x = world[base];
-    const y = world[base + 1];
-    const z = world[base + 2];
-    ts[index] = (y - yMin) / height;
-    radii[index] = Math.hypot(x, z);
-  }
-
-  const binValues: number[][] = Array.from({ length: SLICE_BINS }, () => []);
-  for (let index = 0; index < vertexCount; index += 1) {
-    const bin = Math.min(SLICE_BINS - 1, Math.floor(ts[index] * SLICE_BINS));
-    binValues[bin].push(radii[index]);
-  }
-
-  const sliceMedian = new Float32Array(SLICE_BINS);
-  for (let bin = 0; bin < SLICE_BINS; bin += 1) {
-    const values = binValues[bin];
-    const cutoff = values.length === 0 ? 0 : [...values].sort((a, b) => a - b)[Math.floor(values.length * 0.55)];
-    const core = values.filter((value) => value <= cutoff * 1.08 + 1e-6);
-    sliceMedian[bin] = median(core.length > 0 ? core : values);
-  }
-
-  const included = new Uint8Array(vertexCount);
-  for (let index = 0; index < vertexCount; index += 1) {
-    included[index] = vertexInRegion(ts[index], kind) ? 1 : 0;
-  }
-
-  const sourceIndex = readIndexArray(hullMesh.geometry);
-  const compactFaces: number[] = [];
-  const oldToNew = new Int32Array(vertexCount).fill(-1);
-  const used: number[] = [];
-
-  const remember = (vertex: number): number => {
-    if (oldToNew[vertex] >= 0) {
-      return oldToNew[vertex];
-    }
-
-    const next = used.length;
-    oldToNew[vertex] = next;
-    used.push(vertex);
-    return next;
-  };
-
-  for (let offset = 0; offset + 2 < sourceIndex.length; offset += 3) {
-    const a = sourceIndex[offset];
-    const b = sourceIndex[offset + 1];
-    const c = sourceIndex[offset + 2];
-    if (!included[a] || !included[b] || !included[c]) {
-      continue;
-    }
-
-    compactFaces.push(remember(a), remember(b), remember(c));
-  }
-
-  if (used.length < 3 || compactFaces.length < 3) {
-    return null;
-  }
-
-  const positions = new Float32Array(used.length * 3);
-  const clearances = new Float32Array(used.length);
-  const normals = new Float32Array(used.length * 3);
-
-  for (let compact = 0; compact < used.length; compact += 1) {
-    const source = used[compact];
-    const base = source * 3;
-    const x = world[base];
-    const y = world[base + 1];
-    const z = world[base + 2];
-    const t = ts[source];
-    const bodyR = radii[source];
-    const bin = Math.min(SLICE_BINS - 1, Math.floor(t * SLICE_BINS));
-    const torsoR = sliceMedian[bin] > 1e-5 ? sliceMedian[bin] : bodyR;
-    const targetR = sizeRadiusAtT(t, size);
-    const radialClearanceM = targetR - torsoR;
-    clearances[compact] = radialClearanceM * 100;
-
-    const dirLen = Math.hypot(x, z);
-    const nx = dirLen > 1e-6 ? x / dirLen : 0;
-    const nz = dirLen > 1e-6 ? z / dirLen : 0;
-    const offset = Math.max(FABRIC_THICKNESS_M, radialClearanceM);
-    const outR = bodyR + offset;
-    const outBase = compact * 3;
-    positions[outBase] = nx * outR;
-    positions[outBase + 1] = y;
-    positions[outBase + 2] = nz * outR;
-    normals[outBase] = nx;
-    normals[outBase + 1] = 0;
-    normals[outBase + 2] = nz;
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-  geometry.setAttribute(
-    'color',
-    new THREE.BufferAttribute(computeRadialHeatmapColors(clearances, easeCm), 3),
-  );
-  geometry.setAttribute('uv', new THREE.BufferAttribute(garmentCodeUvsFromPositions(positions), 2));
-  geometry.setIndex(compactFaces);
-  geometry.computeVertexNormals();
-
-  return geometry;
-}
 
 /**
  * Cylindrical UVs matching the GarmentCode rest-length wrap
@@ -282,9 +41,27 @@ export function garmentCodeUvsFromPositions(positions: Float32Array): Float32Arr
   return uvs;
 }
 
+/** Chin height as a fraction of stature; the head ellipsoid spans chin → crown. */
+const MANNEQUIN_CHIN_T = 0.865;
+
+function percentile(values: number[], fraction: number): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.floor(fraction * (sorted.length - 1)))];
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = Math.min(1, Math.max(0, (value - edge0) / Math.max(edge1 - edge0, 1e-6)));
+  return t * t * (3 - 2 * t);
+}
+
 /**
- * Replaces the head with a featureless dome so the avatar is a mannequin,
- * not a face. Mutates the xyz buffer in place.
+ * Sculpts the head into a smooth gallery-mannequin ellipsoid sized to the
+ * shopper's own head: nose, lips, brows, and ears are projected onto the
+ * surface, so the avatar keeps a natural head without a face. Blends through
+ * the neck so there is no seam. Mutates the xyz buffer in place.
  */
 export function sealMannequinHead(
   positions: Float32Array,
@@ -309,22 +86,33 @@ export function sealMannequinHead(
   }
 
   const neckY = yMin + height * headStartT;
-  const neckBand = height * 0.02;
-  const neckRadii: number[] = [];
+  const chinY = Math.max(neckY + height * 0.005, yMin + height * MANNEQUIN_CHIN_T);
+  const headXs: number[] = [];
+  const headZs: number[] = [];
   for (let index = 0; index < vertexCount; index += 1) {
     const base = index * 3;
-    const y = positions[base + 1];
-    if (Math.abs(y - neckY) <= neckBand) {
-      neckRadii.push(Math.hypot(positions[base], positions[base + 2]));
+    if (positions[base + 1] >= chinY) {
+      headXs.push(positions[base]);
+      headZs.push(positions[base + 2]);
     }
   }
+  if (headXs.length === 0) {
+    return;
+  }
 
-  neckRadii.sort((left, right) => left - right);
-  const neckR = neckRadii.length > 0
-    ? neckRadii[Math.floor(neckRadii.length / 2)]
-    : height * 0.055;
-  const capHeight = neckR * 0.42;
-  const capRadius = neckR * 0.7;
+  const centreX = (percentile(headXs, 0.05) + percentile(headXs, 0.95)) / 2;
+  const centreZ = (percentile(headZs, 0.05) + percentile(headZs, 0.95)) / 2;
+  // Percentiles ignore ears and the nose tip when sizing the skull.
+  const semiX = Math.min(
+    Math.max(percentile(headXs.map((x) => Math.abs(x - centreX)), 0.85), height * 0.035),
+    height * 0.06,
+  );
+  const semiZ = Math.min(
+    Math.max(percentile(headZs.map((z) => Math.abs(z - centreZ)), 0.85), height * 0.045),
+    height * 0.07,
+  );
+  const semiY = (yMax - chinY) / 2;
+  const centreY = yMax - semiY;
 
   for (let index = 0; index < vertexCount; index += 1) {
     const base = index * 3;
@@ -335,14 +123,20 @@ export function sealMannequinHead(
       continue;
     }
 
-    const t = Math.min((y - neckY) / Math.max(yMax - neckY, 1e-5), 1);
-    const radius = Math.hypot(x, z);
-    const nx = radius > 1e-6 ? x / radius : 0;
-    const nz = radius > 1e-6 ? z / radius : 1;
-    const dome = Math.sqrt(Math.max(0, 1 - t * t));
-    positions[base] = nx * capRadius * dome;
-    positions[base + 1] = neckY + capHeight * t;
-    positions[base + 2] = nz * capRadius * dome;
+    const dx = x - centreX;
+    const dy = Math.max(y, chinY - semiY * 0.6) - centreY;
+    const dz = z - centreZ;
+    const reach = Math.sqrt((dx / semiX) ** 2 + (dy / semiY) ** 2 + (dz / semiZ) ** 2);
+    if (reach <= 1e-6) {
+      continue;
+    }
+    const projectedX = centreX + dx / reach;
+    const projectedY = centreY + dy / reach;
+    const projectedZ = centreZ + dz / reach;
+    const weight = smoothstep(neckY, chinY, y);
+    positions[base] = x + (projectedX - x) * weight;
+    positions[base + 1] = y + (projectedY - y) * weight;
+    positions[base + 2] = z + (projectedZ - z) * weight;
   }
 }
 
@@ -367,17 +161,8 @@ export function applyFacelessMannequin(mesh: THREE.Mesh): void {
 export function createMannequinMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color: MANNEQUIN_COLOR,
-    roughness: 0.88,
-    metalness: 0.02,
-  });
-}
-
-export function createUndergarmentMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: UNDERGARMENT_COLOR,
-    roughness: 0.78,
-    metalness: 0,
-    side: THREE.DoubleSide,
+    roughness: 0.46,
+    metalness: 0.0,
   });
 }
 
@@ -413,103 +198,65 @@ export function applyMannequinMaterial(root: THREE.Object3D): void {
   });
 }
 
-function vertexInUndergarment(t: number): boolean {
-  return t >= 0.46 && t <= 0.8;
+/** Soft band 0→1→0 between lo and hi with `feather` fade on both edges. */
+function band(value: number, lo: number, hi: number, feather: number): number {
+  const rise = Math.min(1, Math.max(0, (value - lo) / feather));
+  const fall = Math.min(1, Math.max(0, (hi - value) / feather));
+  return Math.min(rise, fall);
 }
 
-/** Neutral tank/brief layer so the mannequin is not a nude grey mesh. */
-export function buildUndergarmentGeometry(hullMesh: THREE.Mesh): THREE.BufferGeometry | null {
-  const positionAttr = hullMesh.geometry.getAttribute('position');
-  if (!positionAttr || positionAttr.count < 3) {
-    return null;
-  }
-
-  const vertexCount = positionAttr.count;
-  const world = new Float32Array(vertexCount * 3);
-  const scratch = new THREE.Vector3();
-
-  for (let index = 0; index < vertexCount; index += 1) {
-    hullMesh.getVertexPosition(index, scratch);
-    if (hullMesh instanceof THREE.SkinnedMesh) {
-      hullMesh.applyBoneTransform(index, scratch);
-    }
-    hullMesh.localToWorld(scratch);
-    const base = index * 3;
-    world[base] = scratch.x;
-    world[base + 1] = scratch.y;
-    world[base + 2] = scratch.z;
+/**
+ * Paints a neutral graphite tank and briefs onto the mannequin as vertex
+ * colours, with feathered edges, so the body is never a nude mesh and there
+ * is no separate shell to z-fight. Bands are fractions of stature; arms and
+ * hands are excluded by distance from the body's centre line.
+ */
+export function paintMannequinUndergarment(mesh: THREE.Mesh): void {
+  const position = mesh.geometry.getAttribute('position');
+  if (!position || position.count < 3) {
+    return;
   }
 
   let yMin = Number.POSITIVE_INFINITY;
   let yMax = Number.NEGATIVE_INFINITY;
-  for (let index = 0; index < vertexCount; index += 1) {
-    const y = world[index * 3 + 1];
+  let xSum = 0;
+  for (let index = 0; index < position.count; index += 1) {
+    const y = position.getY(index);
     yMin = Math.min(yMin, y);
     yMax = Math.max(yMax, y);
+    xSum += position.getX(index);
   }
-
   const height = yMax - yMin;
   if (height <= 1e-4) {
-    return null;
+    return;
   }
 
-  const included = new Uint8Array(vertexCount);
-  for (let index = 0; index < vertexCount; index += 1) {
-    const t = (world[index * 3 + 1] - yMin) / height;
-    included[index] = vertexInUndergarment(t) ? 1 : 0;
+  const centreX = xSum / position.count;
+  const skin = new THREE.Color(MANNEQUIN_COLOR);
+  const garment = new THREE.Color(UNDERGARMENT_COLOR);
+  const colors = new Float32Array(position.count * 3);
+  const feather = height * 0.014;
+  const mixed = new THREE.Color();
+  for (let index = 0; index < position.count; index += 1) {
+    const y = position.getY(index) - yMin;
+    const lateral = Math.abs(position.getX(index) - centreX);
+    const briefs = band(y, height * 0.458, height * 0.565, feather)
+      * band(-lateral, -height * 0.13, height, feather);
+    const top = band(y, height * 0.668, height * 0.778, feather)
+      * band(-lateral, -height * 0.104, height, feather);
+    mixed.copy(skin).lerp(garment, Math.max(briefs, top));
+    colors[index * 3] = mixed.r;
+    colors[index * 3 + 1] = mixed.g;
+    colors[index * 3 + 2] = mixed.b;
   }
 
-  const sourceIndex = readIndexArray(hullMesh.geometry);
-  const compactFaces: number[] = [];
-  const oldToNew = new Int32Array(vertexCount).fill(-1);
-  const used: number[] = [];
-
-  const remember = (vertex: number): number => {
-    if (oldToNew[vertex] >= 0) {
-      return oldToNew[vertex];
+  mesh.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  materials.forEach((material) => {
+    if (material instanceof THREE.MeshStandardMaterial) {
+      material.color.set(0xffffff);
+      material.vertexColors = true;
+      material.needsUpdate = true;
     }
-
-    const next = used.length;
-    oldToNew[vertex] = next;
-    used.push(vertex);
-    return next;
-  };
-
-  for (let offset = 0; offset + 2 < sourceIndex.length; offset += 3) {
-    const a = sourceIndex[offset];
-    const b = sourceIndex[offset + 1];
-    const c = sourceIndex[offset + 2];
-    if (!included[a] || !included[b] || !included[c]) {
-      continue;
-    }
-
-    compactFaces.push(remember(a), remember(b), remember(c));
-  }
-
-  if (used.length < 3 || compactFaces.length < 3) {
-    return null;
-  }
-
-  const positions = new Float32Array(used.length * 3);
-  for (let compact = 0; compact < used.length; compact += 1) {
-    const source = used[compact];
-    const base = source * 3;
-    const x = world[base];
-    const y = world[base + 1];
-    const z = world[base + 2];
-    const dirLen = Math.hypot(x, z);
-    const nx = dirLen > 1e-6 ? x / dirLen : 0;
-    const nz = dirLen > 1e-6 ? z / dirLen : 0;
-    const bodyR = dirLen;
-    const outBase = compact * 3;
-    positions[outBase] = nx * (bodyR + UNDERGARMENT_THICKNESS_M);
-    positions[outBase + 1] = y;
-    positions[outBase + 2] = nz * (bodyR + UNDERGARMENT_THICKNESS_M);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setIndex(compactFaces);
-  geometry.computeVertexNormals();
-  return geometry;
+  });
 }

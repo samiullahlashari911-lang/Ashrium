@@ -11,7 +11,11 @@ export interface ResolveRequest {
   jobId: string;
   sku: string;
   allowXpbd?: boolean;
+  /** Shopper picked another size to try on; defaults to the recommended size. */
+  sizeCode?: string;
 }
+
+const SIZE_CODE_MAX_LENGTH = 24;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -46,6 +50,14 @@ export function parseResolveRequest(value: unknown): ResolveRequest | null {
     || typeof value.sku !== 'string'
     || value.sku.trim().length === 0
     || (value.allowXpbd !== undefined && typeof value.allowXpbd !== 'boolean')
+    || (
+      value.sizeCode !== undefined
+      && (
+        typeof value.sizeCode !== 'string'
+        || value.sizeCode.trim().length === 0
+        || value.sizeCode.length > SIZE_CODE_MAX_LENGTH
+      )
+    )
   ) {
     return null;
   }
@@ -54,5 +66,6 @@ export function parseResolveRequest(value: unknown): ResolveRequest | null {
     jobId: value.jobId,
     sku: value.sku,
     ...(value.allowXpbd === undefined ? {} : { allowXpbd: value.allowXpbd }),
+    ...(typeof value.sizeCode === 'string' ? { sizeCode: value.sizeCode.trim() } : {}),
   };
 }

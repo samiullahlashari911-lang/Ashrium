@@ -9,6 +9,28 @@ import { createServiceClient } from '@/lib/supabase/service';
 
 const PUBLIC_JOB_COLUMNS = 'id, status, parametric_result, error_message, created_at, updated_at';
 
+/**
+ * Live GPU stage for the loading pill. Read separately and best-effort so the
+ * status poll never depends on the progress column existing.
+ */
+async function readProgressStage(
+  supabase: ReturnType<typeof createServiceClient>,
+  jobId: string,
+  tenantId: string,
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('fit_jobs')
+      .select('progress_stage')
+      .eq('id', jobId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    return !error && data && typeof data.progress_stage === 'string' ? data.progress_stage : null;
+  } catch {
+    return null;
+  }
+}
+
 function publicJobPayload(job: {
   id: string;
   status: string;
@@ -113,9 +135,10 @@ export async function GET(request: Request): Promise<Response> {
     .eq('tenant_id', tenantId)
     .maybeSingle();
 
-  if (!refreshError && refreshed) {
-    return Response.json({ job: publicJobPayload(refreshed) });
-  }
+  const latest = !refreshError && refreshed ? refreshed : job;
+  const stage = latest.status === 'pending' || latest.status === 'processing'
+    ? await readProgressStage(supabase, jobId, tenantId)
+    : null;
 
-  return Response.json({ job: publicJobPayload(job) });
+  return Response.json({ job: { ...publicJobPayload(latest), stage } });
 }

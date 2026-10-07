@@ -53,6 +53,11 @@ export interface ResolveFitDrapeInput {
   sku: string;
   /** When true, run Cog task=drape on cache miss. When false, probe cache only. */
   allowXpbd?: boolean;
+  /**
+   * Shopper chose another size to see on the avatar. Only re-targets the
+   * drape; the recommended size number still comes from girths + chart.
+   */
+  sizeCode?: string;
 }
 
 function unavailable(
@@ -414,7 +419,16 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
     return unavailable(MHR_TOPOLOGY_VERSION);
   }
 
-  const size = recommendSize(measurements, storefront.category, storefront.sizeVariants);
+  const recommended = recommendSize(measurements, storefront.category, storefront.sizeVariants);
+  const requested = input.sizeCode
+    ? storefront.sizeVariants.find(
+      (variant) => variant.sizeCode.toLowerCase() === input.sizeCode?.toLowerCase(),
+    )
+    : undefined;
+  if (input.sizeCode && !requested) {
+    return unavailable(mhr ? MHR_TOPOLOGY_VERSION : ANNY_TOPOLOGY_VERSION);
+  }
+  const size = requested ? { variantId: requested.id } : recommended;
   if (!size.variantId) {
     return unavailable(mhr ? MHR_TOPOLOGY_VERSION : ANNY_TOPOLOGY_VERSION);
   }

@@ -50,6 +50,7 @@ export async function POST(request: Request): Promise<Response> {
       jobId: body.jobId,
       sku: body.sku.trim(),
       allowXpbd: body.allowXpbd,
+      sizeCode: body.sizeCode,
     });
 
     return Response.json({

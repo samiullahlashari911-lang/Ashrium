@@ -154,7 +154,8 @@ def prefetch_weights() -> dict:
     min_containers=0,
     max_containers=3,
     volumes={WEIGHTS_MOUNT: weights},
-    secrets=[hf_secret],
+    # HMAC lets task=body sign stage callbacks back to the app (gpu/progress.py).
+    secrets=[hf_secret, hmac_secret],
 )
 class AshriumGpu:
     @modal.enter()
@@ -179,7 +180,10 @@ class AshriumGpu:
         height_cm: float,
         sex: str,
         weight_kg: float,
+        progress: dict | None = None,
     ) -> dict:
+        from progress import make_stage_reporter
+
         with tempfile.TemporaryDirectory() as tmp:
             front = _write_b64_image(front_image_b64, Path(tmp) / "front.webp")
             side = _write_b64_image(side_image_b64, Path(tmp) / "side.webp")
@@ -189,6 +193,7 @@ class AshriumGpu:
                 height_cm=float(height_cm),
                 sex=sex,
                 weight_kg=float(weight_kg or 0),
+                on_stage=make_stage_reporter(progress),
             )
 
     @modal.method()
@@ -294,6 +299,7 @@ def api():
             height_cm=float(payload.get("height_cm") or 0),
             sex=str(payload.get("sex") or "unspecified"),
             weight_kg=float(payload.get("weight_kg") or 0),
+            progress=payload.get("progress") if isinstance(payload.get("progress"), dict) else None,
         )
         return JSONResponse(result)
 

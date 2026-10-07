@@ -152,8 +152,13 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(vercel, /\/api\/v1\/cron\/gpu-guard/);
   assert.match(vercel, /0 0 \* \* \*/);
   assert.match(capture, /SHOPPER_AVATAR_WAIT_MS/);
-  assert.match(capture, /Keep this screen open/);
-  assert.match(capture, /five minutes/);
+  const loader = readFileSync(
+    path.join(process.cwd(), 'components/widget/loading/avatar-loading.tsx'),
+    'utf8',
+  );
+  assert.match(capture, /AvatarLoading/);
+  assert.match(loader, /Keep this screen open/);
+  assert.match(loader, /Starting a fresh GPU/);
   assert.match(capture, /onConsentPassed/);
   assert.match(capture, /gpuArmed/);
   assert.match(capture, /pagehide/);

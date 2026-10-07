@@ -9,7 +9,6 @@ import {
   type GuidedCaptureResult,
 } from '@/components/widget/guided-capture/guided-capture';
 import { recommendFit } from '@/lib/fit/recommend';
-import { garmentKindFromCategory } from '@/lib/fit/size-recommend';
 import { readFitResiduals } from '@/types/hmr';
 
 export interface WidgetPreviewClientProps {
@@ -53,10 +52,6 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
             parametric={result.parametric}
             heightCm={result.session.heightCm}
             garment={{
-              kind: garmentKindFromCategory('tee'),
-              chestCm: recommendation.size.chestCm,
-              waistCm: recommendation.size.waistCm,
-              hipCm: recommendation.size.hipCm,
               easeCm: recommendation.ease.chestCm,
             }}
             className="min-h-[520px] flex-1 w-full"

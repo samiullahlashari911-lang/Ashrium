@@ -27,6 +27,8 @@ export interface RunBodyInput {
   heightCm: number;
   sex: CaptureSex;
   weightKg?: number;
+  /** Where Modal posts live stage callbacks for the shopper's loading pill. */
+  progress?: { url: string; jobId: string; tenantId: string } | null;
 }
 
 export interface RunDrapeInput {
@@ -738,6 +740,15 @@ export async function runBodyPrediction(
       height_cm: input.heightCm,
       sex: input.sex,
       weight_kg: input.weightKg ?? 0,
+      ...(input.progress
+        ? {
+            progress: {
+              url: input.progress.url,
+              job_id: input.progress.jobId,
+              tenant_id: input.progress.tenantId,
+            },
+          }
+        : {}),
     },
     options?.timeoutMs ?? 280_000,
   );

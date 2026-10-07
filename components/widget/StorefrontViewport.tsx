@@ -4,14 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AshriumWordmark } from '@/components/brand/ashrium-logo';
 import { AnnyCanvas } from '@/components/vfr/anny-canvas';
-import { ConfidenceBadge } from '@/components/vfr/confidence-badge';
+import { ConfidenceBadge, approximateReasons } from '@/components/vfr/confidence-badge';
 import {
   GuidedCapture,
   type GuidedCaptureResult,
 } from '@/components/widget/guided-capture/guided-capture';
 import { evaluateConfidenceGate } from '@/lib/fit/confidence-gate';
 import { recommendFit } from '@/lib/fit/recommend';
-import { garmentKindFromCategory } from '@/lib/fit/size-recommend';
 import {
   fetchFitDrapeResolve,
   fetchFitRecommendation,
@@ -30,6 +29,11 @@ interface StorefrontViewportProps {
   embedToken: string;
   allowGallery?: boolean;
 }
+
+/** Drape for the recommended size is fetched before its size code is known. */
+const RECOMMENDED_DRAPE_KEY = '__recommended__';
+
+type DrapeEntry = FitResolveResponse | 'loading' | 'failed';
 
 function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation {
   return {
@@ -57,6 +61,10 @@ function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation
   };
 }
 
+function drapeReady(entry: DrapeEntry | undefined): entry is FitResolveResponse {
+  return typeof entry === 'object' && entry !== null && entry.payloadBase64 !== null;
+}
+
 export function StorefrontViewport({
   garments,
   initialSku,
@@ -72,18 +80,28 @@ export function StorefrontViewport({
   );
   const [result, setResult] = useState<GuidedCaptureResult | null>(null);
   const [remoteRecommendation, setRemoteRecommendation] = useState<FitRecommendation | null>(null);
-  const [drapeResolve, setDrapeResolve] = useState<FitResolveResponse | null>(null);
+  const [drapes, setDrapes] = useState<Record<string, DrapeEntry>>({});
+  const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
   const [clientPrintQaPassed, setClientPrintQaPassed] = useState<boolean | null>(null);
+  const [addedSize, setAddedSize] = useState<string | null>(null);
 
   const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
-  const handleComplete = useCallback((next: GuidedCaptureResult) => {
+  const resetFitting = useCallback(() => {
     emittedSizeRef.current = null;
     setRemoteRecommendation(null);
-    setDrapeResolve(null);
+    setDrapes({});
+    setSelectedSize(null);
+    setShowHeatmap(false);
     setClientPrintQaPassed(null);
-    setResult(next);
+    setAddedSize(null);
   }, []);
+
+  const handleComplete = useCallback((next: GuidedCaptureResult) => {
+    resetFitting();
+    setResult(next);
+  }, [resetFitting]);
 
   useEffect(() => {
     return subscribeToHostEvents(targetOrigin, (event) => {
@@ -151,6 +169,7 @@ export function StorefrontViewport({
     });
   }, [activeGarment, printQaPassed, result]);
 
+  // Recommendation + the recommended size's drape (cache hit or Newton).
   useEffect(() => {
     if (!result?.session.fitJobId || !activeSku) {
       return;
@@ -158,7 +177,7 @@ export function StorefrontViewport({
 
     let cancelled = false;
     setRemoteRecommendation(null);
-    setDrapeResolve(null);
+    setDrapes({ [RECOMMENDED_DRAPE_KEY]: 'loading' });
     setClientPrintQaPassed(null);
 
     void fetchFitRecommendation(embedToken, {
@@ -184,12 +203,12 @@ export function StorefrontViewport({
     })
       .then((drape) => {
         if (!cancelled) {
-          setDrapeResolve(drape);
+          setDrapes((current) => ({ ...current, [RECOMMENDED_DRAPE_KEY]: drape }));
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setDrapeResolve(null);
+          setDrapes((current) => ({ ...current, [RECOMMENDED_DRAPE_KEY]: 'failed' }));
         }
       });
 
@@ -198,13 +217,16 @@ export function StorefrontViewport({
     };
   }, [activeSku, embedToken, result]);
 
+  const recommendedDrape = drapes[RECOMMENDED_DRAPE_KEY];
+
   const recommendation = useMemo((): FitRecommendation | null => {
     const base = remoteRecommendation ?? localRecommendation;
     if (!base || !activeGarment) {
       return base;
     }
 
-    if (!drapeResolve && printQaPassed) {
+    const drape = typeof recommendedDrape === 'object' ? recommendedDrape : null;
+    if (!drape && printQaPassed) {
       return base;
     }
 
@@ -212,28 +234,55 @@ export function StorefrontViewport({
       heightResidualCm: null,
       clothingResidual: null,
     };
+    // Re-evaluated whenever a drape lands, at any wait — no client cutoff.
     const gate = evaluateConfidenceGate({
       captureGatesPassed: base.gate.capturePassed,
       ingestTier: activeGarment.ingestTier,
       approximateFit: activeGarment.approximateFit || !printQaPassed,
-      hnswSimilarity: drapeResolve?.similarity ?? base.gate.hnswSimilarity,
-      xpbdCompleted: Boolean(drapeResolve?.xpbdCompleted || base.gate.xpbdCompleted),
+      hnswSimilarity: drape?.similarity ?? base.gate.hnswSimilarity,
+      xpbdCompleted: Boolean(drape?.xpbdCompleted || base.gate.xpbdCompleted),
       heightResidualCm: residuals.heightResidualCm,
       clothingResidual: residuals.clothingResidual,
       printQaPassed,
     });
 
     return { ...base, gate };
-  }, [
-    activeGarment,
-    drapeResolve,
-    localRecommendation,
-    printQaPassed,
-    remoteRecommendation,
-    result,
-  ]);
+  }, [activeGarment, localRecommendation, printQaPassed, recommendedDrape, remoteRecommendation, result]);
 
-  const drapePayloadBase64 = drapeResolve?.payloadBase64 ?? null;
+  const recommendedSize = recommendation?.size.sizeCode ?? null;
+  const activeSize = selectedSize ?? recommendedSize;
+  const showingRecommended = activeSize !== null && activeSize === recommendedSize;
+  const activeDrapeEntry = showingRecommended || activeSize === null
+    ? recommendedDrape
+    : drapes[activeSize];
+
+  // Shopper picked another size: drape that one on the same avatar.
+  useEffect(() => {
+    if (!result?.session.fitJobId || !activeSize || showingRecommended || drapes[activeSize]) {
+      return;
+    }
+    let cancelled = false;
+    setDrapes((current) => ({ ...current, [activeSize]: 'loading' }));
+    void fetchFitDrapeResolve(embedToken, {
+      jobId: result.session.fitJobId,
+      sku: activeSku,
+      allowXpbd: true,
+      sizeCode: activeSize,
+    })
+      .then((drape) => {
+        if (!cancelled) {
+          setDrapes((current) => ({ ...current, [activeSize]: drape }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDrapes((current) => ({ ...current, [activeSize]: 'failed' }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSize, activeSku, drapes, embedToken, result, showingRecommended]);
 
   useEffect(() => {
     if (!recommendation?.gate.highConfidence) {
@@ -252,78 +301,228 @@ export function StorefrontViewport({
     );
   }, [activeSku, recommendation, targetOrigin]);
 
+  const drapePayloadBase64 = drapeReady(activeDrapeEntry) && printQaPassed
+    ? activeDrapeEntry.payloadBase64
+    : null;
+  const heatmapAvailable = drapePayloadBase64 !== null;
+  const draping = activeDrapeEntry === 'loading';
+
   const canvasGarment = recommendation
     ? {
-        kind: garmentKindFromCategory(activeGarment?.category ?? recommendation.category),
-        chestCm: recommendation.size.chestCm,
-        waistCm: recommendation.size.waistCm,
-        hipCm: recommendation.size.hipCm,
         easeCm: recommendation.ease.chestCm,
         albedoUrl: printQaPassed ? activeGarment?.albedoUrl ?? null : null,
         printQaPassed,
       }
     : null;
 
+  const sizeOptions = activeGarment?.sizeVariants.map((variant) => variant.sizeCode) ?? [];
+  const reasons = recommendation && !recommendation.gate.highConfidence
+    ? approximateReasons(recommendation.gate)
+    : [];
+
+  const statusChip = !printQaPassed
+    ? 'Showing your body; garment preview is off for this product'
+    : draping
+      ? `Dressing you in size ${activeSize ?? ''}…`
+      : drapePayloadBase64
+        ? `Size ${activeSize ?? ''} on your avatar`
+        : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64)
+          ? `Approximate preview of size ${activeSize ?? ''}`
+          : 'Building your fitting';
+
   return (
     <main
       ref={rootRef}
       className={
         result
-          ? 'relative min-h-[520px] overflow-x-hidden overflow-y-auto bg-ash-canvas text-ash-ink'
+          ? 'relative min-h-[100dvh] overflow-x-hidden bg-ash-canvas text-ash-ink'
           : 'relative h-[100dvh] overflow-hidden bg-ash-canvas text-ash-ink'
       }
     >
       {result ? (
-        <div className="flex flex-col">
-          <AnnyCanvas
-            parametric={result.parametric}
-            heightCm={result.session.heightCm}
-            garment={canvasGarment}
-            drapePayloadBase64={printQaPassed ? drapePayloadBase64 : null}
-            onPrintQaFail={() => setClientPrintQaPassed(false)}
-            className="h-[min(78vw,640px)] min-h-[420px] w-full"
-          />
-          <div className="flex items-start justify-between gap-3 px-5 py-4">
-            <div>
+        <div className="ash-page-in mx-auto grid w-full max-w-5xl gap-4 p-3 md:min-h-[100dvh] md:grid-cols-[minmax(0,1fr)_340px] md:gap-6 md:p-6">
+          <section className="relative overflow-hidden rounded-[28px] bg-[radial-gradient(120%_80%_at_50%_15%,#ffffff_0%,#f4f1ec_70%)] shadow-card">
+            <AnnyCanvas
+              parametric={result.parametric}
+              heightCm={result.session.heightCm}
+              garment={canvasGarment}
+              drapePayloadBase64={drapePayloadBase64}
+              showClearanceHeatmap={showHeatmap && heatmapAvailable}
+              onPrintQaFail={() => setClientPrintQaPassed(false)}
+              className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
+            />
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
               <AshriumWordmark
-                className="mb-2"
-                markClassName="h-5 w-5 shrink-0"
-                wordClassName="text-xs font-medium tracking-[0.04em] text-ash-ink"
+                markClassName="h-5 w-5 shrink-0 text-ash-accent"
+                wordClassName="text-xs font-semibold tracking-[0.02em] text-ash-ink"
               />
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ash-subtle">
-                Your avatar
-              </p>
-              <p className="mt-1 text-sm text-ash-muted">
-                Rotate and zoom.
-                {!printQaPassed
-                  ? ' 3D garment is off until print QA passes. Size is still from girths plus the published chart.'
-                  : drapePayloadBase64
-                    ? ' Newton drape is on the avatar. Clearance heatmap is a toggle; loose reads blue.'
-                    : activeGarment
-                      ? ` ${activeGarment.name} size is from girths plus the published chart. Approximate until Newton drape lands.`
-                      : ' Size recommendation comes after a confident drape.'}
-              </p>
+              <span
+                key={statusChip}
+                aria-live="polite"
+                className="ash-rise inline-flex max-w-[60%] items-center gap-2 rounded-full bg-white/85 px-3 py-1.5 text-[11px] font-semibold text-ash-ink shadow-card"
+              >
+                {draping ? (
+                  <span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-ash-accent/30 border-t-ash-accent" />
+                ) : null}
+                <span className="truncate">{statusChip}</span>
+              </span>
             </div>
-            <div className="flex flex-col items-end gap-3">
-              <ConfidenceBadge
-                sizeCode={recommendation?.size.sizeCode ?? null}
-                gate={recommendation?.gate ?? null}
-              />
+            <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/70 px-3 py-1 text-[11px] text-ash-muted">
+              Drag to turn · pinch to zoom
+            </p>
+          </section>
+
+          <aside className="ash-card flex flex-col gap-5 p-5 md:self-start">
+            <header className="flex flex-col gap-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ash-accent">Your fitting</p>
+              <h1 className="text-lg font-semibold leading-snug tracking-tight">
+                {activeGarment?.name ?? 'This product'}
+              </h1>
+            </header>
+
+            <div className="flex flex-col gap-3 rounded-2xl bg-ash-raised p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-ash-muted">Recommended size</p>
+                  <p className="mt-1 text-5xl font-semibold leading-none tracking-tight">
+                    {recommendedSize ?? '–'}
+                  </p>
+                </div>
+                <ConfidenceBadge sizeCode={recommendedSize} gate={recommendation?.gate ?? null} />
+              </div>
+              {reasons.length > 0 ? (
+                <ul className="flex flex-col gap-1 text-xs text-ash-muted">
+                  {reasons.map((reason) => (
+                    <li key={reason} className="flex items-center gap-1.5">
+                      <span aria-hidden="true" className="h-1 w-1 rounded-full bg-ash-subtle" />
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              ) : recommendation?.gate.highConfidence ? (
+                <p className="text-xs text-ash-muted">
+                  Measured from your body and this product’s size chart, and confirmed by a cloth simulation.
+                </p>
+              ) : null}
+            </div>
+
+            {sizeOptions.length > 1 ? (
+              <div className="flex flex-col gap-2.5">
+                <p className="text-xs font-semibold text-ash-ink">Try another size</p>
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Size to preview">
+                  {sizeOptions.map((code) => {
+                    const selected = code === activeSize;
+                    const loading = selected && draping;
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => {
+                          setSelectedSize(code);
+                          setAddedSize(null);
+                        }}
+                        className={[
+                          'relative min-w-12 rounded-xl border px-3.5 py-2 text-sm font-semibold transition active:scale-95',
+                          selected
+                            ? 'border-ash-accent bg-ash-accent text-white shadow-cta'
+                            : 'border-ash-line bg-ash-surface text-ash-ink hover:border-ash-subtle',
+                        ].join(' ')}
+                      >
+                        {loading ? (
+                          <span aria-hidden="true" className="mx-auto block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                        ) : code}
+                        {code === recommendedSize ? (
+                          <span
+                            aria-label="recommended"
+                            className={[
+                              'absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white',
+                              selected ? 'bg-ash-success' : 'bg-ash-accent',
+                            ].join(' ')}
+                          />
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!showingRecommended && recommendedSize ? (
+                  <p className="text-xs text-ash-muted">
+                    Previewing {activeSize}. We recommend {recommendedSize} for you.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-between gap-4 rounded-2xl border border-ash-line p-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">Fit heatmap</p>
+                <p className="text-xs text-ash-muted">
+                  {heatmapAvailable
+                    ? 'Blue is roomy, red is snug.'
+                    : draping || recommendedDrape === 'loading'
+                      ? 'Calculating fit…'
+                      : 'Available after the cloth simulation.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showHeatmap && heatmapAvailable}
+                aria-label="Fit heatmap"
+                disabled={!heatmapAvailable}
+                onClick={() => setShowHeatmap((value) => !value)}
+                className={[
+                  'relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                  showHeatmap && heatmapAvailable ? 'bg-ash-accent' : 'bg-ash-line',
+                ].join(' ')}
+              >
+                <span
+                  aria-hidden="true"
+                  className={[
+                    'absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200',
+                    showHeatmap && heatmapAvailable ? 'translate-x-6' : 'translate-x-1',
+                  ].join(' ')}
+                />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={!activeSize}
+                onClick={() => {
+                  if (!activeSize) {
+                    return;
+                  }
+                  setAddedSize(activeSize);
+                  postWidgetEvent(
+                    { type: 'VFR_ADD_TO_CART', payload: { size: activeSize } },
+                    targetOrigin,
+                  );
+                }}
+                className="ash-cta w-full py-4"
+              >
+                {addedSize && addedSize === activeSize
+                  ? `Size ${activeSize} added`
+                  : `Add size ${activeSize ?? ''} to cart`}
+              </button>
               <button
                 type="button"
                 onClick={() => {
                   setResult(null);
-                  setRemoteRecommendation(null);
-                  setDrapeResolve(null);
-                  setClientPrintQaPassed(null);
-                  emittedSizeRef.current = null;
+                  resetFitting();
                 }}
-                className="rounded-full border border-ash-line px-3 py-1.5 text-xs text-ash-muted"
+                className="rounded-xl py-2 text-sm font-semibold text-ash-muted transition hover:text-ash-ink"
               >
-                Recapture
+                Retake photos
               </button>
             </div>
-          </div>
+
+            <p className="text-center text-[11px] leading-relaxed text-ash-subtle">
+              Your photos were deleted as soon as your avatar was built.
+            </p>
+          </aside>
         </div>
       ) : (
         <GuidedCapture

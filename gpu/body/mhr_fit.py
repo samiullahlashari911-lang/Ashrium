@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -307,6 +307,7 @@ def fit_two_view_mhr(
     height_cm: float,
     weight_kg: float | None,
     device: torch.device,
+    on_measure: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     front_params = torch.tensor(pack_model_params(front), device=device)
     side_params = torch.tensor(pack_model_params(side), device=device)
@@ -483,6 +484,8 @@ def fit_two_view_mhr(
         vertices_cm = vertices
         canon_skel = skel[2:3]
         canon_joints = skeleton_positions(canon_skel)[0]
+        if on_measure is not None:
+            on_measure()
         girths = measure_chest_waist_hip_cm(
             vertices_cm.detach().cpu().numpy(),
             canon_joints.detach().cpu().numpy(),

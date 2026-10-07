@@ -155,6 +155,8 @@ export interface FitJobStatusPayload {
   status: FitJobPublicStatus;
   parametric_result: FitParametricVector | null;
   error_message: string | null;
+  /** Last GPU-reported build stage (silhouettes / body / measure), if any. */
+  stage: string | null;
 }
 
 function isFiniteNumber(value: unknown): value is number {

@@ -362,6 +362,11 @@ export type FitJobRow = {
   inference_duration_ms: number | null;
   parametric_result_expires_at: string | null;
   gpu_hold_until: string | null;
+  progress_stage: string | null;
+  progress_at: string | null;
+  dispatched_at: string | null;
+  gpu_started_at: string | null;
+  completed_at: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
@@ -384,6 +389,11 @@ export type FitJobInsert = {
   inference_duration_ms?: number | null;
   parametric_result_expires_at?: string | null;
   gpu_hold_until?: string | null;
+  progress_stage?: string | null;
+  progress_at?: string | null;
+  dispatched_at?: string | null;
+  gpu_started_at?: string | null;
+  completed_at?: string | null;
   error_message?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -406,6 +416,11 @@ export type FitJobUpdate = {
   inference_duration_ms?: number | null;
   parametric_result_expires_at?: string | null;
   gpu_hold_until?: string | null;
+  progress_stage?: string | null;
+  progress_at?: string | null;
+  dispatched_at?: string | null;
+  gpu_started_at?: string | null;
+  completed_at?: string | null;
   error_message?: string | null;
   created_at?: string;
   updated_at?: string;

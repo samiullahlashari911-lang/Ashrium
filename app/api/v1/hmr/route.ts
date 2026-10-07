@@ -4,6 +4,8 @@ import { modalCallIdForJob, runBodyPrediction } from '@/lib/ml/gpu';
 import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
 import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
 import { applyHmrPredictionToFitJob } from '@/lib/server/apply-hmr-prediction';
+import { recordFitJobTiming } from '@/lib/server/fit-job-timing';
+import { gpuProgressCallbackUrl } from '@/lib/server/gpu-callback-auth';
 import {
   parseBiometricJobImagePath,
   purgeBiometricJobImages,
@@ -202,12 +204,15 @@ export async function POST(request: Request): Promise<Response> {
       };
 
       try {
+        await recordFitJobTiming(job.id, tenantId, { dispatched_at: new Date().toISOString() });
+        const progressUrl = gpuProgressCallbackUrl();
         const output = await runBodyPrediction({
           frontImageB64,
           sideImageB64,
           heightCm: body.heightCm,
           sex: body.sex,
           weightKg: body.weightKg,
+          progress: progressUrl ? { url: progressUrl, jobId: job.id, tenantId } : null,
         });
         await applyHmrPredictionToFitJob(
           job.id,
@@ -220,6 +225,7 @@ export async function POST(request: Request): Promise<Response> {
           },
           jobRow,
         );
+        await recordFitJobTiming(job.id, tenantId, { completed_at: new Date().toISOString() });
       } catch (error) {
         const message = error instanceof Error
           ? error.message

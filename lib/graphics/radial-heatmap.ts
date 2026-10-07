@@ -68,23 +68,6 @@ export function mapRadialClearanceToColor(clearanceCm: number, easeCm: number): 
   );
 }
 
-export function computeRadialHeatmapColors(
-  clearancesCm: Float32Array,
-  easeCm: number,
-): Float32Array {
-  const colors = new Float32Array(clearancesCm.length * 3);
-
-  for (let index = 0; index < clearancesCm.length; index += 1) {
-    const color = mapRadialClearanceToColor(clearancesCm[index], easeCm);
-    const base = index * 3;
-    colors[base] = color.r;
-    colors[base + 1] = color.g;
-    colors[base + 2] = color.b;
-  }
-
-  return colors;
-}
-
 export const RADIAL_HEATMAP_SWATCHES = [
   { label: 'Constricted', color: strainHeatmap.constricted },
   { label: 'Snug', color: strainHeatmap.snug },

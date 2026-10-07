@@ -21,6 +21,7 @@ from body.initializer import Sam3dAccessError, load_sam3d_estimator, initialize_
 from body.mhr_fit import fit_two_view_mhr
 from body.silhouettes import load_sam2_predictor, segment_person
 from body.topology import MHR_TOPOLOGY_VERSION
+from progress import StageReporter
 
 
 def _read_rgb(path: Path, max_side: int = 640) -> np.ndarray:
@@ -87,7 +88,9 @@ class AshriumPipeline:
         height_cm: float,
         sex: str,
         weight_kg: float,
+        on_stage: StageReporter | None = None,
     ) -> dict:
+        report = on_stage or (lambda _stage: None)
         if float(height_cm) < 50:
             raise RuntimeError("task=body requires height_cm between 50 and 250.")
 
@@ -96,11 +99,13 @@ class AshriumPipeline:
 
         clock = StageClock()
         clock.set("setup", getattr(self, "setup_ms", 0.0))
+        report("silhouettes")
         with clock.measure("sam2_front"):
             front_mask, front_bbox = segment_person(self.sam2, front_rgb)
         with clock.measure("sam2_side"):
             side_mask, side_bbox = segment_person(self.sam2, side_rgb)
 
+        report("body")
         with clock.measure("sam3d_front"):
             front_init = initialize_view(self.estimator, front_rgb, front_mask, front_bbox)
         with clock.measure("sam3d_side"):
@@ -116,6 +121,7 @@ class AshriumPipeline:
                 height_cm=float(height_cm),
                 weight_kg=None if weight_kg is None or float(weight_kg) <= 0 else float(weight_kg),
                 device=self.device,
+                on_measure=lambda: report("measure"),
             )
 
         diagnostics = result.get("fit_diagnostics")

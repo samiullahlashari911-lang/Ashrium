@@ -174,17 +174,3 @@ export function recommendSize(
 export function categoryEase(category: GarmentCategory | null): CategoryEaseCm {
   return easeFor(category);
 }
-
-export function garmentKindFromCategory(
-  category: GarmentCategory | null,
-): 'tee' | 'pant' | 'dress' {
-  if (category === 'pant') {
-    return 'pant';
-  }
-
-  if (category === 'dress') {
-    return 'dress';
-  }
-
-  return 'tee';
-}

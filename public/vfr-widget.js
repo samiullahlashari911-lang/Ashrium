@@ -96,8 +96,8 @@
     style.textContent = [
       ':host{all:initial}',
       '.vfr-shell{box-sizing:border-box;display:block;width:100%;min-height:420px;overflow:auto;',
-      'border-radius:16px;background:#0B0B1E;box-shadow:0 12px 36px rgba(8,6,28,.45)}',
-      '.vfr-frame{display:block;width:100%;height:clamp(640px,85vw,820px);border:0;background:#0B0B1E}',
+      'border-radius:20px;background:#F4F1EC;box-shadow:0 12px 36px rgba(29,27,34,.12)}',
+      '.vfr-frame{display:block;width:100%;height:clamp(640px,85vw,820px);border:0;background:#F4F1EC}',
     ].join('');
     var frame = createFrame(embedToken);
     var shell = document.createElement('div');
@@ -115,31 +115,49 @@
     overlay.id = 'ashrium-vfr-overlay';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Ashrium virtual fitting room');
     overlay.style.cssText = [
       'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:stretch;justify-content:center;',
-      'background:rgba(8,6,28,.72);padding:env(safe-area-inset-top,12px) 12px 12px;',
+      'background:rgba(29,27,34,.45);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);',
+      'padding:env(safe-area-inset-top,10px) 10px 10px;opacity:0;transition:opacity .25s ease',
     ].join('');
     var panel = document.createElement('div');
-    panel.style.cssText =
-      'position:relative;width:min(520px,100%);height:100%;max-height:100dvh;border-radius:20px;overflow:hidden;background:#0B0B1E;box-shadow:0 24px 80px rgba(0,0,0,.45)';
+    panel.style.cssText = [
+      'position:relative;width:min(1040px,100%);height:100%;max-height:100dvh;border-radius:24px;overflow:hidden;',
+      'background:#F4F1EC;box-shadow:0 24px 80px rgba(29,27,34,.28);transform:translateY(16px);',
+      'transition:transform .35s cubic-bezier(.22,1,.36,1)',
+    ].join('');
     var close = document.createElement('button');
     close.type = 'button';
-    close.textContent = 'Close';
+    close.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
     close.setAttribute('aria-label', 'Close Try On');
-    close.style.cssText =
-      'position:absolute;top:12px;right:12px;z-index:2;border:0;border-radius:999px;padding:8px 12px;background:#1B1538;color:#F4F1FF;font:600 12px/1 system-ui,sans-serif;cursor:pointer';
-    close.addEventListener('click', function () {
-      overlay.remove();
-    });
+    close.style.cssText = [
+      'position:absolute;top:14px;right:14px;z-index:2;display:flex;align-items:center;justify-content:center;',
+      'width:36px;height:36px;border:1px solid #E6E1D9;border-radius:999px;background:#fff;color:#1D1B22;cursor:pointer;',
+      'box-shadow:0 4px 12px rgba(29,27,34,.08)',
+    ].join('');
+    function dismiss() {
+      overlay.style.opacity = '0';
+      setTimeout(function () { overlay.remove(); }, 220);
+    }
+    close.addEventListener('click', dismiss);
     var frame = createFrame(embedToken);
-    frame.style.cssText = 'display:block;width:100%;height:100%;border:0;background:#0B0B1E';
+    frame.style.cssText = 'display:block;width:100%;height:100%;border:0;background:#F4F1EC';
     panel.appendChild(close);
     panel.appendChild(frame);
     overlay.appendChild(panel);
     overlay.addEventListener('click', function (event) {
-      if (event.target === overlay) overlay.remove();
+      if (event.target === overlay) dismiss();
+    });
+    document.addEventListener('ashrium:vfr:vfr_add_to_cart', function onAdded() {
+      document.removeEventListener('ashrium:vfr:vfr_add_to_cart', onAdded);
+      setTimeout(dismiss, 650);
     });
     document.body.appendChild(overlay);
+    requestAnimationFrame(function () {
+      overlay.style.opacity = '1';
+      panel.style.transform = 'none';
+    });
     attachHostApi(frame);
   }
 
@@ -168,12 +186,14 @@
   buttonHost.style.cssText = 'display:none;width:100%;margin:0 0 12px';
   var button = document.createElement('button');
   button.type = 'button';
-  button.textContent = 'Try On';
+  button.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="flex:none"><path d="M12 6a2 2 0 1 0-2-2M12 6v2m0 0L3.5 14.2A1.5 1.5 0 0 0 4.4 17h15.2a1.5 1.5 0 0 0 .9-2.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Try it on in 3D</span>';
   button.style.cssText = [
-    'display:block;width:100%;box-sizing:border-box;border:0;border-radius:999px;padding:14px 18px;',
-    'background:linear-gradient(90deg,#6D5CFF,#C026D3);color:#fff;font:650 15px/1.1 system-ui,sans-serif;',
-    'letter-spacing:.02em;cursor:pointer',
+    'display:flex;align-items:center;justify-content:center;gap:8px;width:100%;box-sizing:border-box;border:0;',
+    'border-radius:14px;padding:14px 18px;background:#6A4CF5;color:#fff;font:600 15px/1.1 system-ui,sans-serif;',
+    'letter-spacing:.01em;cursor:pointer;box-shadow:0 8px 24px rgba(106,76,245,.28);transition:background .16s ease',
   ].join('');
+  button.addEventListener('mouseenter', function () { button.style.background = '#5536E0'; });
+  button.addEventListener('mouseleave', function () { button.style.background = '#6A4CF5'; });
   button.addEventListener('click', function () {
     button.disabled = true;
     mintToken()

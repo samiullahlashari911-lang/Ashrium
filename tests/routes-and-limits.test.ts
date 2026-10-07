@@ -62,6 +62,9 @@ test('fit recommend and resolve parsers require a UUID job id', () => {
   assert.equal(parseRecommendRequest({ jobId: JOB, sku: 'TEE-1', captureGatesPassed: 'yes' }), null);
   assert.equal(parseResolveRequest({ jobId: JOB, sku: 'TEE-1', allowXpbd: false })?.allowXpbd, false);
   assert.equal(parseResolveRequest({ jobId: JOB, sku: 'TEE-1', allowXpbd: 'true' }), null);
+  assert.equal(parseResolveRequest({ jobId: JOB, sku: 'TEE-1', sizeCode: ' L ' })?.sizeCode, 'L');
+  assert.equal(parseResolveRequest({ jobId: JOB, sku: 'TEE-1', sizeCode: '' }), null);
+  assert.equal(parseResolveRequest({ jobId: JOB, sku: 'TEE-1', sizeCode: 'X'.repeat(25) }), null);
 });
 
 test('in-memory rate limit denies the request after the window fills', () => {

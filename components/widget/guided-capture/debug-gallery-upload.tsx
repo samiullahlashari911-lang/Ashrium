@@ -6,7 +6,6 @@ import { AnnyCanvas } from '@/components/vfr/anny-canvas';
 import { ConfidenceBadge } from '@/components/vfr/confidence-badge';
 import { CaptureIntake, type CaptureIntakeValues } from '@/components/widget/guided-capture/capture-intake';
 import { recommendFit } from '@/lib/fit/recommend';
-import { garmentKindFromCategory } from '@/lib/fit/size-recommend';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import { uploadDualWebpAndDispatch } from '@/lib/widget/fit-client';
 import { encodeImageFileToWebp } from '@/lib/widget/webp-encode';
@@ -149,10 +148,6 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
             parametric={parametric}
             heightCm={intake.heightCm}
             garment={{
-              kind: garmentKindFromCategory('tee'),
-              chestCm: debugRecommendation.size.chestCm,
-              waistCm: debugRecommendation.size.waistCm,
-              hipCm: debugRecommendation.size.hipCm,
               easeCm: debugRecommendation.ease.chestCm,
             }}
             className="h-[420px] w-full overflow-hidden rounded-xl"

@@ -4,11 +4,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { CaptureIntake, type CaptureIntakeValues } from '@/components/widget/guided-capture/capture-intake';
 import { CaptureViewport } from '@/components/widget/guided-capture/capture-viewport';
+import { AvatarLoading } from '@/components/widget/loading/avatar-loading';
 import {
   SHOPPER_AVATAR_WAIT_MS,
   SHOPPER_GPU_TIMEOUT_MESSAGE,
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
+import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
+import {
+  currentAvatarStage,
+  isAvatarStageKey,
+  type AvatarStageKey,
+} from '@/lib/widget/avatar-stages';
 import {
   abortShopperGpu,
   uploadDualWebpAndDispatch,
@@ -16,6 +23,7 @@ import {
   type DualUploadProgress,
 } from '@/lib/widget/fit-client';
 import type {
+  FitJobPublicStatus,
   FitParametricVector,
   CaptureSession,
   CaptureView,
@@ -65,6 +73,9 @@ export function GuidedCapture({
   const [uploadStage, setUploadStage] = useState<DualUploadProgress | null>(null);
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const [gpuArmed, setGpuArmed] = useState(false);
+  const [jobStatus, setJobStatus] = useState<FitJobPublicStatus | null>(null);
+  const [gpuStage, setGpuStage] = useState<AvatarStageKey | null>(null);
+  const [finishedResult, setFinishedResult] = useState<GuidedCaptureResult | null>(null);
   const gpuSessionKeyRef = useRef(
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -190,7 +201,14 @@ export function GuidedCapture({
       jobId,
       embedToken,
       (job) => {
+        setJobStatus(job.status);
+        if (isAvatarStageKey(job.stage)) {
+          setGpuStage(job.stage);
+        }
         if (job.status === 'completed' && job.parametric_result) {
+          if (completedRef.current) {
+            return;
+          }
           completedRef.current = true;
           const session: CaptureSession = {
             tenantId,
@@ -204,7 +222,8 @@ export function GuidedCapture({
             sideGate,
             captureGatesPassed: frontGate === 'aligned' && sideGate === 'aligned',
           };
-          onComplete({ session, parametric: job.parametric_result });
+          // Let the particles converge before the avatar reveal takes over.
+          setFinishedResult({ session, parametric: job.parametric_result });
           return;
         }
 
@@ -217,7 +236,7 @@ export function GuidedCapture({
         // Keep waiting until the job row is terminal or the wait budget ends.
       },
     );
-  }, [embedToken, failCapture, frontGate, intake, jobId, onComplete, sideGate, step, tenantId]);
+  }, [embedToken, failCapture, frontGate, intake, jobId, sideGate, step, tenantId]);
 
   useEffect(() => {
     if (step !== 'inferring') {
@@ -255,6 +274,9 @@ export function GuidedCapture({
     setUploadStage(null);
     setWarmupError(null);
     setGpuArmed(false);
+    setJobStatus(null);
+    setGpuStage(null);
+    setFinishedResult(null);
   };
 
   useEffect(() => {
@@ -340,46 +362,40 @@ export function GuidedCapture({
   }
 
   if (step === 'uploading' || step === 'inferring') {
-    const uploadCopy =
-      uploadStage === 'front' || uploadStage === 'side'
-        ? 'Uploading front and side photos…'
-        : uploadStage === 'proxy'
-          ? 'Uploading photos via the server…'
-          : uploadStage === 'dispatch'
-            ? 'Starting live body inference…'
-            : 'Preparing a secure upload…';
     return (
-      <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 px-6 text-center text-ash-ink">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ash-subtle">
-          Building your avatar
-        </p>
-        <h1 className="text-2xl font-semibold">
-          {step === 'uploading' ? 'Uploading photos' : 'Running live MHR fit'}
-        </h1>
-        <p className="max-w-sm text-sm text-ash-muted">
-          {step === 'uploading'
-            ? uploadCopy
-            : 'Keep this screen open. Usually under two minutes on a warm GPU. First start of a session can take up to five minutes. Closing Try On stops billing.'}
-        </p>
-        <p className="font-mono text-xs text-ash-subtle">
-          {step === 'inferring'
-            ? `${waitSeconds}s elapsed · ${Math.max(0, Math.ceil(SHOPPER_AVATAR_WAIT_MS / 1000) - waitSeconds)}s remaining`
-            : `${waitSeconds}s elapsed`}
-        </p>
-      </div>
+      <AvatarLoading
+        photo={frontBlob}
+        outline={intake ? CAPTURE_OUTLINES[intake.sex].front : null}
+        stage={currentAvatarStage({
+          uploading: step === 'uploading',
+          jobStatus: finishedResult ? 'completed' : jobStatus,
+          gpuStage,
+        })}
+        elapsedSeconds={waitSeconds}
+        finishing={finishedResult !== null}
+        onFinished={() => {
+          if (finishedResult) {
+            onComplete(finishedResult);
+          }
+        }}
+      />
     );
   }
 
   return (
-    <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 px-6 text-center text-ash-ink">
-      <h1 className="text-2xl font-semibold">{captureErrorTitle(error)}</h1>
-      <p className="max-w-sm text-sm text-ash-tension">{error ?? 'Something went wrong.'}</p>
-      <button
-        type="button"
-        onClick={reset}
-        className="ash-cta"
-      >
-        Try again
+    <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col items-center justify-center gap-5 px-6 text-center text-ash-ink">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-ash-tension-soft text-ash-tension">
+        <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
+          <path d="M12 8v5M12 16.5v.5M10.3 3.9L2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+      <h1 className="text-[22px] font-semibold tracking-tight">{captureErrorTitle(error)}</h1>
+      <p className="max-w-sm text-sm leading-relaxed text-ash-muted">{error ?? 'Something went wrong.'}</p>
+      <p className="max-w-sm text-xs text-ash-subtle">
+        Your photos were deleted. Retake them to try again; it only takes a minute.
+      </p>
+      <button type="button" onClick={reset} className="ash-cta mt-2 px-8 py-4">
+        Retake photos
       </button>
     </div>
   );

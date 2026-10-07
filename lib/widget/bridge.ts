@@ -13,6 +13,11 @@ export interface VfrSizeRecommendedEvent {
   size: string;
 }
 
+/** Shopper tapped "Add to cart" for a size they chose in the fitting room. */
+export interface VfrAddToCartEvent {
+  size: string;
+}
+
 export interface VfrWidgetReadyEvent {
   sku: string;
 }
@@ -27,6 +32,7 @@ export type HostToWidgetEvent =
 
 export type WidgetToHostEvent =
   | { payload: VfrSizeRecommendedEvent; type: 'VFR_SIZE_RECOMMENDED' }
+  | { payload: VfrAddToCartEvent; type: 'VFR_ADD_TO_CART' }
   | { payload: VfrWidgetReadyEvent; type: 'VFR_WIDGET_READY' }
   | { payload: VfrResizeViewportEvent; type: 'VFR_RESIZE_VIEWPORT' };
 

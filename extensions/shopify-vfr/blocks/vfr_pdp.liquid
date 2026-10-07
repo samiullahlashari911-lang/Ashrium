@@ -27,7 +27,7 @@
             return normalizeSize(option) === normalizedSize;
           });
         });
-        if (!match) return;
+        if (!match) return false;
         document.querySelectorAll('form[action*="/cart/add"]').forEach(function (form) {
           var variantSelect = form.querySelector('select[name="id"]');
           var variantInput = form.querySelector('input[name="id"]');
@@ -39,12 +39,24 @@
             variantInput.dispatchEvent(new Event('change', { bubbles: true }));
           }
         });
+        return true;
       }
 
       window.addEventListener('message', function (event) {
         if (event.origin !== appOrigin || !event.data || event.data.source !== 'ashrium-vfr') return;
         if (event.data.type === 'VFR_SIZE_RECOMMENDED' && event.data.payload) {
           selectNativeVariant(event.data.payload.size);
+        }
+        if (event.data.type === 'VFR_ADD_TO_CART' && event.data.payload) {
+          // Shopper chose this size in the fitting room: select it and add to cart.
+          if (selectNativeVariant(event.data.payload.size)) {
+            var form = document.querySelector('form[action*="/cart/add"]');
+            if (form && typeof form.requestSubmit === 'function') {
+              setTimeout(function () { form.requestSubmit(); }, 0);
+            } else if (form) {
+              form.submit();
+            }
+          }
         }
       });
 
@@ -66,7 +78,7 @@
         }
 
         var script = document.createElement('script');
-        script.src = appOrigin + '/vfr-widget.js?v=no-sandbox-launcher-1';
+        script.src = appOrigin + '/vfr-widget.js?v=no-sandbox-launcher-2';
         script.async = true;
         script.dataset.launcher = 'true';
         script.dataset.sku = sku || '';

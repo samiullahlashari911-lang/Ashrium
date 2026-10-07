@@ -109,15 +109,32 @@ test('GarmentCode UVs wrap around the cylinder and increase with height', () => 
   assert.equal(uvs[5], 1);
 });
 
-test('faceless mannequin collapses head vertices into a featureless cap', () => {
-  const positions = new Float32Array([
-    0.08, 0.4, 0.08,
-    0.08, 1.6, 0.2,
-    -0.08, 1.65, 0.18,
-  ]);
+test('faceless mannequin sculpts the head into a smooth ellipsoid without a nose', () => {
+  // A 1.7 m column with a spherical head (radius 0.1 m) and a nose 4 cm proud.
+  const points: number[] = [0, 0, 0, 0.1, 0.8, 0, -0.1, 0.8, 0];
+  for (let step = 0; step < 48; step += 1) {
+    const polar = (step / 47) * Math.PI;
+    for (let turn = 0; turn < 12; turn += 1) {
+      const azimuth = (turn / 12) * Math.PI * 2;
+      points.push(
+        0.08 * Math.sin(polar) * Math.cos(azimuth),
+        1.6 + 0.1 * Math.cos(polar),
+        0.09 * Math.sin(polar) * Math.sin(azimuth),
+      );
+    }
+  }
+  const noseIndex = points.length / 3;
+  points.push(0, 1.6, 0.13);
+  const positions = new Float32Array(points);
   sealMannequinHead(positions);
-  assert.ok(positions[4] < 1.6);
-  assert.ok(Math.hypot(positions[3], positions[5]) < 0.2);
+
+  const noseZ = positions[noseIndex * 3 + 2];
+  assert.ok(noseZ < 0.105, `nose should be pulled onto the skull, got z=${noseZ}`);
+  let crown = 0;
+  for (let index = 0; index < positions.length / 3; index += 1) {
+    crown = Math.max(crown, positions[index * 3 + 1]);
+  }
+  assert.ok(crown > 1.68, 'head keeps its height instead of being chopped');
 });
 
 test('failed print QA forces Approximate and keeps the girth size', () => {
