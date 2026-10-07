@@ -28,6 +28,8 @@ interface StorefrontViewportProps {
   tenantId: string;
   embedToken: string;
   allowGallery?: boolean;
+  /** Merchant enabled the on-device face on the avatar (default off). */
+  showFace?: boolean;
 }
 
 /** Drape for the recommended size is fetched before its size code is known. */
@@ -72,6 +74,7 @@ export function StorefrontViewport({
   tenantId,
   embedToken,
   allowGallery = false,
+  showFace = false,
 }: StorefrontViewportProps): React.JSX.Element {
   const rootRef = useRef<HTMLElement | null>(null);
   const emittedSizeRef = useRef<string | null>(null);
@@ -348,6 +351,7 @@ export function StorefrontViewport({
               garment={canvasGarment}
               drapePayloadBase64={drapePayloadBase64}
               showClearanceHeatmap={showHeatmap && heatmapAvailable}
+              faceImage={showFace ? result.face : null}
               onPrintQaFail={() => setClientPrintQaPassed(false)}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
             />
@@ -529,6 +533,7 @@ export function StorefrontViewport({
           tenantId={tenantId}
           embedToken={embedToken}
           allowGallery={allowGallery}
+          captureFace={showFace}
           onComplete={handleComplete}
         />
       )}

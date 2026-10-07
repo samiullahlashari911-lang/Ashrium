@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { DomainAllowlistForm } from '@/components/settings/domain-allowlist-form';
+import { OnDeviceFaceForm } from '@/components/settings/on-device-face-form';
 import { TelemetrySecretForm } from '@/components/settings/telemetry-secret-form';
 import { createServiceClient } from '@/lib/supabase/service';
 import { createClient } from '@/lib/supabase/server';
@@ -20,6 +21,21 @@ function formatPlanTier(planTier: string): string {
 function telemetryWebhookUrl(): string {
   const base = process.env.APP_BASE_URL?.trim();
   return base ? `${base.replace(/\/$/, '')}/api/v1/telemetry` : '';
+}
+
+/** Best-effort so settings still render before the face migration lands. */
+async function readOnDeviceFace(tenantId: string): Promise<boolean> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('tenants')
+      .select('on_device_face_enabled')
+      .eq('id', tenantId)
+      .maybeSingle();
+    return !error && data?.on_device_face_enabled === true;
+  } catch {
+    return false;
+  }
 }
 
 export default async function SettingsPage() {
@@ -137,6 +153,8 @@ export default async function SettingsPage() {
       </section>
 
       <DomainAllowlistForm initialDomains={tenant?.allowed_domains ?? []} />
+
+      <OnDeviceFaceForm initialEnabled={await readOnDeviceFace(tenantId)} />
 
       <TelemetrySecretForm
         configured={telemetryIntegration !== null}

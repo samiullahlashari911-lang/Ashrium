@@ -33,6 +33,15 @@ export const CONSENT_BULLETS: ReadonlyArray<{ title: string; body: string }> = [
 ];
 
 /**
+ * Shown only when the merchant turned on the on-device face. The face crop is
+ * drawn on the avatar in this browser and is never uploaded.
+ */
+export const FACE_ON_DEVICE_BULLET = {
+  title: 'Your face stays on your phone',
+  body: 'This store shows your face on your avatar. It is drawn on this phone only, never uploaded, and gone when you close Try On.',
+} as const;
+
+/**
  * Flip to true only in the release where `gpu/body/mhr_fit.py` actually
  * conditions the starting body shape on sex. Until then the explainer must
  * not claim it.
@@ -71,6 +80,10 @@ export const PRIVACY_SECTIONS: ReadonlyArray<{ title: string; body: string }> = 
   {
     title: 'What we never do',
     body: 'Ashrium does not sell biometric data, does not use fitting photos to train models, and does not keep a durable shopper identity. We refuse the under-16 / COPPA path: if you are under 16, the camera never starts. The storefront widget receives only a short-lived embed token. Merchant Shopify credentials never enter the iframe.',
+  },
+  {
+    title: 'Your face on your avatar (only if the store turns it on)',
+    body: 'Some stores let you see your own face on your avatar. When they do, the face is cut from your front photo and drawn on the avatar on your device only. It is never uploaded to Ashrium or the store, and it disappears when you close Try On. Servers still receive only photos with the head removed.',
   },
   {
     title: 'Size recommendations',

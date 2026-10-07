@@ -11,7 +11,12 @@ import {
 import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
-import { encodeImageFileToWebp, encodeVideoFrameToWebp } from '@/lib/widget/webp-encode';
+import {
+  cropOnDeviceFace,
+  encodeImageFileToWebp,
+  encodeVideoFrameToWebp,
+  type OnDeviceFace,
+} from '@/lib/widget/webp-encode';
 import type { CaptureSex, CaptureView, PoseGateStatus } from '@/types/hmr';
 
 const ALIGNED_HOLD_MS = 1200;
@@ -21,7 +26,10 @@ interface CaptureViewportProps {
   view: CaptureView;
   /** Picks the female / male / neutral outline. */
   sex: CaptureSex;
-  onCaptured: (blob: Blob, gate: PoseGateStatus) => void;
+  /** `face` is only set when the merchant enabled the on-device face; it never leaves the browser. */
+  onCaptured: (blob: Blob, gate: PoseGateStatus, face?: OnDeviceFace | null) => void;
+  /** Keep an on-device face crop from the front photo (merchant opt-in). */
+  captureFace?: boolean;
   onBack: () => void;
   allowGallery?: boolean;
   requireConfirm?: boolean;
@@ -48,6 +56,7 @@ export function CaptureViewport({
   allowGallery = false,
   requireConfirm = false,
   flowStep,
+  captureFace = false,
 }: CaptureViewportProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -245,6 +254,9 @@ export function CaptureViewport({
 
         if (elapsed >= ALIGNED_HOLD_MS) {
           capturingRef.current = true;
+          const face = captureFace && view === 'front'
+            ? cropOnDeviceFace(video, pose, video.videoWidth, video.videoHeight)
+            : null;
           void encodeVideoFrameToWebp(video, pose)
             .then((blob) => {
               if (requireConfirm) {
@@ -262,7 +274,7 @@ export function CaptureViewport({
               alignedSinceRef.current = null;
               setHoldProgress(1);
               setFlash(true);
-              window.setTimeout(() => onCaptured(blob, 'aligned'), 420);
+              window.setTimeout(() => onCaptured(blob, 'aligned', face), 420);
             })
             .catch(() => {
               capturingRef.current = false;
@@ -287,7 +299,7 @@ export function CaptureViewport({
     }
 
     return () => cancelAnimationFrame(frameId);
-  }, [landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
+  }, [captureFace, landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
 
   const title = view === 'front' ? 'Front photo' : 'Side photo';
   const hint =

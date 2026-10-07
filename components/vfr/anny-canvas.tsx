@@ -6,9 +6,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { RadialHeatmapLegend } from '@/components/vfr/radial-heatmap-legend';
+import type { OnDeviceFace } from '@/lib/widget/webp-encode';
 import {
   applyFacelessMannequin,
   applyMannequinMaterial,
+  buildFaceDecalGeometry,
   createGarmentAlbedoMaterial,
   garmentCodeUvsFromPositions,
   paintMannequinUndergarment,
@@ -65,6 +67,8 @@ export interface AnnyCanvasProps {
   onPrintQaFail?: () => void;
   /** Fires once the avatar body is in the scene. */
   onBodyReady?: () => void;
+  /** On-device face (merchant opt-in). Drawn here only; never uploaded. */
+  faceImage?: OnDeviceFace | null;
   className?: string;
 }
 
@@ -183,6 +187,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   turntable = true,
   onPrintQaFail,
   onBodyReady,
+  faceImage = null,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -322,8 +327,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       const bodyMesh = isMhrParametricVector(parametric)
         ? findMhrHullMesh(hull)
         : findAnnyHullMesh(hull);
+      const headFrame = bodyMesh ? applyFacelessMannequin(bodyMesh) : null;
       if (bodyMesh) {
-        applyFacelessMannequin(bodyMesh);
         paintMannequinUndergarment(bodyMesh);
       }
 
@@ -353,6 +358,27 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
           fadeMaterials.push(node.material);
         }
       });
+      if (faceImage && bodyMesh && headFrame) {
+        const decalGeometry = buildFaceDecalGeometry(bodyMesh, headFrame);
+        if (decalGeometry) {
+          const faceTexture = new THREE.CanvasTexture(faceImage);
+          faceTexture.colorSpace = THREE.SRGBColorSpace;
+          const decal = new THREE.Mesh(
+            decalGeometry,
+            new THREE.MeshStandardMaterial({
+              map: faceTexture,
+              transparent: true,
+              depthWrite: false,
+              roughness: 0.6,
+              metalness: 0,
+              polygonOffset: true,
+              polygonOffsetFactor: -2,
+            }),
+          );
+          bodyMesh.add(decal);
+        }
+      }
+
       // Reveal: fade the body in while the camera glides to its resting orbit.
       fadeMaterials.forEach((material) => {
         material.transparent = true;
@@ -467,7 +493,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         mountElement,
       });
     };
-  }, [heightCm, parametric]);
+  }, [faceImage, heightCm, parametric]);
 
   // Layer 2 — the garment. Rebuilds on drape / size / albedo changes without touching the body.
   useEffect(() => {

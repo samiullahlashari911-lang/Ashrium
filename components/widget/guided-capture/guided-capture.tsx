@@ -11,6 +11,7 @@ import {
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
+import type { OnDeviceFace } from '@/lib/widget/webp-encode';
 import {
   currentAvatarStage,
   isAvatarStageKey,
@@ -46,6 +47,8 @@ function captureErrorTitle(message: string | null): string {
 export interface GuidedCaptureResult {
   session: CaptureSession;
   parametric: FitParametricVector;
+  /** On-device face (merchant opt-in). Never uploaded; dropped with the session. */
+  face: OnDeviceFace | null;
 }
 
 interface GuidedCaptureProps {
@@ -54,6 +57,8 @@ interface GuidedCaptureProps {
   onComplete: (result: GuidedCaptureResult) => void;
   /** Merchant sandbox / preview only. Live storefront stays camera-only. */
   allowGallery?: boolean;
+  /** Merchant enabled the on-device face on the avatar. */
+  captureFace?: boolean;
 }
 
 export function GuidedCapture({
@@ -61,10 +66,12 @@ export function GuidedCapture({
   embedToken,
   onComplete,
   allowGallery = false,
+  captureFace = false,
 }: GuidedCaptureProps): React.JSX.Element {
   const [step, setStep] = useState<CaptureStep>('intake');
   const [intake, setIntake] = useState<CaptureIntakeValues | null>(null);
   const [frontBlob, setFrontBlob] = useState<Blob | null>(null);
+  const [frontFace, setFrontFace] = useState<OnDeviceFace | null>(null);
   const [frontGate, setFrontGate] = useState<PoseGateStatus | null>(null);
   const [sideGate, setSideGate] = useState<PoseGateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -102,8 +109,9 @@ export function GuidedCapture({
     setStep('error');
   }, [stopGpu]);
 
-  const handleFrontCaptured = useCallback((blob: Blob, gate: PoseGateStatus) => {
+  const handleFrontCaptured = useCallback((blob: Blob, gate: PoseGateStatus, face?: OnDeviceFace | null) => {
     setFrontBlob(blob);
+    setFrontFace(face ?? null);
     setFrontGate(gate);
     setStep('side');
   }, []);
@@ -223,7 +231,7 @@ export function GuidedCapture({
             captureGatesPassed: frontGate === 'aligned' && sideGate === 'aligned',
           };
           // Let the particles converge before the avatar reveal takes over.
-          setFinishedResult({ session, parametric: job.parametric_result });
+          setFinishedResult({ session, parametric: job.parametric_result, face: frontFace });
           return;
         }
 
@@ -236,7 +244,7 @@ export function GuidedCapture({
         // Keep waiting until the job row is terminal or the wait budget ends.
       },
     );
-  }, [embedToken, failCapture, frontGate, intake, jobId, sideGate, step, tenantId]);
+  }, [embedToken, failCapture, frontFace, frontGate, intake, jobId, sideGate, step, tenantId]);
 
   useEffect(() => {
     if (step !== 'inferring') {
@@ -266,6 +274,7 @@ export function GuidedCapture({
     setStep('intake');
     setIntake(null);
     setFrontBlob(null);
+    setFrontFace(null);
     setFrontGate(null);
     setSideGate(null);
     setError(null);
@@ -323,6 +332,7 @@ export function GuidedCapture({
       <div>
         {warmupBanner}
         <CaptureIntake
+          showFaceNotice={captureFace}
           submitLabel="Next"
           onConsentPassed={() => setGpuArmed(true)}
           onSubmit={(values) => {
@@ -344,6 +354,7 @@ export function GuidedCapture({
           view={view}
           sex={intake.sex}
           allowGallery={allowGallery}
+          captureFace={captureFace}
           flowStep={step}
           onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
           onBack={() => {

@@ -64,6 +64,7 @@ export type TenantRow = {
   allowed_domains: string[];
   status: TenantStatus;
   api_key_hash: string;
+  on_device_face_enabled: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -75,6 +76,7 @@ export type TenantInsert = {
   allowed_domains?: string[];
   status?: TenantStatus;
   api_key_hash: string;
+  on_device_face_enabled?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -87,6 +89,7 @@ export type TenantUpdate = {
   status?: TenantStatus;
   created_at?: string;
   updated_at?: string;
+  on_device_face_enabled?: boolean;
 };
 
 export type GarmentIngestModeColumn = 'A' | 'B' | 'C';

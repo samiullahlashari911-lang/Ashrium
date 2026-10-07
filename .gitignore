@@ -85,3 +85,6 @@ supabase/.temp/
 tmp/
 temp/
 *.orig
+
+# Operator benchmark photos (consenting, head-cropped). Never commit.
+gpu/bench/

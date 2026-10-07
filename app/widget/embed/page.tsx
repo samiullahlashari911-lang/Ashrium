@@ -182,8 +182,16 @@ export default async function WidgetEmbedPage({
     return renderEmbedError('Try On is not available for this item.');
   }
 
+  // Best-effort: absent column (pre-migration) means the default, faceless.
+  const { data: faceSetting } = await serviceClient
+    .from('tenants')
+    .select('on_device_face_enabled')
+    .eq('id', claims.tenantId)
+    .maybeSingle();
+
   return (
     <StorefrontViewport
+      showFace={faceSetting?.on_device_face_enabled === true}
       garments={garments}
       initialSku={initialSku}
       targetOrigin={isDevelopment ? '*' : parentOrigin}

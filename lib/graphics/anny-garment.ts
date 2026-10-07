@@ -41,6 +41,18 @@ export function garmentCodeUvsFromPositions(positions: Float32Array): Float32Arr
   return uvs;
 }
 
+/** The sculpted mannequin head: an ellipsoid from chin to crown (mesh space). */
+export interface MannequinHeadFrame {
+  centreX: number;
+  centreY: number;
+  centreZ: number;
+  semiX: number;
+  semiY: number;
+  semiZ: number;
+  chinY: number;
+  crownY: number;
+}
+
 /** Chin height as a fraction of stature; the head ellipsoid spans chin → crown. */
 const MANNEQUIN_CHIN_T = 0.865;
 
@@ -66,10 +78,10 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
 export function sealMannequinHead(
   positions: Float32Array,
   headStartT: number = MANNEQUIN_HEAD_START_T,
-): void {
+): MannequinHeadFrame | null {
   const vertexCount = Math.floor(positions.length / 3);
   if (vertexCount < 3) {
-    return;
+    return null;
   }
 
   let yMin = Number.POSITIVE_INFINITY;
@@ -82,7 +94,7 @@ export function sealMannequinHead(
 
   const height = yMax - yMin;
   if (height <= 1e-4) {
-    return;
+    return null;
   }
 
   const neckY = yMin + height * headStartT;
@@ -97,7 +109,7 @@ export function sealMannequinHead(
     }
   }
   if (headXs.length === 0) {
-    return;
+    return null;
   }
 
   const centreX = (percentile(headXs, 0.05) + percentile(headXs, 0.95)) / 2;
@@ -138,24 +150,90 @@ export function sealMannequinHead(
     positions[base + 1] = y + (projectedY - y) * weight;
     positions[base + 2] = z + (projectedZ - z) * weight;
   }
+
+  return { centreX, centreY, centreZ, semiX, semiY, semiZ, chinY, crownY: yMax };
 }
 
-export function applyFacelessMannequin(mesh: THREE.Mesh): void {
+export function applyFacelessMannequin(mesh: THREE.Mesh): MannequinHeadFrame | null {
   const position = mesh.geometry.getAttribute('position');
   if (!position || position.count < 3) {
-    return;
+    return null;
   }
 
   const array = position.array;
   if (!(array instanceof Float32Array)) {
-    return;
+    return null;
   }
 
-  sealMannequinHead(array);
+  const frame = sealMannequinHead(array);
   position.needsUpdate = true;
   mesh.geometry.computeVertexNormals();
   mesh.geometry.computeBoundingBox();
   mesh.geometry.computeBoundingSphere();
+  return frame;
+}
+
+/**
+ * Face decal for the on-device face: the front half of the sculpted head,
+ * lifted 1.5 mm off the surface, with UVs projected straight on from the
+ * camera so the shopper's front photo lands where it was taken.
+ */
+export function buildFaceDecalGeometry(
+  mesh: THREE.Mesh,
+  frame: MannequinHeadFrame,
+): THREE.BufferGeometry | null {
+  const position = mesh.geometry.getAttribute('position');
+  const normal = mesh.geometry.getAttribute('normal');
+  const index = mesh.geometry.getIndex();
+  if (!position || !normal || !index) {
+    return null;
+  }
+
+  const inFront = (vertex: number): boolean =>
+    position.getY(vertex) >= frame.chinY - frame.semiY * 0.15
+    && position.getZ(vertex) >= frame.centreZ - frame.semiZ * 0.1;
+
+  const remap = new Map<number, number>();
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const faces: number[] = [];
+  const lift = 0.0015;
+  const keep = (vertex: number): number => {
+    const known = remap.get(vertex);
+    if (known !== undefined) {
+      return known;
+    }
+    const x = position.getX(vertex);
+    const y = position.getY(vertex);
+    const z = position.getZ(vertex);
+    positions.push(x + normal.getX(vertex) * lift, y + normal.getY(vertex) * lift, z + normal.getZ(vertex) * lift);
+    uvs.push(
+      0.5 + (x - frame.centreX) / (2.1 * frame.semiX),
+      (y - (frame.chinY - frame.semiY * 0.15)) / (frame.crownY - frame.chinY + frame.semiY * 0.15),
+    );
+    const next = remap.size;
+    remap.set(vertex, next);
+    return next;
+  };
+
+  for (let cursor = 0; cursor + 2 < index.count; cursor += 3) {
+    const a = index.getX(cursor);
+    const b = index.getX(cursor + 1);
+    const c = index.getX(cursor + 2);
+    if (inFront(a) && inFront(b) && inFront(c)) {
+      faces.push(keep(a), keep(b), keep(c));
+    }
+  }
+  if (faces.length < 3) {
+    return null;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(faces);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 export function createMannequinMaterial(): THREE.MeshStandardMaterial {

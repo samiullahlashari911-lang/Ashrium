@@ -265,7 +265,13 @@ patterns to replicate, not copy pixel-for-pixel:
   "Approximate fit" copy when the confidence AND-gate fails. Never render an
   approximate result to look identical to a confident one.
 - **3D drape viewport:** faceless, **non-skin-toned** mannequin (do not
-  infer skin; GDPR Art. 9) with a neutral undergarment layer. Avatar and
+  infer skin; GDPR Art. 9) — porcelain finish, sculpted ellipsoid head — with
+  a painted neutral undergarment. **Owner-approved exception (2026-10-07):**
+  when the merchant turns on `tenants.on_device_face_enabled` (default off;
+  counsel review before any live store), the shopper's own face crop is kept
+  in browser memory as a canvas (`OnDeviceFace`, never a Blob), drawn on the
+  avatar head on their device only, and dropped when Try On closes. Servers
+  still receive only headless photos. Avatar and
   garment centered with generous negative space; rotate/zoom only in v1.
   **Clearance heatmap** (loose = blue) is a **toggle**, not always-on over
   the product texture. Legend sits at the edge, not overlapping the model.
@@ -416,8 +422,10 @@ This is the most failure-prone area of the codebase. Follow these exactly.
 - **Catalog honesty:** do not invent girths. `completeMeasurements` (or
   equivalent) must not set `measurementsFromSource` on filled-in values.
   Per-SKU ingest is the primary path; bulk sync is secondary.
-- **Mannequin:** faceless and non-skin-toned. Do not infer or display skin
-  color from photos.
+- **Mannequin:** faceless and non-skin-toned on every server and in every
+  stored artifact. Do not infer skin color. The only face ever shown is the
+  on-device exception above (merchant opt-in, never uploaded, consent bullet
+  and `/privacy` section shown when on).
 
 ---
 

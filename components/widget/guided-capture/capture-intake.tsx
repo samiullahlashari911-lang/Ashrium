@@ -11,6 +11,7 @@ import {
   CONSENT_BULLETS,
   CONSENT_CHECKBOX_LABEL,
   CONSENT_SUMMARY,
+  FACE_ON_DEVICE_BULLET,
   FITTED_CLOTHING_COPY,
   ILLINOIS_BIPA_REFUSAL,
   PRIVACY_PAGE_PATH,
@@ -41,6 +42,8 @@ interface CaptureIntakeProps {
   heading?: string;
   submitLabel?: string;
   showStep?: boolean;
+  /** Merchant enabled the on-device face: say so before consent. */
+  showFaceNotice?: boolean;
 }
 
 type IntakePage = 'consent' | 'height' | 'sex' | 'weight';
@@ -138,6 +141,7 @@ export function CaptureIntake({
   heading = 'Before we start',
   submitLabel = 'Next',
   showStep = true,
+  showFaceNotice = false,
 }: CaptureIntakeProps): React.JSX.Element {
   const [page, setPage] = useState<IntakePage>('consent');
   const [heightCm, setHeightCm] = useState(HEIGHT_CM_DEFAULT);
@@ -264,11 +268,11 @@ export function CaptureIntake({
             </PageTitle>
 
             <ul className="flex flex-col gap-3.5">
-              {CONSENT_BULLETS.map((bullet, index) => (
+              {(showFaceNotice ? [...CONSENT_BULLETS, FACE_ON_DEVICE_BULLET] : CONSENT_BULLETS).map((bullet, index) => (
                 <li key={bullet.title} className="flex items-start gap-3.5">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ash-accent-soft text-ash-accent">
                     <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">
-                      <path d={BULLET_ICONS[index] ?? ''} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d={BULLET_ICONS[index] ?? BULLET_ICONS[0] ?? ''} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </span>
                   <span className="flex flex-col gap-0.5">

@@ -93,3 +93,22 @@ test('two shoppers share one A100: containers scale to ceil(occupancy / 2)', asy
   assert.equal(containersForOccupancy(3), 2);
   assert.equal(shopperGpuCapacity(3), 6);
 });
+
+test('on-device face never reaches an upload path and is off by default', async () => {
+  const { readFileSync } = await import('node:fs');
+  const path = await import('node:path');
+  const read = (file: string): string => readFileSync(path.join(process.cwd(), file), 'utf8');
+  const fitClient = read('lib/widget/fit-client.ts');
+  const capture = read('components/widget/guided-capture/guided-capture.tsx');
+  const migration = read('supabase/migrations/20261007130000_tenant_on_device_face.sql');
+  const encoder = read('lib/widget/webp-encode.ts');
+
+  // The upload/dispatch client has no notion of a face at all.
+  assert.doesNotMatch(fitClient, /OnDeviceFace|frontFace|faceImage/);
+  // The dispatch call is built from the headless blobs only.
+  assert.match(capture, /frontBlob,\s*\n\s*sideBlob: blob,/);
+  assert.doesNotMatch(capture, /uploadDualWebpAndDispatch\([^)]*frontFace/);
+  // Face crops are canvases, not Blobs, so FormData/fetch cannot take them by accident.
+  assert.match(encoder, /export type OnDeviceFace = HTMLCanvasElement;/);
+  assert.match(migration, /on_device_face_enabled boolean NOT NULL DEFAULT false/);
+});

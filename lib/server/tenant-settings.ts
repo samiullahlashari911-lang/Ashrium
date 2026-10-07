@@ -136,3 +136,39 @@ export async function replaceAllowedDomains(rawInputs: string[]): Promise<Tenant
     success: true,
   };
 }
+
+export interface OnDeviceFaceResult {
+  enabled: boolean;
+  message: string;
+  success: boolean;
+}
+
+/**
+ * Merchant switch for showing the shopper's face on their avatar, drawn on
+ * their own device only. Default off until counsel signs off (AGENTS.md §8).
+ */
+export async function updateOnDeviceFace(enabled: boolean): Promise<OnDeviceFaceResult> {
+  const tenantId = await requireCurrentTenantId();
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from('tenants')
+    .update({ on_device_face_enabled: enabled })
+    .eq('id', tenantId);
+
+  if (error) {
+    return {
+      enabled: !enabled,
+      message: 'Unable to update this setting. Try again in a moment.',
+      success: false,
+    };
+  }
+
+  revalidateMerchantSettings();
+  return {
+    enabled,
+    message: enabled
+      ? 'Shoppers will see their own face on their avatar, drawn on their phone only.'
+      : 'Avatars stay faceless.',
+    success: true,
+  };
+}
