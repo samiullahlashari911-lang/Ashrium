@@ -205,7 +205,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(cogInit, /extract_loaded_mhr/);
   assert.match(cogInit, /sam3d_snapshot_ready/);
   assert.match(pipeline, /configure_hf_cache/);
-  assert.match(modalApp, /gpu="A100-80GB"/);
+  assert.match(modalApp, /gpu=\["A100-80GB", "A100-40GB", "L40S"\]/);
   assert.match(modalApp, /ASHRIUM_WEIGHTS_ROOT/);
   const prefetch = readFileSync(path.join(process.cwd(), 'gpu/body/prefetch_weights.py'), 'utf8');
   assert.match(prefetch, /SAM3D_HF_REPO/);

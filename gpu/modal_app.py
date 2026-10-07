@@ -154,7 +154,9 @@ def prefetch_weights() -> dict:
 
 @app.cls(
     image=image,
-    gpu="A100-80GB",
+    # A100-80GB first; fall back when Modal has none free (a ~160 s queue was
+    # observed). Both fallbacks fit the pipeline and cost the same or less.
+    gpu=["A100-80GB", "A100-40GB", "L40S"],
     timeout=300,
     scaledown_window=180,
     min_containers=0,

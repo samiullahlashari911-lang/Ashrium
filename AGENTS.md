@@ -48,7 +48,10 @@ retired per the roadmap in Section 11. Do not write new ANNY phenotypes,
 stamp `anny-13380-104` on new rows, or treat ANNY-Fit as the live GPU.
 
 **Live GPU = our Python pipeline on Modal A100-80GB**, reached through
-HMAC HTTP (`POST /body`, `/drape`, `/pattern`). Required env (fail closed —
+HMAC HTTP (`POST /body`, `/drape`, `/pattern`). Owner-approved
+(2026-10-07): when Modal has no free A100-80GB, the app falls back to
+A100-40GB, then L40S (`gpu=["A100-80GB", "A100-40GB", "L40S"]`) so a cold
+start does not queue for minutes. Required env (fail closed —
 no mock fallback): `MODAL_GPU_URL` and `ASHRIUM_GPU_HMAC`. If either is
 missing, stop and ask. If HuggingFace gated access to **SAM 3D Body**
 weights is not granted, stop — do not stub the initializer.
@@ -79,7 +82,7 @@ block.
 | Cloth simulation | **Newton XPBD** (`SolverXPBD` / `SolverVBD` on upstream Warp, Apache 2.0) **inside the same warm Modal A100 app** (`task=drape`). JS XPBD in `lib/graphics/xpbd-cloth.ts` is debug-only. |
 | Pattern ingest | **GarmentCode / PyGarment core (MIT)** inside the Modal app (`task=pattern`). Never `NvidiaWarp-GarmentCode`. |
 | Pose capture | MediaPipe Pose (`@mediapipe/tasks-vision`) — already in the stack |
-| ML / GPU | Modal **A100-80GB**, via `fetch` in `lib/ml/gpu.ts`. Not ANNY-Fit. Not Replicate. |
+| ML / GPU | Modal **A100-80GB** (fallback A100-40GB → L40S when none is free), via `fetch` in `lib/ml/gpu.ts`. Not ANNY-Fit. Not Replicate. |
 | Storefront Integration | Shopify Liquid block + `public/vfr-widget.js` iframe |
 | Styling | Design tokens in `lib/design-tokens.ts` ("Ashrium" light: warm canvas, white cards, violet accent) |
 
