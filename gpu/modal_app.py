@@ -157,6 +157,9 @@ def prefetch_weights() -> dict:
     # HMAC lets task=body sign stage callbacks back to the app (gpu/progress.py).
     secrets=[hf_secret, hmac_secret],
 )
+# Two shoppers per A100 (lib/ml/session-gpu.ts SHOPPER_GPU_SLOTS_PER_CONTAINER).
+# Shared models that are not thread-safe are locked inside AshriumPipeline.
+@modal.concurrent(max_inputs=2)
 class AshriumGpu:
     @modal.enter()
     def enter(self) -> None:
@@ -170,7 +173,8 @@ class AshriumGpu:
 
     @modal.method()
     def ping(self) -> dict:
-        return {"ok": True, "status": "warm"}
+        # Methods only run after @enter, so a reply means setup is done.
+        return {"ok": True, "status": "warm", "setup_ms": getattr(self.pipeline, "setup_ms", None)}
 
     @modal.method()
     def body(
@@ -242,13 +246,18 @@ def _scale_gpu(min_containers: int) -> dict:
         scaledown_window=180,
     )
     if n > 0:
-        cls().ping.remote()
+        # Fire-and-forget: the autoscaler starts the container; the warmup
+        # HTTP call must not wait out a cold start.
+        cls().ping.spawn()
     return {"ok": True, "min_containers": n}
 
 
 @app.function(image=web_image, secrets=[hmac_secret], timeout=300)
+@modal.concurrent(max_inputs=32)
 @modal.asgi_app()
 def api():
+    import asyncio
+
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import JSONResponse
 
@@ -281,10 +290,10 @@ def api():
         requested = payload.get("min_containers") if isinstance(payload, dict) else None
         if action == "warm":
             n = int(requested) if requested is not None else 1
-            return JSONResponse(_scale_gpu(max(1, n)))
+            return JSONResponse(await asyncio.to_thread(_scale_gpu, max(1, n)))
         if action == "sleep":
             n = int(requested) if requested is not None else 0
-            return JSONResponse(_scale_gpu(max(0, n)))
+            return JSONResponse(await asyncio.to_thread(_scale_gpu, max(0, n)))
         return JSONResponse({"ok": True, "action": "status", "min_containers": None})
 
     @web.post("/body")
@@ -293,7 +302,7 @@ def api():
         authorize(request, raw)
         payload = read_json(raw)
         gpu = AshriumGpu()
-        result = gpu.body.remote(
+        result = await gpu.body.remote.aio(
             front_image_b64=str(payload.get("front_image_b64") or ""),
             side_image_b64=str(payload.get("side_image_b64") or ""),
             height_cm=float(payload.get("height_cm") or 0),
@@ -309,7 +318,7 @@ def api():
         authorize(request, raw)
         payload = read_json(raw)
         gpu = AshriumGpu()
-        result = gpu.drape.remote(
+        result = await gpu.drape.remote.aio(
             collider_positions=str(payload.get("collider_positions") or ""),
             collider_indices=str(payload.get("collider_indices") or ""),
             garment_rest_mesh=str(payload.get("garment_rest_mesh") or ""),
@@ -327,7 +336,7 @@ def api():
         authorize(request, raw)
         payload = read_json(raw)
         gpu = AshriumGpu()
-        result = gpu.pattern.remote(
+        result = await gpu.pattern.remote.aio(
             product_text=str(payload.get("product_text") or ""),
             size_chart=str(payload.get("size_chart") or "[]"),
             garment_category=str(payload.get("garment_category") or "tee"),

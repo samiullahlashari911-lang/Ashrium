@@ -1,7 +1,7 @@
 import { after } from 'next/server';
 
 import { modalCallIdForJob, runBodyPrediction } from '@/lib/ml/gpu';
-import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
+import { FITTING_ROOM_AT_CAPACITY_MESSAGE, shopperGpuCapacity } from '@/lib/ml/session-gpu';
 import { watchShopperGpuDeadline } from '@/lib/server/abort-shopper-gpu';
 import { applyHmrPredictionToFitJob } from '@/lib/server/apply-hmr-prediction';
 import { recordFitJobTiming } from '@/lib/server/fit-job-timing';
@@ -74,7 +74,7 @@ export async function POST(request: Request): Promise<Response> {
   const convertedLease = await convertWarmupLeaseToJob(tenantId, body.gpuSessionKey);
   if (!convertedLease) {
     const occupancy = await readShopperGpuOccupancy();
-    if (occupancy.occupancy >= occupancy.cap) {
+    if (occupancy.occupancy >= shopperGpuCapacity(occupancy.cap)) {
       return Response.json(
         { code: 'FITTING_ROOM_AT_CAPACITY', message: FITTING_ROOM_AT_CAPACITY_MESSAGE },
         { status: 409 },

@@ -121,6 +121,22 @@ export function sessionGpuShouldSleep(input: {
   );
 }
 
+/**
+ * Shoppers one A100 container serves at once (`@modal.concurrent(max_inputs=2)`
+ * in gpu/modal_app.py). Keep the two numbers in sync.
+ */
+export const SHOPPER_GPU_SLOTS_PER_CONTAINER = 2;
+
+/** Warm containers needed for this many active shoppers (jobs + leases). */
+export function containersForOccupancy(occupancy: number): number {
+  return Math.ceil(Math.max(0, occupancy) / SHOPPER_GPU_SLOTS_PER_CONTAINER);
+}
+
+/** Shoppers the fitting room can hold before "at capacity". */
+export function shopperGpuCapacity(maxContainers: number): number {
+  return Math.max(0, maxContainers) * SHOPPER_GPU_SLOTS_PER_CONTAINER;
+}
+
 export function shopperGpuOccupancy(input: {
   activeBodyJobCount: number;
   warmupLeaseCount: number;

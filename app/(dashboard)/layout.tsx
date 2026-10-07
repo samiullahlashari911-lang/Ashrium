@@ -32,11 +32,15 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
   }
 
   return (
-    <ThemeShell intensity="subtle" surface="dashboard">
+    <ThemeShell atmosphere={false} surface="dashboard">
       <PostHogAnalytics tenantId={access.tenantId} />
-      <DashboardNavigation />
-      {goLiveStatus ? <StorefrontGoLiveBanner status={goLiveStatus} /> : null}
-      {children}
+      <div className="md:flex">
+        <DashboardNavigation />
+        <div className="min-w-0 flex-1">
+          {goLiveStatus ? <StorefrontGoLiveBanner status={goLiveStatus} /> : null}
+          {children}
+        </div>
+      </div>
     </ThemeShell>
   );
 }

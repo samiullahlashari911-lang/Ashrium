@@ -162,7 +162,7 @@ export const ShopifyForm: FC<ShopifyFormProps> = ({ connected, shopDomain, usesO
       </div>
 
       <details
-        className="mt-6 rounded-xl border border-ash-line bg-white/[0.02] p-4"
+        className="mt-6 rounded-xl border border-ash-line bg-ash-raised p-4"
         open={showManualToken}
         onToggle={(event) => setShowManualToken(event.currentTarget.open)}
       >

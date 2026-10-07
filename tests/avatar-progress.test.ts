@@ -81,3 +81,15 @@ test('progress callbacks are only offered on an HTTPS app URL', () => {
     }
   }
 });
+
+test('two shoppers share one A100: containers scale to ceil(occupancy / 2)', async () => {
+  const { containersForOccupancy, shopperGpuCapacity, SHOPPER_GPU_SLOTS_PER_CONTAINER } = await import(
+    '@/lib/ml/session-gpu'
+  );
+  assert.equal(SHOPPER_GPU_SLOTS_PER_CONTAINER, 2);
+  assert.equal(containersForOccupancy(0), 0);
+  assert.equal(containersForOccupancy(1), 1);
+  assert.equal(containersForOccupancy(2), 1);
+  assert.equal(containersForOccupancy(3), 2);
+  assert.equal(shopperGpuCapacity(3), 6);
+});

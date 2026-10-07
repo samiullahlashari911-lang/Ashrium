@@ -228,7 +228,7 @@ export function StorefrontSandbox({
             </li>
           ) : (
             events.map((event) => (
-              <li key={event.id} className="rounded-lg border border-ash-line bg-white/[0.04] p-3">
+              <li key={event.id} className="rounded-lg border border-ash-line bg-ash-raised p-3">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-mono text-xs text-ash-accent">{event.direction}</span>
                   <time className="text-xs text-ash-subtle">{event.timestamp}</time>

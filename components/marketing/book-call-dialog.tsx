@@ -177,14 +177,14 @@ export function BookCallDialog({ onClose, open }: BookCallDialogProps): JSX.Elem
         requestClose();
       }}
     >
-      <div className="relative max-h-[inherit] overflow-y-auto rounded-[1.75rem] border border-white/10 bg-obsidian-card p-6 sm:p-8">
+      <div className="relative max-h-[inherit] overflow-y-auto rounded-[1.75rem] border border-ash-line bg-ash-surface p-6 sm:p-8">
         <div className="flex items-start justify-between gap-4">
           <h2 id={titleId} className="text-balance text-2xl font-semibold tracking-tight">
             {status === 'saved' ? 'Choose a time' : 'Book a Call'}
           </h2>
           <button
             type="button"
-            className="rounded-full border border-white/15 px-3 py-1.5 text-sm text-obsidian-muted transition-colors duration-150 hover:text-obsidian-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            className="rounded-full border border-ash-line px-3 py-1.5 text-sm text-ash-muted transition-colors duration-150 hover:text-ash-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ash-accent"
             onClick={requestClose}
           >
             Close
@@ -193,7 +193,7 @@ export function BookCallDialog({ onClose, open }: BookCallDialogProps): JSX.Elem
 
         {status === 'saved' ? (
           <div className="mt-5">
-            <p className="max-w-prose text-pretty text-sm text-obsidian-muted">
+            <p className="max-w-prose text-pretty text-sm text-ash-muted">
               {calendlyUrl
                 ? 'Request saved. Pick a time and Calendly will email the invite.'
                 : 'Request saved. The calendar is not connected on this deployment, so a time cannot be picked here yet.'}
@@ -202,7 +202,7 @@ export function BookCallDialog({ onClose, open }: BookCallDialogProps): JSX.Elem
               <iframe
                 title="Choose a time to book a call"
                 src={calendlyUrl}
-                className="mt-4 h-[min(40rem,70dvh)] w-full rounded-2xl border border-white/10 bg-white"
+                className="mt-4 h-[min(40rem,70dvh)] w-full rounded-2xl border border-ash-line bg-white"
               />
             ) : null}
           </div>
@@ -211,7 +211,7 @@ export function BookCallDialog({ onClose, open }: BookCallDialogProps): JSX.Elem
             <p
               id={errorId}
               aria-live="polite"
-              className={formError ? 'text-sm text-obsidian-tension' : 'sr-only'}
+              className={formError ? 'text-sm text-ash-tension' : 'sr-only'}
             >
               {formError ?? ''}
             </p>
@@ -267,7 +267,7 @@ export function BookCallDialog({ onClose, open }: BookCallDialogProps): JSX.Elem
               onChange={setAnnualRecurringRevenueUsd}
             />
 
-            <button type="submit" className="obsidian-cta w-full" disabled={saving}>
+            <button type="submit" className="ash-cta w-full" disabled={saving}>
               {saving ? 'Sending…' : 'Book a Call'}
             </button>
           </form>
@@ -310,7 +310,7 @@ function Field({
 
   return (
     <div>
-      <label htmlFor={id} className="text-sm text-obsidian-ink">
+      <label htmlFor={id} className="text-sm text-ash-ink">
         {label}
       </label>
       <input
@@ -326,10 +326,10 @@ function Field({
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
         onChange={(event) => onChange(event.target.value)}
-        className="obsidian-input mt-1.5"
+        className="ash-input mt-1.5"
       />
       {error ? (
-        <p id={errorId} className="mt-1.5 text-sm text-obsidian-tension">
+        <p id={errorId} className="mt-1.5 text-sm text-ash-tension">
           {error}
         </p>
       ) : null}

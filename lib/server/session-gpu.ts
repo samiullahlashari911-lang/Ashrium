@@ -4,9 +4,11 @@ import {
   GPU_COLD_START_WAIT_MS,
   GPU_WARM_SETTLE_WAIT_MS,
   SHOPPER_GPU_WARMUP_IDLE_MS,
+  containersForOccupancy,
   readShopperGpuMaxInstances,
   sessionGpuShouldSleep,
   shopperGpuActiveLookbackMs,
+  shopperGpuCapacity,
   shopperGpuOccupancy,
 } from '@/lib/ml/session-gpu';
 import { createServiceClient } from '@/lib/supabase/service';
@@ -102,7 +104,7 @@ async function scaleShopperDeployment(occupancy: number): Promise<{
   minInstancesUpdated: boolean;
 }> {
   const cap = readShopperGpuMaxInstances();
-  const n = Math.min(cap, Math.max(0, occupancy));
+  const n = Math.min(cap, containersForOccupancy(occupancy));
   const patched = await scaleModalGpu(n);
   return { minInstancesUpdated: patched.minContainersUpdated };
 }
@@ -141,7 +143,7 @@ export async function claimShopperGpuSession(
   const refreshingLive = isLiveLease(existing?.expires_at);
   if (!refreshingLive) {
     const before = await readShopperGpuOccupancy();
-    if (before.occupancy >= before.cap) {
+    if (before.occupancy >= shopperGpuCapacity(before.cap)) {
       throw new FittingRoomAtCapacityError();
     }
   }

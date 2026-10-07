@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,12 @@ class AshriumPipeline:
 
         self.device = torch.device("cuda")
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+        # @modal.concurrent runs two shoppers per container on threads. Models
+        # holding per-call state are serialized; the MHR fit itself overlaps.
+        self._sam2_lock = threading.Lock()
+        self._sam3d_lock = threading.Lock()
+        self._drape_lock = threading.Lock()
+        self._pattern_lock = threading.Lock()
         from body.prefetch_weights import configure_hf_cache, sam3d_snapshot_ready
 
         configure_hf_cache()
@@ -100,16 +107,19 @@ class AshriumPipeline:
         clock = StageClock()
         clock.set("setup", getattr(self, "setup_ms", 0.0))
         report("silhouettes")
-        with clock.measure("sam2_front"):
-            front_mask, front_bbox = segment_person(self.sam2, front_rgb)
-        with clock.measure("sam2_side"):
-            side_mask, side_bbox = segment_person(self.sam2, side_rgb)
+        # SAM 2 / SAM 3D Body predictors hold per-image state: one shopper at a time.
+        with self._sam2_lock:
+            with clock.measure("sam2_front"):
+                front_mask, front_bbox = segment_person(self.sam2, front_rgb)
+            with clock.measure("sam2_side"):
+                side_mask, side_bbox = segment_person(self.sam2, side_rgb)
 
         report("body")
-        with clock.measure("sam3d_front"):
-            front_init = initialize_view(self.estimator, front_rgb, front_mask, front_bbox)
-        with clock.measure("sam3d_side"):
-            side_init = initialize_view(self.estimator, side_rgb, side_mask, side_bbox)
+        with self._sam3d_lock:
+            with clock.measure("sam3d_front"):
+                front_init = initialize_view(self.estimator, front_rgb, front_mask, front_bbox)
+            with clock.measure("sam3d_side"):
+                side_init = initialize_view(self.estimator, side_rgb, side_mask, side_bbox)
 
         with clock.measure("mhr_fit"):
             result = fit_two_view_mhr(
@@ -141,7 +151,12 @@ class AshriumPipeline:
         result["stated_height_cm"] = float(height_cm)
         return result
 
-    def predict_drape(
+    def predict_drape(self, **kwargs: Any) -> dict:
+        # Newton / Warp thread safety is unverified: one drape per container at a time.
+        with self._drape_lock:
+            return self._predict_drape(**kwargs)
+
+    def _predict_drape(
         self,
         collider_positions: str,
         collider_indices: str,
@@ -180,7 +195,11 @@ class AshriumPipeline:
         draped["topology_version"] = MHR_TOPOLOGY_VERSION
         return draped
 
-    def predict_pattern(
+    def predict_pattern(self, **kwargs: Any) -> dict:
+        with self._pattern_lock:
+            return self._predict_pattern(**kwargs)
+
+    def _predict_pattern(
         self,
         product_text: str,
         size_chart: str,
