@@ -245,8 +245,10 @@ class AshriumGpu:
 
 def _scale_gpu(min_containers: int) -> dict:
     n = max(0, int(min_containers))
-    cls = modal.Cls.from_name(APP_NAME, GPU_FUNCTION_NAME)
-    cls.update_autoscaler(
+    # update_autoscaler lives on the instance in Modal 1.x; on the Cls it
+    # resolves to a method lookup and raises "'Function' object is not callable".
+    gpu = modal.Cls.from_name(APP_NAME, GPU_FUNCTION_NAME)()
+    gpu.update_autoscaler(
         min_containers=n,
         max_containers=3,
         scaledown_window=180,
@@ -254,7 +256,7 @@ def _scale_gpu(min_containers: int) -> dict:
     if n > 0:
         # Fire-and-forget: the autoscaler starts the container; the warmup
         # HTTP call must not wait out a cold start.
-        cls().ping.spawn()
+        gpu.ping.spawn()
     return {"ok": True, "min_containers": n}
 
 
