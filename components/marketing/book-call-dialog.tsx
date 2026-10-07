@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type FormEvent, type JSX, type RefObject } from 'react';
 
+import { trackEvent } from '@/lib/analytics/posthog';
 import type { LeadField, LeadFieldErrors } from '@/lib/marketing/lead';
 
 interface BookCallDialogProps {
@@ -157,6 +158,7 @@ export function BookCallDialog({ onClose, open }: BookCallDialogProps): JSX.Elem
 
       setCalendlyUrl(typeof record.calendlyUrl === 'string' ? record.calendlyUrl : null);
       setStatus('saved');
+      trackEvent('book_call_submitted');
     } catch {
       setFormError('We could not save this request. Check your connection and try again.');
       setStatus('editing');

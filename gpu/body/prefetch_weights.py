@@ -45,7 +45,7 @@ def hub_cache() -> Path:
 
 
 def load_host_env() -> None:
-    """Read `.env.local` on the host so `cog push` can bake gated weights."""
+    """Read `.env.local` on the host so weight prefetch can see HF_TOKEN."""
     env_path = repo_root() / ".env.local"
     if not env_path.is_file():
         return

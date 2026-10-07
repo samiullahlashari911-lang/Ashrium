@@ -1,0 +1,21 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "ecf01cd85aace61cf12d948ca1220ab7"
+name = "Ashrium VFR"
+application_url = "https://www.ashrium.org"
+embedded = false
+
+[app_preferences]
+url = "https://www.ashrium.org/settings/integrations"
+
+[webhooks]
+api_version = "2026-07"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://www.ashrium.org/api/v1/shopify/oauth/callback" ]

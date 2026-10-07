@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { DashboardNavigation } from '@/app/(dashboard)/dashboard-navigation';
 import { StorefrontGoLiveBanner } from '@/components/dashboard/storefront-golive-banner';
 import { ThemeShell } from '@/components/theme/atmosphere-backdrop';
+import { PostHogAnalytics } from '@/lib/analytics/posthog';
 import { loadStorefrontGoLiveStatus } from '@/lib/server/storefront-golive';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -32,6 +33,7 @@ export default async function DashboardLayout({ children }: Readonly<{ children:
 
   return (
     <ThemeShell intensity="subtle" surface="dashboard">
+      <PostHogAnalytics tenantId={access.tenantId} />
       <DashboardNavigation />
       {goLiveStatus ? <StorefrontGoLiveBanner status={goLiveStatus} /> : null}
       {children}

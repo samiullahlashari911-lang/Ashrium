@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { JSX } from 'react';
 
 import { MarketingHome } from '@/components/marketing/landing-page';
+import { PostHogAnalytics } from '@/lib/analytics/posthog';
 
 export const metadata: Metadata = {
   title: 'Ashrium — Virtual fitting room for Shopify',
@@ -14,5 +15,10 @@ export const viewport: Viewport = {
 };
 
 export default function LandingPage(): JSX.Element {
-  return <MarketingHome />;
+  return (
+    <>
+      <PostHogAnalytics />
+      <MarketingHome />
+    </>
+  );
 }

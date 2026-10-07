@@ -3,7 +3,9 @@
     (function () {
       if (document.getElementById('ashrium-vfr-app-embed')) return;
       var appOrigin = {{ block.settings.platform_url | json }};
-      if (!appOrigin) return;
+      if (!appOrigin) {
+        appOrigin = 'https://www.ashrium.org';
+      }
       try {
         appOrigin = new URL(appOrigin).origin;
       } catch (error) {

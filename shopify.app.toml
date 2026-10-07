@@ -1,0 +1,18 @@
+client_id = "[SENSITIVE]"
+
+# Learn more at https://shopify.dev/docs/apps/build/cli-for-apps/app-configuration
+
+name = "Ashrium VFR"
+application_url = "https://www.ashrium.org"
+embedded = false
+
+[webhooks]
+api_version = "2025-10"
+
+[access_scopes]
+scopes = "read_products"
+
+[auth]
+redirect_urls = [
+  "https://www.ashrium.org/api/v1/shopify/oauth/callback",
+]
