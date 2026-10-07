@@ -2,43 +2,82 @@
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import torch
 
 from .topology import SAM2_HF_ID
 
 
-def _largest_reasonable_mask(masks: np.ndarray, scores: np.ndarray) -> np.ndarray:
-    if masks.ndim == 2:
-        return masks > 0.5
+# Prompt grid (fractions of W, H) over where a head-cropped torso can sit. One
+# centred point lands on the wall: between the legs in the front A-pose, and in
+# front of the body in the side view (the outline is centred on body + arms).
+PROMPT_XS = (0.3, 0.4, 0.5, 0.6, 0.7)
+PROMPT_YS = (0.15, 0.3, 0.45)
 
-    areas = masks.reshape(masks.shape[0], -1).sum(axis=1)
-    image_area = float(masks.shape[-1] * masks.shape[-2])
-    ranked = np.argsort(-scores)
-    for index in ranked:
-        fraction = float(areas[index]) / image_area
-        if 0.04 <= fraction <= 0.92:
-            return masks[index] > 0.5
 
-    return masks[int(np.argmax(scores))] > 0.5
+def person_mask_area(mask: np.ndarray) -> float | None:
+    """Area fraction if the mask is shaped like a head-cropped standing person, else None.
+
+    The capture frames the body from the cropped neck to the feet. Wall and
+    floor masks wrap the frame edges; a person touches the top and bottom rows
+    only at the neck and feet.
+    """
+    binary = np.asarray(mask) > 0.5
+    height, width = binary.shape
+    area = float(binary.mean())
+    if not 0.04 <= area <= 0.7:
+        return None
+    rows = np.flatnonzero(binary.any(axis=1))
+    if rows[0] > 0.2 * height or rows[-1] < 0.75 * height:
+        return None
+    if 0.5 * (binary[:, 0].mean() + binary[:, -1].mean()) > 0.25:
+        return None
+    if binary[0].mean() > 0.6 or binary[-1].mean() > 0.5:
+        return None
+    # A person is one solid region; low-contrast wall comes back as speckle.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary.astype(np.uint8), connectivity=8)
+    if count < 2 or stats[1:, cv2.CC_STAT_AREA].max() < 0.9 * binary.sum():
+        return None
+    return area
+
+
+def pick_person_mask(candidates: list[np.ndarray]) -> np.ndarray | None:
+    """Most-agreed person-shaped mask across prompts (IoU >= 0.9 votes); area breaks ties."""
+    plausible = [(mask > 0.5) for mask in candidates if person_mask_area(mask) is not None]
+    if not plausible:
+        return None
+
+    def votes(mask: np.ndarray) -> int:
+        total = 0
+        for other in plausible:
+            union = np.logical_or(mask, other).sum()
+            if union and np.logical_and(mask, other).sum() / union >= 0.9:
+                total += 1
+        return total
+
+    return max(plausible, key=lambda mask: (votes(mask), mask.sum()))
 
 
 def segment_person(predictor, image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return a boolean HxW silhouette and an xyxy bbox from a centered body prompt."""
+    """Return a boolean HxW silhouette and an xyxy bbox for the standing person."""
     height, width = image_rgb.shape[:2]
-    point_coords = np.array([[width * 0.5, height * 0.58]], dtype=np.float32)
-    point_labels = np.array([1], dtype=np.int32)
+    candidates: list[np.ndarray] = []
 
     with torch.inference_mode():
+        # The image encoder runs once; each prompt is a cheap decoder pass.
         predictor.set_image(image_rgb)
-        masks, scores, _ = predictor.predict(
-            point_coords=point_coords,
-            point_labels=point_labels,
-            multimask_output=False,
-        )
+        for fy in PROMPT_YS:
+            for fx in PROMPT_XS:
+                masks, _scores, _ = predictor.predict(
+                    point_coords=np.array([[width * fx, height * fy]], dtype=np.float32),
+                    point_labels=np.array([1], dtype=np.int32),
+                    multimask_output=True,
+                )
+                candidates.extend(np.asarray(masks).reshape(-1, height, width))
 
-    mask = _largest_reasonable_mask(np.asarray(masks), np.asarray(scores).reshape(-1))
-    if int(mask.sum()) < 32:
+    mask = pick_person_mask(candidates)
+    if mask is None:
         raise RuntimeError("SAM 2 did not find a person silhouette in the capture.")
 
     ys, xs = np.where(mask)
