@@ -1,3 +1,4 @@
+import { headlessKeepBox } from '@/lib/widget/webp-encode';
 import type { CaptureView, PoseGateStatus } from '@/types/hmr';
 
 export interface PoseLandmarkSample {
@@ -61,10 +62,18 @@ export function gateStatusCopy(status: PoseGateStatus, view: CaptureView): strin
       return view === 'front' ? 'Face the camera' : 'Turn 90° to your side';
     case 'raise_wrists':
       return 'Lift your wrists to your shoulders';
+    case 'off_center':
+      return 'Move to the middle of the frame';
+    case 'show_head':
+      return 'Step back so your head is in view too';
+    case 'arms_closed':
+      return 'Hold your arms a little away from your body';
+    case 'arms_too_high':
+      return 'Lower your arms, slightly away from your sides';
     case 'not_detected':
       return view === 'front'
-        ? 'Stand in the outline with arms slightly open'
-        : 'Step into the outline, then raise your wrists';
+        ? 'Step back so your whole body and feet are in view'
+        : 'Turn sideways with your whole body and feet in view';
   }
 }
 
@@ -120,7 +129,14 @@ export function evaluatePoseGate(
   }
 
   if (centerX < 0.24 || centerX > 0.76) {
-    return 'not_detected';
+    return 'off_center';
+  }
+
+  // Capture removes the head on the phone and fails closed without a visible
+  // face. Gate on the same rule so the hold never starts on a frame that
+  // cannot be cropped (it used to pass, trace, fail, and repeat forever).
+  if (!headlessKeepBox(landmarks, 1000, 1000)) {
+    return 'show_head';
   }
 
   const leftShoulder = landmarks[LEFT_SHOULDER];
@@ -166,8 +182,12 @@ export function evaluatePoseGate(
   const wristsTooHigh =
     leftWrist.y < leftShoulder.y - 0.1 && rightWrist.y < rightShoulder.y - 0.1;
 
-  if (!wristsOpen || wristsTooHigh) {
-    return 'not_detected';
+  if (wristsTooHigh) {
+    return 'arms_too_high';
+  }
+
+  if (!wristsOpen) {
+    return 'arms_closed';
   }
 
   return 'aligned';

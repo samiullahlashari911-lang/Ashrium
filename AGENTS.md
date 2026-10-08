@@ -310,8 +310,13 @@ patterns to replicate, not copy pixel-for-pixel:
   and side with arms forward at shoulder height. Owner-approved
   (2026-10-07): outlines should read as a natural body, so they are traced
   from SAM 2 masks of model photos (`gpu/tools/outline_masks/`; male done,
-  female/neutral still from the MHR mean mesh until their photos exist). Red until the gate passes, green while aligned, a trace
-  around the outline during the 1.2s hold.
+  female/neutral still from the MHR mean mesh until their photos exist).
+  Red until the gate passes, green while aligned, a trace around the
+  outline during the 1.2s hold. The live preview is mirrored like a selfie
+  (display only), side outlines are centred on the torso and flip to face
+  the way the shopper faces, and the pose gate requires a visible face (the
+  same rule as the on-device head crop) with a specific message for each
+  failure.
 - Replicate any attached design exactly: spacing, type hierarchy, corner
   radius, and color. Do not "simplify" or approximate a provided design.
 - Empty states are required everywhere data can be absent (no garments yet,

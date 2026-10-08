@@ -20,6 +20,21 @@ import {
 import type { CaptureSex, CaptureView, PoseGateStatus } from '@/types/hmr';
 
 const ALIGNED_HOLD_MS = 1200;
+const NOSE = 0;
+const LEFT_SHOULDER = 11;
+const RIGHT_SHOULDER = 12;
+
+/** True when the nose points to the raw frame's right; null while unclear. */
+function sideFacingRawRight(pose: readonly PoseLandmarkSample[]): boolean | null {
+  const nose = pose[NOSE];
+  const left = pose[LEFT_SHOULDER];
+  const right = pose[RIGHT_SHOULDER];
+  if (!nose || !left || !right || (nose.visibility ?? 0) < 0.5) {
+    return null;
+  }
+  const offset = nose.x - (left.x + right.x) / 2;
+  return Math.abs(offset) < 0.02 ? null : offset > 0;
+}
 const POSE_DETECT_INTERVAL_MS = 66;
 
 interface CaptureViewportProps {
@@ -81,6 +96,8 @@ export function CaptureViewport({
   const [holdProgress, setHoldProgress] = useState(0);
   const [pending, setPending] = useState<PendingCapture | null>(null);
   const [flash, setFlash] = useState(false);
+  // Side guide faces the way the shopper faces on the (mirrored) preview.
+  const [sideGuideMirrored, setSideGuideMirrored] = useState(false);
 
   sourceRef.current = source;
   viewportActiveRef.current = viewportActive;
@@ -233,6 +250,13 @@ export function CaptureViewport({
       }
 
       const nextGate = pose ? evaluatePoseGate(pose, view, lastGateRef.current) : 'not_detected';
+      if (view === 'side' && pose) {
+        const facing = sideFacingRawRight(pose);
+        // Raw-right is screen-left on the mirrored preview; the outline faces screen-right.
+        if (facing !== null) {
+          setSideGuideMirrored(facing);
+        }
+      }
       if (nextGate !== lastGateRef.current) {
         lastGateRef.current = nextGate;
         setGate(nextGate);
@@ -427,12 +451,20 @@ export function CaptureViewport({
               playsInline
               muted
               className={[
-                'absolute inset-0 h-full w-full object-cover',
+                // Mirrored like a selfie so stepping left moves left on screen.
+                // Display only: capture and pose use the raw camera frame.
+                'absolute inset-0 h-full w-full -scale-x-100 object-cover',
                 source === 'gallery' ? 'invisible' : '',
               ].join(' ')}
             />
             <div aria-hidden="true" className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 to-transparent" />
-            <SilhouetteOverlay view={view} sex={sex} gate={gate} holdProgress={holdProgress} />
+            <SilhouetteOverlay
+              view={view}
+              sex={sex}
+              gate={gate}
+              holdProgress={holdProgress}
+              mirrored={view === 'side' && sideGuideMirrored}
+            />
           </>
         )}
         <div

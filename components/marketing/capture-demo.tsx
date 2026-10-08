@@ -26,7 +26,7 @@ const SHOTS: Record<DemoView, { src: string; width: number; height: number; outl
     src: '/marketing/capture-side.webp',
     width: 896,
     height: 1200,
-    outline: 'translate(300.6 112.6) scale(1.0627)',
+    outline: 'translate(16.7 112.6) scale(1.0627)',
     chinY: 294,
   },
 };

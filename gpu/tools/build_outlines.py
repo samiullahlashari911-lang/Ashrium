@@ -231,6 +231,21 @@ def bezier_path(points: np.ndarray, scale: float) -> str:
     return "".join(parts) + "Z"
 
 
+def center_on_torso(mask: np.ndarray) -> tuple[np.ndarray, int]:
+    """Pad the side view so the torso, not body + forward arms, is centred.
+
+    The capture screen centres the outline and the pose gate centres the body;
+    without this the side guide sat beside a correctly placed shopper.
+    Returns the padded mask and the pixels added on the left.
+    """
+    height, width = mask.shape
+    band = mask[int(0.35 * height) : int(0.55 * height)]
+    torso_x = float(np.median(np.nonzero(band)[1]))
+    pad_left = max(0, int(round(width - 2 * torso_x)))
+    pad_right = max(0, int(round(2 * torso_x - width)))
+    return cv2.copyMakeBorder(mask, 0, 0, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0), pad_left
+
+
 def build() -> dict[str, dict[str, dict[str, object]]]:
     vertices, faces = load_mesh()
     masks = arm_masks(vertices)
@@ -248,9 +263,14 @@ def build() -> dict[str, dict[str, dict[str, object]]]:
             photo_mask = PHOTO_MASKS.get((sex, view))
             if photo_mask is not None:
                 mask, (x0, y0, crop_h) = photo_silhouette(photo_mask)
-                print(f"{sex} {view}: photo transform translate({x0:.1f} {y0:.1f}) scale({crop_h / view_height:.4f})")
             else:
                 mask = silhouette(posed, faces, axis, flip)
+            if view == "side":
+                mask, pad_left = center_on_torso(mask)
+                if photo_mask is not None:
+                    x0 -= pad_left * crop_h / RENDER_HEIGHT_PX
+            if photo_mask is not None:
+                print(f"{sex} {view}: photo transform translate({x0:.1f} {y0:.1f}) scale({crop_h / view_height:.4f})")
             points = smooth_contour(mask)
             scale = view_height / mask.shape[0]
             outlines[sex][view] = {

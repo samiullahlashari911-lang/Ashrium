@@ -45,6 +45,38 @@ const SIDE_ALIGNED = landmarks({
   28: { x: 0.51, y: 0.88 },
 });
 
+test('a head out of view blocks capture before the hold starts', () => {
+  // Face landmarks above the frame: the on-device head crop would fail closed.
+  const headless = landmarks({
+    ...Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => [i, { x: 0.5, y: 0.1, visibility: 0.1 }])),
+    11: { x: 0.38, y: 0.28 },
+    12: { x: 0.62, y: 0.28 },
+    15: { x: 0.28, y: 0.48 },
+    16: { x: 0.72, y: 0.48 },
+    23: { x: 0.42, y: 0.52 },
+    24: { x: 0.58, y: 0.52 },
+    27: { x: 0.43, y: 0.88 },
+    28: { x: 0.57, y: 0.88 },
+  });
+  assert.equal(evaluatePoseGate(headless, 'front'), 'show_head');
+  assert.match(gateStatusCopy('show_head', 'front'), /head/i);
+});
+
+test('front gate names the arm or position problem instead of a generic miss', () => {
+  const closed = [...FRONT_ALIGNED];
+  closed[15] = { x: 0.43, y: 0.5, visibility: 1 };
+  closed[16] = { x: 0.57, y: 0.5, visibility: 1 };
+  assert.equal(evaluatePoseGate(closed, 'front'), 'arms_closed');
+
+  const raised = [...FRONT_ALIGNED];
+  raised[15] = { x: 0.28, y: 0.1, visibility: 1 };
+  raised[16] = { x: 0.72, y: 0.1, visibility: 1 };
+  assert.equal(evaluatePoseGate(raised, 'front'), 'arms_too_high');
+
+  const shifted = FRONT_ALIGNED.map((point) => ({ ...point, x: point.x + 0.3 }));
+  assert.equal(evaluatePoseGate(shifted, 'front'), 'off_center');
+});
+
 test('front A-pose is aligned when the body fills the silhouette', () => {
   assert.equal(evaluatePoseGate(FRONT_ALIGNED, 'front'), 'aligned');
   assert.match(gateStatusCopy('aligned', 'front'), /Hold still/);

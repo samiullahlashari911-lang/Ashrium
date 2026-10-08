@@ -133,6 +133,10 @@ export type PoseGateStatus =
   | 'too_far'
   | 'turn_required'
   | 'raise_wrists'
+  | 'off_center'
+  | 'show_head'
+  | 'arms_closed'
+  | 'arms_too_high'
   | 'not_detected';
 
 export interface CaptureSession {
