@@ -22,6 +22,8 @@ export default async function SandboxPage() {
     mode: readGarmentIngestMode(item.profile.mode),
     ingestTier: readGarmentIngestTier(item.profile.ingest_tier),
     approximateFit: item.profile.approximate_fit,
+    imageUrl: item.profile.cad_pattern_url,
+    printQaPassed: item.profile.print_qa_passed === true,
   }));
 
   return (
