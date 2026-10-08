@@ -58,22 +58,45 @@ test('hoods, lapels, cargo, and knitwear are unsupported for 3D', () => {
   assert.equal(detectUnsupportedGeometry({ category: 'tee', title: 'Essential Cotton Tee' }), null);
 });
 
+test('skirts filed as bottoms and multi-piece sets have no 3D path; descriptions do not trigger it', () => {
+  assert.equal(detectUnsupportedGeometry({ category: 'pant', title: 'Striped Maxi Skirt / Pink' }), 'skirt');
+  assert.equal(detectUnsupportedGeometry({ category: 'pant', title: 'Vintage Wash Oversized Tee and Shorts Set' }), 'multi-piece set');
+  assert.equal(detectUnsupportedGeometry({ category: 'dress', title: 'Scoop Neck Top and Skort Swim Set / Black' }), 'multi-piece set');
+  assert.equal(
+    detectUnsupportedGeometry({ category: 'dress', title: 'Halter Neck Maxi Dress', description: 'A flowy skirt that moves' }),
+    null,
+  );
+  assert.equal(
+    detectUnsupportedGeometry({ category: 'tee', title: 'Cotton Crew Tee', description: 'Classic set-in sleeves' }),
+    null,
+  );
+});
+
 test('pattern dispatch skips unsupported styles and empty charts', () => {
   assert.equal(shouldDispatchPattern(teeDraft()), true);
   assert.equal(shouldDispatchPattern(teeDraft({ name: 'Pullover Hoodie', category: 'outerwear' })), false);
   assert.equal(shouldDispatchPattern(teeDraft({ sizeVariants: [] })), false);
+  const size = (overrides: Partial<{ chestCm: number | null; waistCm: number | null; hipCm: number | null; lengthCm: number | null }>) => ({
+    sizeCode: 'M',
+    chestCm: null,
+    waistCm: null,
+    hipCm: null,
+    lengthCm: null,
+    externalSku: null,
+    measurementsFromSource: true,
+    ...overrides,
+  });
+  // A real tee chart: chest + length only. GarmentCode can grade it.
+  assert.equal(shouldDispatchPattern(teeDraft({ sizeVariants: [size({ chestCm: 104, lengthCm: 70 })] })), true);
+  // No length: the pattern cannot be sized.
+  assert.equal(shouldDispatchPattern(teeDraft({ sizeVariants: [size({ chestCm: 104 })] })), false);
+  // Pants grade on waist or hip + length, not chest.
   assert.equal(
-    shouldDispatchPattern(teeDraft({
-      sizeVariants: [{
-        sizeCode: 'M',
-        chestCm: 104,
-        waistCm: null,
-        hipCm: null,
-        lengthCm: 70,
-        externalSku: null,
-        measurementsFromSource: true,
-      }],
-    })),
+    shouldDispatchPattern(teeDraft({ name: 'Wide Leg Chino', category: 'pant', sizeVariants: [size({ waistCm: 76, lengthCm: 100 })] })),
+    true,
+  );
+  assert.equal(
+    shouldDispatchPattern(teeDraft({ name: 'Wide Leg Chino', category: 'pant', sizeVariants: [size({ chestCm: 100, lengthCm: 100 })] })),
     false,
   );
 });

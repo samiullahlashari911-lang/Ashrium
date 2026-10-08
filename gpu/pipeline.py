@@ -63,7 +63,6 @@ class AshriumPipeline:
         self._sam2_lock = threading.Lock()
         self._sam3d_lock = threading.Lock()
         self._drape_lock = threading.Lock()
-        self._pattern_lock = threading.Lock()
         from body.prefetch_weights import configure_hf_cache, sam3d_snapshot_ready
 
         configure_hf_cache()
@@ -83,9 +82,6 @@ class AshriumPipeline:
         except Exception as error:
             raise RuntimeError(f"GPU setup failed on live weights: {error}") from error
 
-        from pattern.paths import garmentcode_root
-
-        self.garmentcode_root = garmentcode_root()
         self.setup_ms = elapsed_ms(setup_started)
 
     def predict_body(
@@ -194,27 +190,3 @@ class AshriumPipeline:
         draped["task"] = "drape"
         draped["topology_version"] = MHR_TOPOLOGY_VERSION
         return draped
-
-    def predict_pattern(self, **kwargs: Any) -> dict:
-        with self._pattern_lock:
-            return self._predict_pattern(**kwargs)
-
-    def _predict_pattern(
-        self,
-        product_text: str,
-        size_chart: str,
-        garment_category: str,
-    ) -> dict:
-        from pattern.instantiate import instantiate_patterns
-
-        text = product_text if isinstance(product_text, str) else ""
-        if len(text) > 16_000:
-            text = text[:16_000]
-        result = instantiate_patterns(
-            category=garment_category,
-            product_text=text,
-            size_chart_json=size_chart,
-        )
-        result["task"] = "pattern"
-        result["topology_version"] = MHR_TOPOLOGY_VERSION
-        return result

@@ -231,18 +231,24 @@ class AshriumGpu:
             origin_y=float(origin_y),
         )
 
-    @modal.method()
-    def pattern(
-        self,
-        product_text: str,
-        size_chart: str,
-        garment_category: str,
-    ) -> dict:
-        return self.pipeline.predict_pattern(
-            product_text=product_text,
-            size_chart=size_chart,
-            garment_category=garment_category,
-        )
+
+# GarmentCode 2D instantiation is CPU work: grading a catalog must not pay for
+# an A100 (and its 35 s model load) or take shopper GPU slots.
+@app.function(image=image, cpu=4.0, memory=8192, timeout=300, max_containers=8)
+def pattern_task(product_text: str, size_chart: str, garment_category: str) -> dict:
+    _package_on_path()
+    from body.topology import MHR_TOPOLOGY_VERSION
+    from pattern.instantiate import instantiate_patterns
+
+    text = product_text if isinstance(product_text, str) else ""
+    result = instantiate_patterns(
+        category=garment_category,
+        product_text=text[:16_000],
+        size_chart_json=size_chart,
+    )
+    result["task"] = "pattern"
+    result["topology_version"] = MHR_TOPOLOGY_VERSION
+    return result
 
 
 def _scale_gpu(min_containers: int) -> dict:
@@ -351,8 +357,7 @@ def api():
         raw = await request.body()
         authorize(request, raw)
         payload = read_json(raw)
-        gpu = AshriumGpu()
-        result = await gpu.pattern.remote.aio(
+        result = await pattern_task.remote.aio(
             product_text=str(payload.get("product_text") or ""),
             size_chart=str(payload.get("size_chart") or "[]"),
             garment_category=str(payload.get("garment_category") or "tee"),

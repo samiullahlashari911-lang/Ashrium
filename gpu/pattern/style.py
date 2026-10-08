@@ -22,6 +22,10 @@ _JUMPSUIT = re.compile(r"\b(jumpsuit|romper|overall)\b", re.I)
 _SLEEVELESS = re.compile(r"\b(sleeveless|tank\s+top|\btank\b|vest)\b", re.I)
 _LONG_SLEEVE = re.compile(r"\b(long[-\s]?sleeve|full[-\s]?sleeve)\b", re.I)
 _THREE_QUARTER = re.compile(r"\b(3/?4[-\s]?sleeve|three[-\s]?quarter)\b", re.I)
+# Gathered waists: the sewn waist is wider than the relaxed chart waist.
+_ELASTIC_WAIST = re.compile(
+    r"\b(elastic|drawstring|jogger|joggers|legging|leggings|sweatpants?|pull[-\s]?on|smocked)\b", re.I
+)
 
 
 def _corpus(product_text: str) -> str:
@@ -69,4 +73,5 @@ def parse_style(category: str, product_text: str) -> dict[str, Any]:
         "sleeve_length": sleeve_length,
         "shirt_width": shirt_width,
         "category": category,
+        "elastic_waist": bool(_ELASTIC_WAIST.search(text)),
     }

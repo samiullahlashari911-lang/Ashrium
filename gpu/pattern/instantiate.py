@@ -96,29 +96,44 @@ def _chart_ok(chart: float, pattern: float) -> bool:
 
 def _cross_check(
     category: str,
-    measurements: dict[str, float],
+    measurements: dict[str, Any],
     pattern_girths: dict[str, float],
+    elastic_waist: bool = False,
 ) -> str | None:
+    """Compare the instantiated pattern with the girths the chart published (never inferred ones).
+
+    An elastic or drawstring waist is charted relaxed; its sewn waist is wider,
+    so only a pattern waist narrower than the chart is a mismatch.
+    """
+    published = measurements.get("published", {*GIRTH_KEYS, "lengthCm"})
     if not _chart_ok(measurements["lengthCm"], pattern_girths["lengthCm"]):
         rel = abs(pattern_girths["lengthCm"] - measurements["lengthCm"]) / max(
             measurements["lengthCm"], 1.0
         )
         if rel > LENGTH_REL_TOL:
             return "chart_mismatch"
-    if category == "pant":
-        if not _chart_ok(measurements["waistCm"], pattern_girths["waistCm"]):
+    checked = ("waistCm", "hipCm") if category == "pant" else ("chestCm", "waistCm")
+    for key in checked:
+        if key not in published:
+            continue
+        if key == "waistCm" and elastic_waist:
+            if pattern_girths[key] < measurements[key] - CHART_ABS_TOL_CM:
+                return "chart_mismatch"
+            continue
+        if not _chart_ok(measurements[key], pattern_girths[key]):
             return "chart_mismatch"
-        if not _chart_ok(measurements["hipCm"], pattern_girths["hipCm"]):
-            return "chart_mismatch"
-        return None
-    if not _chart_ok(measurements["chestCm"], pattern_girths["chestCm"]):
-        return "chart_mismatch"
-    if not _chart_ok(measurements["waistCm"], pattern_girths["waistCm"]):
-        return "chart_mismatch"
     return None
 
 
-def _parse_size_chart(raw: str) -> list[dict[str, Any]]:
+GIRTH_KEYS = ("chestCm", "waistCm", "hipCm")
+
+
+def _parse_size_chart(raw: str, category: str) -> list[dict[str, Any]]:
+    """Published sizes. Tops/dresses need chest + length; pants need waist or hip + length.
+
+    Real charts publish only what matters for the garment (a tee has no hip), so
+    other girths may be 0. `published` records what the chart actually stated.
+    """
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -131,15 +146,35 @@ def _parse_size_chart(raw: str) -> list[dict[str, Any]]:
             raise RuntimeError("size_chart entries must be objects.")
         size_code = str(entry.get("sizeCode", "")).strip()
         measurements = {
-            "chestCm": float(entry.get("chestCm", 0)),
-            "waistCm": float(entry.get("waistCm", 0)),
-            "hipCm": float(entry.get("hipCm", 0)),
-            "lengthCm": float(entry.get("lengthCm", 0)),
+            key: max(0.0, float(entry.get(key, 0) or 0)) for key in (*GIRTH_KEYS, "lengthCm")
         }
-        if not size_code or any(value <= 0 for value in measurements.values()):
-            raise RuntimeError("Each size needs sizeCode and positive chest/waist/hip/length cm.")
-        sizes.append({"sizeCode": size_code, **measurements})
+        published = {key for key, value in measurements.items() if value > 0}
+        if category == "pant":
+            girth_ok = "waistCm" in published or "hipCm" in published
+            need = "waist or hip"
+        else:
+            girth_ok = "chestCm" in published
+            need = "chest"
+        if not size_code or not girth_ok or "lengthCm" not in published:
+            raise RuntimeError(f"Each size needs sizeCode, {need}, and length in cm.")
+        sizes.append({"sizeCode": size_code, **measurements, "published": published})
     return sizes
+
+
+def _fill_unpublished_girths(size: dict[str, Any], body: Any) -> None:
+    """Infer girths the chart did not publish from the template body's proportions.
+
+    Pattern geometry only: inferred values shape GarmentCode's body proxy, are
+    never cross-checked as if published, and never reach the catalog or the
+    size verdict (that is girths + the published chart).
+    """
+    template = {"chestCm": float(body["bust"]), "waistCm": float(body["waist"]), "hipCm": float(body["hips"])}
+    anchors = [key for key in GIRTH_KEYS if key in size["published"]]
+    for key in GIRTH_KEYS:
+        if key in size["published"]:
+            continue
+        ratios = [size[anchor] / max(template[anchor], 1.0) for anchor in anchors]
+        size[key] = template[key] * (sum(ratios) / len(ratios))
 
 
 def instantiate_patterns(
@@ -160,12 +195,13 @@ def instantiate_patterns(
             "meshes": [],
         }
 
-    sizes = _parse_size_chart(size_chart_json)
+    sizes = _parse_size_chart(size_chart_json, category)
     base_design = _load_yaml_design()
     meshes: list[dict[str, Any]] = []
 
     for size in sizes:
         body = BodyParameters(str(body_yaml_path()))
+        _fill_unpublished_girths(size, body)
         _scale_body(body, size)
         design = copy.deepcopy(base_design)
         _apply_style(design, style)
@@ -209,7 +245,7 @@ def instantiate_patterns(
                 "meshes": [],
             }
 
-        mismatch = _cross_check(category, size, pattern_girths)
+        mismatch = _cross_check(category, size, pattern_girths, bool(style.get("elastic_waist")))
         if mismatch:
             return {
                 "task": "pattern",
@@ -222,6 +258,8 @@ def instantiate_patterns(
 
         mesh = to_rest_length_mesh(category, str(size["sizeCode"]), size, quarter_widths)
         mesh["pattern_girths"] = pattern_girths
+        # Girths not listed here were inferred for pattern geometry only.
+        mesh["published_measurements"] = sorted(size["published"])
         meshes.append(mesh)
 
     return {

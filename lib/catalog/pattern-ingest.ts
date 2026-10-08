@@ -13,18 +13,19 @@ export function shouldDispatchPattern(draft: CatalogGarmentDraft): boolean {
     return false;
   }
 
-  const allGirthsPublished = draft.sizeVariants.every(
-    (variant) =>
-      typeof variant.chestCm === 'number'
-      && variant.chestCm > 0
-      && typeof variant.waistCm === 'number'
-      && variant.waistCm > 0
-      && typeof variant.hipCm === 'number'
-      && variant.hipCm > 0
-      && typeof variant.lengthCm === 'number'
-      && variant.lengthCm > 0,
+  // What GarmentCode needs per category (gpu/pattern/instantiate.py): a top
+  // or dress needs chest + length, pants need waist or hip + length. Real
+  // charts omit the rest (a tee has no hip); the GPU infers those for pattern
+  // geometry only, never for the size verdict.
+  const published = (value: number | null | undefined): boolean =>
+    typeof value === 'number' && value > 0;
+  const everySizeGradable = draft.sizeVariants.every((variant) =>
+    published(variant.lengthCm)
+    && (draft.category === 'pant'
+      ? published(variant.waistCm) || published(variant.hipCm)
+      : published(variant.chestCm)),
   );
-  if (!allGirthsPublished) {
+  if (!everySizeGradable) {
     return false;
   }
 

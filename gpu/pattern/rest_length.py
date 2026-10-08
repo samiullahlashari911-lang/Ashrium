@@ -179,21 +179,48 @@ def sample_quarter_widths_m(
         girth_cm = max(girth_cm_at_world_y(panels, world_y), 8.0)
         widths_m.append((girth_cm / 100.0) / 4.0)
 
-    def station(t: float) -> float:
-        return girth_cm_at_world_y(panels, ymin + t * span)
+    profile = [
+        (t, girth_cm_at_world_y(panels, ymin + t * span))
+        for t in (step / (PROFILE_SAMPLES - 1) for step in range(PROFILE_SAMPLES))
+    ]
+    return widths_m, pattern_girths_from_profile(profile, category, span)
+
+
+PROFILE_SAMPLES = 41
+
+
+def pattern_girths_from_profile(
+    profile: list[tuple[float, float]],
+    category: str,
+    span_cm: float,
+) -> dict[str, float]:
+    """Chart-comparable girths from a hem-to-top girth profile (t = 0 at the hem).
+
+    Tops are measured by shape, not fixed heights: a fixed 78% station sat in
+    the armhole curve (a 102 cm chest read as 80 cm) while the real chest was
+    labelled waist. Chest = widest point below the armholes, waist = narrowest
+    mid-body, hip = widest near the hem.
+    """
+
+    def band(low: float, high: float) -> list[float]:
+        values = [girth for t, girth in profile if low <= t <= high]
+        if not values:
+            raise RuntimeError(f"No pattern girth samples between {low} and {high}.")
+        return values
+
+    def at(t_target: float) -> float:
+        return min(profile, key=lambda sample: abs(sample[0] - t_target))[1]
 
     if category == "pant":
-        pattern_girths = {
-            "chestCm": station(0.7),
-            "waistCm": station(0.92),
-            "hipCm": station(0.7),
-            "lengthCm": span,
+        return {
+            "chestCm": at(0.7),
+            "waistCm": at(0.92),
+            "hipCm": at(0.7),
+            "lengthCm": span_cm,
         }
-    else:
-        pattern_girths = {
-            "chestCm": station(0.78),
-            "waistCm": station(0.42),
-            "hipCm": station(0.18),
-            "lengthCm": span,
-        }
-    return widths_m, pattern_girths
+    return {
+        "chestCm": max(band(0.45, 0.78)),
+        "waistCm": min(band(0.3, 0.6)),
+        "hipCm": max(band(0.0, 0.25)),
+        "lengthCm": span_cm,
+    }
