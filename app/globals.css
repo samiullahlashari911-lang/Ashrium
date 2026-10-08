@@ -287,22 +287,29 @@ body {
   }
 }
 
-/* Landing page: the capture outline traces itself the way it does on the phone. */
-@keyframes mkt-trace {
-  0% {
+/* Capture demo: one 1.2 s trace while the pose is held, as in the app. */
+@keyframes mkt-hold-trace {
+  from {
     stroke-dashoffset: 100;
-    opacity: 1;
   }
-  70% {
+  to {
     stroke-dashoffset: 0;
-    opacity: 1;
   }
-  100% {
-    stroke-dashoffset: 0;
+}
+
+.mkt-hold-trace {
+  animation: mkt-hold-trace 1.2s linear forwards;
+}
+
+@keyframes mkt-flash {
+  from {
+    opacity: 0.9;
+  }
+  to {
     opacity: 0;
   }
 }
 
-.mkt-trace {
-  animation: mkt-trace 2.6s var(--ash-ease) infinite;
+.mkt-flash {
+  animation: mkt-flash 0.35s ease-out forwards;
 }

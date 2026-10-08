@@ -1,11 +1,11 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition, type ChangeEvent, type FormEvent } from 'react';
 
 import { AshriumWordmark } from '@/components/brand/ashrium-logo';
-import { MannequinShowcase } from '@/components/marketing/mannequin-showcase';
 import {
   MERCHANT_HOME_PATH,
   merchantPostAuthPath,
@@ -81,7 +81,30 @@ export function AuthForm({ initialError }: AuthFormProps) {
           markClassName="h-8 w-8 shrink-0 text-ash-accent"
           wordClassName="text-base font-semibold tracking-tight text-ash-ink"
         />
-        <MannequinShowcase className="mx-auto h-[56vh] w-full max-w-md" />
+        <div className="relative mx-auto h-[56vh] w-full max-w-md">
+          <div className="relative h-full overflow-hidden rounded-[28px] border border-ash-line bg-ash-surface shadow-lift">
+            <Image
+              src="/marketing/signin-linen.webp"
+              alt="A shopper in a sand linen shirt"
+              fill
+              sizes="448px"
+              className="object-cover object-top"
+              priority
+            />
+          </div>
+          <div className="absolute bottom-8 left-0 -translate-x-6 rounded-2xl border border-ash-line bg-ash-surface/95 px-4 py-3 shadow-lift backdrop-blur">
+            <p className="text-[11px] text-ash-muted">Recommended size</p>
+            <div className="mt-1 flex items-center gap-3">
+              <span className="text-2xl font-semibold leading-none text-ash-ink">M</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-ash-success px-2.5 py-1 text-[10px] font-semibold text-white">
+                <svg viewBox="0 0 24 24" className="h-3 w-3" aria-hidden="true">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Confident fit
+              </span>
+            </div>
+          </div>
+        </div>
         <div>
           <p className="text-2xl font-semibold leading-snug tracking-tight text-ash-ink">
             Your fitting room, your numbers.

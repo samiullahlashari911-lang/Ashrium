@@ -1,13 +1,13 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useState, type JSX, type ReactNode } from 'react';
 
 import { AshriumWordmark } from '@/components/brand/ashrium-logo';
 import { BookCallDialog } from '@/components/marketing/book-call-dialog';
-import { MannequinShowcase } from '@/components/marketing/mannequin-showcase';
+import { CaptureDemo, CaptureFrame } from '@/components/marketing/capture-demo';
 import { CONSENT_BULLETS } from '@/lib/privacy/consent-copy';
-import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
 
 const NAV = [
   { href: '#how', label: 'How it works' },
@@ -68,23 +68,26 @@ function Eyebrow({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** The real capture outline, tracing green as it does on the phone. */
-function OutlineTrace({ className = '' }: { className?: string }): JSX.Element {
-  const outline = CAPTURE_OUTLINES.female.front;
+/**
+ * Product-page gallery thumbnails: the store's model photo (shown) and the
+ * shopper's own 3D fit, which Ashrium adds to the page.
+ */
+function GalleryThumbs(): JSX.Element {
   return (
-    <svg viewBox={outline.viewBox} className={className} aria-hidden="true">
-      <path d={outline.path} fill="rgba(34,199,122,0.16)" stroke="#22C77A" strokeWidth={7} strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 10px rgba(34,199,122,0.6))' }} />
-      <path
-        d={outline.path}
-        fill="none"
-        stroke="#fff"
-        strokeWidth={9}
-        strokeLinecap="round"
-        pathLength={100}
-        strokeDasharray="100 100"
-        className="mkt-trace"
-      />
-    </svg>
+    <div className="absolute right-3 top-3 flex gap-2" aria-hidden="true">
+      <figure className="flex flex-col items-center gap-1">
+        <span className="relative block h-[58px] w-[46px] overflow-hidden rounded-lg border-2 border-ash-accent bg-white shadow-card">
+          <Image src="/marketing/product-linen.webp" alt="" fill sizes="46px" className="object-cover object-top" />
+        </span>
+        <figcaption className="text-[9px] font-semibold text-ash-ink">On model</figcaption>
+      </figure>
+      <figure className="flex flex-col items-center gap-1">
+        <span className="flex h-[58px] w-[46px] items-center justify-center rounded-lg border border-ash-line bg-white text-[11px] font-semibold text-ash-accent shadow-card">
+          3D
+        </span>
+        <figcaption className="text-[9px] font-medium text-ash-muted">Your fit</figcaption>
+      </figure>
+    </div>
   );
 }
 
@@ -182,26 +185,34 @@ function Hero({ onBook }: { onBook: () => void }): JSX.Element {
               <span className="ml-3 truncate text-xs text-ash-subtle">yourstore.com/products/relaxed-linen-shirt</span>
             </div>
             <div className="grid grid-cols-1 gap-3 bg-ash-canvas p-3 sm:grid-cols-[1fr_230px]">
-              <div className="relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_80%_at_50%_15%,#ffffff_0%,#f4f1ec_70%)]">
-                <MannequinShowcase className="h-[360px] sm:h-[380px]" />
+              <div className="relative h-[360px] overflow-hidden rounded-2xl bg-[radial-gradient(90%_70%_at_50%_35%,#EDE6DE_0%,#E2DAD0_70%,#D8CFC3_100%)] sm:h-[380px]">
+                <Image
+                  src="/marketing/product-linen-full.webp"
+                  alt="Model wearing the relaxed linen shirt"
+                  fill
+                  sizes="(min-width: 640px) 400px, 90vw"
+                  className="object-contain"
+                  style={{
+                    maskImage: 'linear-gradient(90deg, transparent 0%, #000 14%, #000 86%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 14%, #000 86%, transparent 100%)',
+                  }}
+                  priority
+                />
                 <span className="absolute left-3 top-3 rounded-full bg-white/85 px-2.5 py-1 text-[10px] font-semibold text-ash-ink shadow-card">
-                  Live 3D mannequin
+                  On model
                 </span>
+                <GalleryThumbs />
               </div>
               <FittingPanel />
             </div>
           </div>
           <PhoneFrame className="absolute -left-1 top-[170px] w-[104px] sm:-bottom-2 sm:-left-10 sm:top-auto sm:w-[150px] lg:-bottom-10">
-            <div className="flex h-[230px] flex-col bg-[#17151C] sm:h-[270px]">
-              <div className="flex flex-1 items-center justify-center p-3">
-                <OutlineTrace className="h-full max-w-full" />
-              </div>
-              <div className="flex justify-center pb-3">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1 text-[9px] font-semibold text-ash-ink">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#22C77A]" />
-                  Perfect, hold still
-                </span>
-              </div>
+            <div className="relative flex h-[230px] flex-col justify-center bg-[#ECE6DF] sm:h-[270px]">
+              <CaptureFrame view="front" phase="hold" className="aspect-[3/4] w-full" priority />
+              <span className="absolute bottom-2.5 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-full bg-white/90 px-2.5 py-1 text-[9px] font-semibold text-ash-ink shadow-card">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#22C77A]" />
+                Perfect, hold still
+              </span>
             </div>
           </PhoneFrame>
         </div>
@@ -234,11 +245,7 @@ function StepVisual({ index }: { index: number }): JSX.Element {
     );
   }
   if (index === 1) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-2xl bg-[#17151C] p-4" aria-hidden="true">
-        <OutlineTrace className="h-full max-h-[210px]" />
-      </div>
-    );
+    return <CaptureDemo />;
   }
   return (
     <div className="flex h-full items-center justify-center" aria-hidden="true">
@@ -297,7 +304,7 @@ export function MarketingHome(): JSX.Element {
             <ol className="mt-10 grid gap-5 md:grid-cols-3">
               {STEPS.map((step, index) => (
                 <li key={step.title} className="ash-card flex flex-col gap-5 p-6">
-                  <div className="h-[260px] overflow-hidden rounded-2xl bg-ash-raised p-3">
+                  <div className="h-[320px] overflow-hidden rounded-2xl bg-ash-raised p-3">
                     <StepVisual index={index} />
                   </div>
                   <div className="flex items-start gap-3">
