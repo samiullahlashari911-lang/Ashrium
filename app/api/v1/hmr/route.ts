@@ -27,6 +27,15 @@ import { createServiceClient } from '@/lib/supabase/service';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
+/** Best-effort GPU sleep: awaited so it runs, but never changes the response. */
+async function sleepGpuQuietly(): Promise<void> {
+  try {
+    await sleepGpuIfNoActiveFitJobs();
+  } catch {
+    // The status poll and deadline watcher reconcile the GPU again.
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   let payload: unknown;
 
@@ -89,7 +98,7 @@ export async function POST(request: Request): Promise<Response> {
   ]);
 
   if (frontObject.error || !frontObject.data || sideObject.error || !sideObject.data) {
-    void sleepGpuIfNoActiveFitJobs();
+    await sleepGpuQuietly();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 404 });
   }
 
@@ -103,7 +112,7 @@ export async function POST(request: Request): Promise<Response> {
     frontImageB64 = Buffer.from(frontBytes).toString('base64');
     sideImageB64 = Buffer.from(sideBytes).toString('base64');
   } catch {
-    void sleepGpuIfNoActiveFitJobs();
+    await sleepGpuQuietly();
     return Response.json({ code: 'BIOMETRIC_ASSET_UNAVAILABLE' }, { status: 502 });
   }
 
@@ -123,7 +132,7 @@ export async function POST(request: Request): Promise<Response> {
     .single();
 
   if (createError || !job) {
-    void sleepGpuIfNoActiveFitJobs();
+    await sleepGpuQuietly();
     return Response.json({ code: 'JOB_CREATION_FAILED' }, { status: 500 });
   }
 
@@ -155,7 +164,7 @@ export async function POST(request: Request): Promise<Response> {
       })
       .eq('id', job.id)
       .eq('tenant_id', tenantId);
-    void sleepGpuIfNoActiveFitJobs();
+    await sleepGpuQuietly();
     return Response.json({ job_id: job.id, status: 'failed' }, { status: 502 });
   }
 
@@ -187,13 +196,15 @@ export async function POST(request: Request): Promise<Response> {
       .eq('id', job.id)
       .eq('tenant_id', tenantId);
 
-    void sleepGpuIfNoActiveFitJobs();
+    await sleepGpuQuietly();
     return Response.json({ job_id: job.id, status: 'pending' }, { status: 500 });
   }
 
-  after(() => {
-    void watchShopperGpuDeadline(job.id);
-    void (async () => {
+  // Return the work: Vercel keeps the function alive only for promises the
+  // after() callback hands back. A fire-and-forget body call never reached Modal.
+  after(() => Promise.all([
+    watchShopperGpuDeadline(job.id),
+    (async () => {
       const startedAt = new Date().toISOString();
       const jobRow = {
         replicate_prediction_id: callId,
@@ -260,11 +271,11 @@ export async function POST(request: Request): Promise<Response> {
             .eq('id', job.id)
             .eq('tenant_id', tenantId)
             .in('status', ['pending', 'processing']);
-          void sleepGpuIfNoActiveFitJobs();
+          await sleepGpuQuietly();
         }
       }
-    })();
-  });
+    })(),
+  ]));
 
   return Response.json({ job_id: job.id, status: 'pending' }, { status: 202 });
 }

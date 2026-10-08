@@ -64,9 +64,9 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'SESSION_GPU_FAILED' }, { status: 502 });
   }
 
-  after(() => {
-    void watchWarmGpuIdleTimeout();
-  });
+  // Returned so Vercel keeps the function alive for it; a voided promise was
+  // dropped and an abandoned capture never put the GPU back to sleep.
+  after(() => watchWarmGpuIdleTimeout());
 
   return Response.json({ ok: true, status: 'warming' }, { status: 202 });
 }

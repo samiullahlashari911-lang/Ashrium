@@ -24,9 +24,8 @@ function compositionJson(draft: CatalogGarmentDraft): Json | null {
 
 function scheduleFollowUp(work: () => Promise<void>): void {
   try {
-    after(() => {
-      void work();
-    });
+    // Return the promise so Vercel keeps the function alive until grading ends.
+    after(() => work());
   } catch {
     // Charts are already saved; GarmentCode can retry on the next sync.
   }
