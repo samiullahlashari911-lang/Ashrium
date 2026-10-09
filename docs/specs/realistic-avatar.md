@@ -106,3 +106,18 @@ S1 needs a Modal deploy by the owner (production deploys are blocked for the age
   p95 + 20 %; drape failure shows the shopper in their own clothes".
 - §5.5 file map (additive): `lib/graphics/photo-skin.ts`,
   `gpu/tools/build_body_parts.py`, `public/models/mhr-parts.bin`.
+
+## Mirror view (owner decision 2026-10-09, after the painted 3D avatar was rejected as "looks like a 3D model")
+
+| # | Decision |
+|---|---|
+| Q15 | Prototype offline on the landing-page model photos (real GPU drape, real photo) and get the owner's yes on the images **before** any app change. |
+| Q16 | Clean studio backdrop with a soft floor shadow; the shopper is cut out on the phone (MediaPipe segmentation, approved package; nothing uploaded). |
+| Q17 | Front and side photo views with a toggle; the 3D turn view leaves the shopper screen; the tight/loose heatmap is an overlay on the photo. |
+| Q18 | **The tried garment fully replaces what it stands for.** The old top's pixels are removed (MediaPipe multi-class "clothes", split top/bottom by the fitted body's parts); where the new garment does not cover, the shopper's fitted body shows in their skin tone, or the backdrop beyond the body outline. |
+| Q19 | The garment is lit to match the photo (brightness and warmth from the photo) with soft contact shadows, so it sits in the photo. |
+
+How: the GPU already returns where every body vertex lands in each photo
+(`photo_uv`). Garment vertices are carried from the canonical body (where
+Newton drapes) into the photo through a per-vertex local affine map of the
+body's own projection, so no extra GPU work is needed for the overlay.

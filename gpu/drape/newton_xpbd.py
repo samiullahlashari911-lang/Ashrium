@@ -103,7 +103,13 @@ def drape_newton_xpbd(
         )
 
     model = builder.finalize()
-    model.gravity = wp.vec3(0.0, 0.0, -9.81)
+    # Newton 1.5 stores gravity as a per-world wp.array[vec3]; assigning one
+    # vec3 over it made integrate_particles reject every drape (HTTP 500), so
+    # no shopper ever got a cloth simulation.
+    if hasattr(model, "set_gravity"):
+        model.set_gravity((0.0, 0.0, -9.81))
+    else:
+        model.gravity = wp.vec3(0.0, 0.0, -9.81)
     model.soft_contact_ke = 1.0e2
     model.soft_contact_kd = 1.0e0
     model.soft_contact_mu = 0.35
