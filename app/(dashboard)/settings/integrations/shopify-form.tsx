@@ -19,6 +19,8 @@ export interface ShopifyFormProps {
   connected: boolean;
   shopDomain: string | null;
   usesOAuth: boolean;
+  /** The client's own app install link; replaces the shop-domain OAuth form. */
+  installUrl?: string | null;
 }
 
 function readOAuthMessage(searchParams: URLSearchParams): { message: string; isError: boolean } | null {
@@ -35,7 +37,7 @@ function readOAuthMessage(searchParams: URLSearchParams): { message: string; isE
   };
 }
 
-export const ShopifyForm: FC<ShopifyFormProps> = ({ connected, shopDomain, usesOAuth }) => {
+export const ShopifyForm: FC<ShopifyFormProps> = ({ connected, shopDomain, usesOAuth, installUrl = null }) => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const domainRef = useRef<HTMLInputElement | null>(null);
@@ -90,6 +92,10 @@ export const ShopifyForm: FC<ShopifyFormProps> = ({ connected, shopDomain, usesO
   };
 
   const handleConnect = (): void => {
+    if (installUrl) {
+      window.location.assign(installUrl);
+      return;
+    }
     const domain = domainRef.current?.value ?? shopDomain ?? '';
     const params = new URLSearchParams({
       shop: domain,
@@ -102,32 +108,45 @@ export const ShopifyForm: FC<ShopifyFormProps> = ({ connected, shopDomain, usesO
     <section className="ash-card p-6">
       <div className="border-b border-ash-line pb-4">
         <h2 className="text-lg font-semibold text-ash-ink">Shopify Admin</h2>
-        <p className="mt-1 text-sm text-ash-muted">
-          Connect once with the Ashrium VFR Partner app. Ashrium stores an encrypted offline Admin
-          API token server-side and refreshes it when needed. The widget never receives these
-          credentials. Required scope:{' '}
-          <span className="font-mono text-xs">read_products</span>.
-        </p>
-        <p className="mt-2 text-sm text-ash-muted">
-          In the Shopify Dev Dashboard, whitelist your OAuth redirect URL to match{' '}
-          <span className="font-mono text-xs">APP_BASE_URL/api/v1/shopify/oauth/callback</span>{' '}
-          (or set <span className="font-mono text-xs">SHOPIFY_OAUTH_REDIRECT_URI</span> explicitly).
-        </p>
+        {installUrl ? (
+          <p className="mt-1 text-sm text-ash-muted">
+            Connect opens Shopify so you can approve Ashrium on{' '}
+            <span className="font-mono text-xs">{shopDomain}</span>. Ashrium only reads your
+            products, keeps the access encrypted on our servers, and never shares it with the
+            storefront widget.
+          </p>
+        ) : (
+          <>
+          <p className="mt-1 text-sm text-ash-muted">
+            Connect once with the Ashrium VFR Partner app. Ashrium stores an encrypted offline Admin
+            API token server-side and refreshes it when needed. The widget never receives these
+            credentials. Required scope:{' '}
+            <span className="font-mono text-xs">read_products</span>.
+          </p>
+          <p className="mt-2 text-sm text-ash-muted">
+            In the Shopify Dev Dashboard, whitelist your OAuth redirect URL to match{' '}
+            <span className="font-mono text-xs">APP_BASE_URL/api/v1/shopify/oauth/callback</span>{' '}
+            (or set <span className="font-mono text-xs">SHOPIFY_OAUTH_REDIRECT_URI</span> explicitly).
+          </p>
+          </>
+        )}
       </div>
 
-      <label className="mt-5 flex flex-col gap-2 text-sm font-medium text-ash-ink">
-        Shop domain
-        <input
-          ref={domainRef}
-          required
-          name="shopifyShopDomain"
-          autoComplete="off"
-          spellCheck={false}
-          defaultValue={shopDomain ?? ''}
-          placeholder="brand.myshopify.com"
-          className="ash-input-box font-mono text-sm"
-        />
-      </label>
+      {installUrl ? null : (
+        <label className="mt-5 flex flex-col gap-2 text-sm font-medium text-ash-ink">
+          Shop domain
+          <input
+            ref={domainRef}
+            required
+            name="shopifyShopDomain"
+            autoComplete="off"
+            spellCheck={false}
+            defaultValue={shopDomain ?? ''}
+            placeholder="brand.myshopify.com"
+            className="ash-input-box font-mono text-sm"
+          />
+        </label>
+      )}
 
       {connected && shopDomain ? (
         <div className="mt-4 rounded-xl border border-ash-success/30 bg-ash-success-soft px-4 py-3 text-sm text-ash-success">
@@ -161,37 +180,39 @@ export const ShopifyForm: FC<ShopifyFormProps> = ({ connected, shopDomain, usesO
         ) : null}
       </div>
 
-      <details
-        className="mt-6 rounded-xl border border-ash-line bg-ash-raised p-4"
-        open={showManualToken}
-        onToggle={(event) => setShowManualToken(event.currentTarget.open)}
-      >
-        <summary className="cursor-pointer text-sm font-medium text-ash-ink">
-          Advanced: paste Admin API token
-        </summary>
-        <p className="mt-3 text-sm text-ash-muted">
-          Legacy fallback for custom apps or debugging. Prefer Connect Shopify for the Partner app
-          flow with automatic token refresh.
-        </p>
-        <form onSubmit={handleManualSubmit} className="mt-4 flex flex-col gap-4">
-          <label className="flex flex-col gap-2 text-sm font-medium text-ash-ink">
-            Admin API access token
-            <input
-              ref={tokenRef}
-              required
-              type="password"
-              name="shopifyAdminToken"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="shpat_..."
-              className="ash-input-box font-mono text-sm"
-            />
-          </label>
-          <button type="submit" disabled={isPending} className="ash-cta self-start">
-            {isPending ? 'Verifying…' : 'Save manual token'}
-          </button>
-        </form>
-      </details>
+      {installUrl ? null : (
+        <details
+          className="mt-6 rounded-xl border border-ash-line bg-ash-raised p-4"
+          open={showManualToken}
+          onToggle={(event) => setShowManualToken(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer text-sm font-medium text-ash-ink">
+            Advanced: paste Admin API token
+          </summary>
+          <p className="mt-3 text-sm text-ash-muted">
+            Legacy fallback for custom apps or debugging. Prefer Connect Shopify for the Partner app
+            flow with automatic token refresh.
+          </p>
+          <form onSubmit={handleManualSubmit} className="mt-4 flex flex-col gap-4">
+            <label className="flex flex-col gap-2 text-sm font-medium text-ash-ink">
+              Admin API access token
+              <input
+                ref={tokenRef}
+                required
+                type="password"
+                name="shopifyAdminToken"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="shpat_..."
+                className="ash-input-box font-mono text-sm"
+              />
+            </label>
+            <button type="submit" disabled={isPending} className="ash-cta self-start">
+              {isPending ? 'Verifying…' : 'Save manual token'}
+            </button>
+          </form>
+        </details>
+      )}
     </section>
   );
 };

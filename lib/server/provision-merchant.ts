@@ -1,5 +1,6 @@
 import { buildAuthConfirmUrl, inviteEmail } from '@/lib/server/auth-links';
 import { sendAccountEmail } from '@/lib/server/email';
+import { encryptTenantSecret } from '@/lib/server/secret-crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 
 const OPERATOR_INVITE_MARK = 'ashrium_operator';
@@ -10,6 +11,40 @@ export interface ProvisionMerchantInput {
   companyName: string;
   /** e.g. https://www.ashrium.org — the invite opens /auth/confirm there. */
   appBaseUrl: string;
+  /** The client's own custom-distribution Shopify app (npm run client:new). */
+  shopifyApp?: ClientShopifyAppInput;
+}
+
+export interface ClientShopifyAppInput {
+  clientId: string;
+  clientSecret: string;
+  shopDomain: string;
+  installUrl: string;
+}
+
+const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
+/** Plain-language problem with a client app registration, or null. */
+export function clientShopifyAppProblem(app: ClientShopifyAppInput): string | null {
+  if (!/^[a-f0-9]{32}$/i.test(app.clientId.trim())) {
+    return 'The Shopify Client ID should be 32 letters and digits (Dev Dashboard → app → Settings).';
+  }
+  if (app.clientSecret.trim().length < 20) {
+    return 'The Shopify Client secret looks too short.';
+  }
+  if (!SHOP_DOMAIN_PATTERN.test(app.shopDomain.trim().toLowerCase())) {
+    return 'The store must be its *.myshopify.com address.';
+  }
+  let install: URL;
+  try {
+    install = new URL(app.installUrl.trim());
+  } catch {
+    return 'The install link is not a valid URL.';
+  }
+  if (install.protocol !== 'https:' || !/(^|\.)shopify\.com$/i.test(install.hostname)) {
+    return 'The install link should be the https://…shopify.com link from Dev Dashboard → Distribution.';
+  }
+  return null;
 }
 
 export interface ProvisionMerchantResult {
@@ -73,7 +108,24 @@ export async function provisionContractedMerchant(
     throw new Error('Company name must be between 1 and 160 characters.');
   }
 
+  const appProblem = input.shopifyApp ? clientShopifyAppProblem(input.shopifyApp) : null;
+  if (appProblem) {
+    throw new Error(appProblem);
+  }
+
   const service = createServiceClient();
+  if (input.shopifyApp) {
+    const { data: claimed } = await service
+      .from('tenant_integrations')
+      .select('tenant_id')
+      .eq('provider', 'shopify')
+      .eq('shopify_shop_domain', input.shopifyApp.shopDomain.trim().toLowerCase())
+      .limit(1);
+    if (claimed && claimed.length > 0) {
+      throw new Error(`${input.shopifyApp.shopDomain} is already connected to another Ashrium account.`);
+    }
+  }
+
   const { data: created, error: createError } = await service.auth.admin.createUser({
     email,
     email_confirm: false,
@@ -130,6 +182,26 @@ export async function provisionContractedMerchant(
 
   if (metadataError) {
     throw new Error(`Tenant was created but JWT tenant_id could not be stamped: ${metadataError.message}`);
+  }
+
+  if (input.shopifyApp) {
+    // Registered inactive: the install + OAuth callback activate it with tokens.
+    const { error: appError } = await service.from('tenant_integrations').insert({
+      tenant_id: userId,
+      provider: 'shopify',
+      shopify_shop_domain: input.shopifyApp.shopDomain.trim().toLowerCase(),
+      shopify_app_client_id: input.shopifyApp.clientId.trim().toLowerCase(),
+      shopify_app_client_secret_ciphertext: encryptTenantSecret(input.shopifyApp.clientSecret.trim()),
+      shopify_install_url: input.shopifyApp.installUrl.trim(),
+      is_active: false,
+    });
+
+    if (appError) {
+      await service.from('merchants').delete().eq('id', userId);
+      await service.from('tenants').delete().eq('id', userId);
+      await service.auth.admin.deleteUser(userId);
+      throw new Error(`Unable to register the client's Shopify app: ${appError.message}`);
+    }
   }
 
   const { data: linkData, error: linkError } = await service.auth.admin.generateLink({

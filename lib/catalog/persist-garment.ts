@@ -234,6 +234,7 @@ export async function persistCatalogGarment(
     mode: draft.mode,
     approximate_fit: approximateFit,
     print_qa_passed: printQa.passed,
+    ...(draft.shopifyProductId ? { shopify_product_id: draft.shopifyProductId } : {}),
   };
 
   let garmentId = profileId ?? '';

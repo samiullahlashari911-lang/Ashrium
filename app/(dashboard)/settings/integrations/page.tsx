@@ -43,6 +43,7 @@ export default async function IntegrationsPage() {
           connected={shopify.connected}
           shopDomain={shopify.shopDomain}
           usesOAuth={shopify.usesOAuth}
+          installUrl={shopify.installUrl}
         />
       </Suspense>
 

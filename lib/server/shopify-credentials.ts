@@ -21,6 +21,8 @@ export interface ShopifyConnectionStatus {
   shopDomain: string | null;
   tokenExpiresAt: string | null;
   usesOAuth: boolean;
+  /** Set for clients with their own Shopify app: Connect opens this link. */
+  installUrl: string | null;
 }
 
 export interface SaveShopifyCredentialsResult {
@@ -103,7 +105,8 @@ async function refreshStoredShopifyToken(
 
   let tokens;
   try {
-    tokens = await refreshShopifyAccessToken(shopDomain, refreshToken);
+    const { shopifyAppForTenant } = await import('@/lib/server/shopify-app');
+    tokens = await refreshShopifyAccessToken(shopDomain, refreshToken, await shopifyAppForTenant(tenantId));
   } catch (error) {
     const message =
       error instanceof Error
@@ -163,12 +166,20 @@ export async function getShopifyConnectionStatus(
   tenantId: string,
 ): Promise<ShopifyConnectionStatus> {
   const row = await readShopifyIntegrationRow(tenantId);
+  // The registration row is inactive until the client installs their app.
+  const { data: registration } = await createServiceClient()
+    .from('tenant_integrations')
+    .select('shopify_shop_domain, shopify_install_url')
+    .eq('tenant_id', tenantId)
+    .eq('provider', 'shopify')
+    .maybeSingle();
 
   return {
     connected: Boolean(row?.shopify_shop_domain),
-    shopDomain: row?.shopify_shop_domain ?? null,
+    shopDomain: row?.shopify_shop_domain ?? registration?.shopify_shop_domain ?? null,
     tokenExpiresAt: row?.shopify_token_expires_at ?? null,
     usesOAuth: Boolean(row?.shopify_refresh_token_ciphertext),
+    installUrl: registration?.shopify_install_url ?? null,
   };
 }
 

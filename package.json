@@ -12,6 +12,7 @@
     "merchant:invite": "node ./scripts/invite-merchant.mjs",
     "merchant:invite:local": "node ./scripts/invite-merchant-local.mjs",
     "merchant:set-password": "node ./scripts/set-merchant-password.mjs",
+    "client:new": "node ./scripts/client-new.mjs",
     "db:repair-auth": "node ./scripts/apply-auth-repair.mjs",
     "supabase:push": "npx --yes supabase@2.110.0 db push --linked --include-all --yes",
     "supabase:start": "npx --yes supabase@2.110.0 start",

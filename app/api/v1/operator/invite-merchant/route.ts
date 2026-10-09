@@ -51,6 +51,23 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ code: 'INVALID_REQUEST' }, { status: 400 });
   }
 
+  const rawApp = isRecord(payload.shopifyApp) ? payload.shopifyApp : null;
+  const shopifyApp = rawApp
+    && typeof rawApp.clientId === 'string'
+    && typeof rawApp.clientSecret === 'string'
+    && typeof rawApp.shopDomain === 'string'
+    && typeof rawApp.installUrl === 'string'
+    ? {
+      clientId: rawApp.clientId,
+      clientSecret: rawApp.clientSecret,
+      shopDomain: rawApp.shopDomain,
+      installUrl: rawApp.installUrl,
+    }
+    : undefined;
+  if (rawApp && !shopifyApp) {
+    return Response.json({ code: 'INVALID_REQUEST', message: 'shopifyApp needs clientId, clientSecret, shopDomain and installUrl.' }, { status: 400 });
+  }
+
   const appBaseUrl = process.env.APP_BASE_URL?.trim();
   if (!appBaseUrl) {
     return Response.json({ code: 'APP_BASE_URL_MISSING' }, { status: 500 });
@@ -61,6 +78,7 @@ export async function POST(request: Request): Promise<Response> {
       email: payload.email,
       companyName: payload.companyName,
       appBaseUrl: appBaseUrl.replace(/\/$/, ''),
+      shopifyApp,
     });
 
     return Response.json(result, { status: 201 });

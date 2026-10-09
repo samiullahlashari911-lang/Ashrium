@@ -108,6 +108,7 @@ export type GarmentCadProfileRow = GarmentCadMechanicalColumns & {
   mode: GarmentIngestModeColumn | null;
   approximate_fit: boolean;
   print_qa_passed: boolean;
+  shopify_product_id: string | null;
   created_at: string;
 };
 
@@ -125,6 +126,7 @@ export type GarmentCadProfileInsert = GarmentCadMechanicalColumns & {
   mode?: GarmentIngestModeColumn | null;
   approximate_fit?: boolean;
   print_qa_passed?: boolean;
+  shopify_product_id?: string | null;
   created_at?: string;
 };
 
@@ -146,6 +148,7 @@ export type GarmentCadProfileUpdate = {
   mode?: GarmentIngestModeColumn | null;
   approximate_fit?: boolean;
   print_qa_passed?: boolean;
+  shopify_product_id?: string | null;
   created_at?: string;
 };
 
@@ -284,6 +287,9 @@ export type TenantIntegrationRow = {
   shopify_token_expires_at: string | null;
   shopify_refresh_token_ciphertext: string | null;
   shopify_refresh_token_expires_at: string | null;
+  shopify_app_client_id: string | null;
+  shopify_app_client_secret_ciphertext: string | null;
+  shopify_install_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -300,6 +306,9 @@ export type TenantIntegrationInsert = {
   shopify_token_expires_at?: string | null;
   shopify_refresh_token_ciphertext?: string | null;
   shopify_refresh_token_expires_at?: string | null;
+  shopify_app_client_id?: string | null;
+  shopify_app_client_secret_ciphertext?: string | null;
+  shopify_install_url?: string | null;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -316,6 +325,9 @@ export type TenantIntegrationUpdate = {
   shopify_token_expires_at?: string | null;
   shopify_refresh_token_ciphertext?: string | null;
   shopify_refresh_token_expires_at?: string | null;
+  shopify_app_client_id?: string | null;
+  shopify_app_client_secret_ciphertext?: string | null;
+  shopify_install_url?: string | null;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;

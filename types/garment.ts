@@ -204,6 +204,8 @@ export interface CatalogGarmentDraft {
   sizeVariants: CatalogSizeVariantInput[];
   /** Product-page text used by Cog task=pattern (HTML parse). Not a secret. */
   ingestCorpus?: string;
+  /** Shopify product GID, so product webhooks can find this garment. */
+  shopifyProductId?: string;
 }
 
 export const REST_LENGTH_SCHEMA = 'ashrium.rest_length.v1' as const;

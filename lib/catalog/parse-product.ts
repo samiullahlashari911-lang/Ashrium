@@ -522,6 +522,7 @@ function draftForVariants(
     cadPatternUrl: product.imageUrl,
     sizeVariants: sizes,
     ingestCorpus: corpus.slice(0, 16_000),
+    ...(product.id ? { shopifyProductId: product.id } : {}),
     ...classified,
     approximateFit: classified.approximateFit || unsupportedReason !== null,
   };

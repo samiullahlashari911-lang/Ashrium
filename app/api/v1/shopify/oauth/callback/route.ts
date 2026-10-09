@@ -1,10 +1,12 @@
+import { shopifyAppForShop, shopifyAppForTenant } from '@/lib/server/shopify-app';
 import {
   completeShopifyOAuthConnection,
-  getShopifyOAuthConfig,
   normalizeShopifyShopDomain,
   parseShopifyOAuthState,
+  peekShopifyOAuthStateTenantId,
   resolveShopifyOAuthAppRedirect,
   verifyShopifyCallbackHmac,
+  type ShopifyOAuthConfig,
 } from '@/lib/server/shopify-oauth';
 import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
@@ -45,47 +47,59 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const stateParam = query.get('state') ?? '';
-  const state = parseShopifyOAuthState(stateParam);
-  if (!state) {
+  const invalidState = (): Response => redirectToApp(
+    request,
+    fallbackReturnTo,
+    'error',
+    'Shopify OAuth state was invalid or expired.',
+  );
+
+  // The state names its tenant; that tenant's app secret is what verifies it.
+  const claimedTenantId = peekShopifyOAuthStateTenantId(stateParam);
+  if (!claimedTenantId) {
+    return invalidState();
+  }
+
+  let app: ShopifyOAuthConfig;
+  try {
+    app = await shopifyAppForTenant(claimedTenantId);
+  } catch {
     return redirectToApp(
       request,
       fallbackReturnTo,
-      'error',
-      'Shopify OAuth state was invalid or expired.',
-    );
-  }
-
-  // The state is signed but not tied to a browser, so a link started by one
-  // merchant must not attach a shop to their tenant from someone else's session.
-  let sessionTenantId: string | null = null;
-  try {
-    sessionTenantId = await requireCurrentTenantId();
-  } catch {
-    sessionTenantId = null;
-  }
-  if (sessionTenantId !== state.tenantId) {
-    return redirectToApp(
-      request,
-      state.returnTo,
-      'error',
-      'Sign in to the Ashrium account that started this connection, then try again.',
-    );
-  }
-
-  let config;
-  try {
-    config = getShopifyOAuthConfig();
-  } catch {
-    return redirectToApp(
-      request,
-      state.returnTo,
       'error',
       'Shopify OAuth is not configured on this deployment.',
     );
   }
 
-  if (!verifyShopifyCallbackHmac(query, config.clientSecret)) {
+  const state = parseShopifyOAuthState(stateParam, app);
+  if (!state) {
+    return invalidState();
+  }
+
+  if (!verifyShopifyCallbackHmac(query, app.clientSecret)) {
     return redirectToApp(request, state.returnTo, 'error', 'Shopify callback signature was invalid.');
+  }
+
+  // The shared app's state is signed but not tied to a browser, so a link
+  // started by one merchant must not attach a shop from someone else's
+  // session. A client's own app can only be installed on the shop the
+  // operator registered for that tenant, so its install needs no session.
+  if (!app.perClient) {
+    let sessionTenantId: string | null = null;
+    try {
+      sessionTenantId = await requireCurrentTenantId();
+    } catch {
+      sessionTenantId = null;
+    }
+    if (sessionTenantId !== state.tenantId) {
+      return redirectToApp(
+        request,
+        state.returnTo,
+        'error',
+        'Sign in to the Ashrium account that started this connection, then try again.',
+      );
+    }
   }
 
   const shopDomain = normalizeShopifyShopDomain(query.get('shop') ?? '');
@@ -99,12 +113,22 @@ export async function GET(request: Request): Promise<Response> {
     return redirectToApp(request, state.returnTo, 'error', 'Shopify did not return an authorization code.');
   }
 
+  if (app.perClient && (await shopifyAppForShop(shopDomain))?.tenantId !== state.tenantId) {
+    return redirectToApp(
+      request,
+      state.returnTo,
+      'error',
+      `${shopDomain} is not the store registered for this Ashrium account.`,
+    );
+  }
+
   try {
     const result = await completeShopifyOAuthConnection({
       tenantId: state.tenantId,
       shopDomain,
       requestedShopDomain: state.shopDomain,
       code,
+      app,
     });
 
     return redirectToApp(

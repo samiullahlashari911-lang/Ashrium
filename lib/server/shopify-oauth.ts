@@ -5,6 +5,8 @@ import { encryptTenantSecret } from '@/lib/server/secret-crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const SHOPIFY_OAUTH_SCOPES = 'read_products';
+/** Per-client apps also read metaobjects, where size-chart apps keep charts. */
+export const SHOPIFY_CLIENT_APP_SCOPES = 'read_products,read_metaobjects';
 const SHOP_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -15,6 +17,9 @@ export interface ShopifyOAuthConfig {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+  scopes: string;
+  /** True for a client's own custom-distribution app; false for the shared app. */
+  perClient: boolean;
 }
 
 export interface ShopifyOAuthStateClaims {
@@ -126,15 +131,19 @@ export function getShopifyOAuthConfig(): ShopifyOAuthConfig {
     clientId,
     clientSecret,
     redirectUri: getShopifyOAuthRedirectUri(),
+    scopes: SHOPIFY_OAUTH_SCOPES,
+    perClient: false,
   };
 }
 
-export function createShopifyOAuthState(input: {
-  tenantId: string;
-  shopDomain: string;
-  returnTo?: string;
-}): string {
-  const config = getShopifyOAuthConfig();
+export function createShopifyOAuthState(
+  input: {
+    tenantId: string;
+    shopDomain: string;
+    returnTo?: string;
+  },
+  config: ShopifyOAuthConfig = getShopifyOAuthConfig(),
+): string {
   const claims: ShopifyOAuthStatePayload = {
     exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS,
     nonce: randomBytes(16).toString('hex'),
@@ -147,10 +156,31 @@ export function createShopifyOAuthState(input: {
   return `${encodedPayload}.${signOAuthState(encodedPayload, config.clientSecret)}`;
 }
 
-export function parseShopifyOAuthState(state: string): ShopifyOAuthStateClaims | null {
+/**
+ * Reads the tenant from a state WITHOUT verifying it, only to pick which app
+ * secret verifies it. Never trust the result until parseShopifyOAuthState passes.
+ */
+export function peekShopifyOAuthStateTenantId(state: string): string | null {
+  const [encodedPayload] = state.split('.');
+  const serialized = encodedPayload ? decodeBase64Url(encodedPayload) : null;
+  if (!serialized) {
+    return null;
+  }
+  try {
+    const claims: unknown = JSON.parse(serialized);
+    return isShopifyOAuthStatePayload(claims) ? claims.tenantId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseShopifyOAuthState(
+  state: string,
+  appConfig?: ShopifyOAuthConfig,
+): ShopifyOAuthStateClaims | null {
   let config: ShopifyOAuthConfig;
   try {
-    config = getShopifyOAuthConfig();
+    config = appConfig ?? getShopifyOAuthConfig();
   } catch {
     return null;
   }
@@ -193,11 +223,14 @@ export function parseShopifyOAuthState(state: string): ShopifyOAuthStateClaims |
   }
 }
 
-export function buildShopifyAuthorizeUrl(shopDomain: string, state: string): string {
-  const config = getShopifyOAuthConfig();
+export function buildShopifyAuthorizeUrl(
+  shopDomain: string,
+  state: string,
+  config: ShopifyOAuthConfig = getShopifyOAuthConfig(),
+): string {
   const params = new URLSearchParams({
     client_id: config.clientId,
-    scope: SHOPIFY_OAUTH_SCOPES,
+    scope: config.scopes,
     redirect_uri: config.redirectUri,
     state,
   });
@@ -308,7 +341,6 @@ async function postShopifyOAuthToken(
   shopDomain: string,
   body: URLSearchParams,
 ): Promise<ShopifyOAuthTokenResponse> {
-  const config = getShopifyOAuthConfig();
   const response = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
     method: 'POST',
     headers: {
@@ -331,8 +363,8 @@ async function postShopifyOAuthToken(
 export async function exchangeShopifyOAuthCode(
   shopDomain: string,
   code: string,
+  config: ShopifyOAuthConfig = getShopifyOAuthConfig(),
 ): Promise<ShopifyOAuthTokenResponse> {
-  const config = getShopifyOAuthConfig();
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
@@ -346,8 +378,8 @@ export async function exchangeShopifyOAuthCode(
 export async function refreshShopifyAccessToken(
   shopDomain: string,
   refreshToken: string,
+  config: ShopifyOAuthConfig = getShopifyOAuthConfig(),
 ): Promise<ShopifyOAuthTokenResponse> {
-  const config = getShopifyOAuthConfig();
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
@@ -403,9 +435,10 @@ export async function completeShopifyOAuthConnection(input: {
   shopDomain: string;
   code: string;
   requestedShopDomain?: string;
+  app?: ShopifyOAuthConfig;
 }): Promise<{ shopDomain: string }> {
   const { verifyShopifyAdminCredentials } = await import('@/lib/catalog/shopify-admin');
-  const tokens = await exchangeShopifyOAuthCode(input.shopDomain, input.code);
+  const tokens = await exchangeShopifyOAuthCode(input.shopDomain, input.code, input.app);
   const identity = await verifyShopifyAdminCredentials({
     shopDomain: input.shopDomain,
     adminToken: tokens.accessToken,
