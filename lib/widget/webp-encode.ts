@@ -116,6 +116,84 @@ export async function encodeVideoFrameToWebp(
   return canvasToWebp(drawToWebpCanvas(video, video.videoWidth, video.videoHeight, keepBox));
 }
 
+/**
+ * The full camera frame of one capture, kept in this browser so the shopper's
+ * own look (face, hair, skin, clothes) can be painted on their avatar. A
+ * canvas, never a Blob, so it cannot be uploaded by accident; released with
+ * `releaseOnDevicePhoto` when Try On closes. `keepBox` is the headless region
+ * that was uploaded, in this canvas's pixels, so GPU photo coordinates
+ * (normalized to the upload) map back here, head included. `landmarks` are
+ * the MediaPipe pose landmarks of this frame, normalized.
+ */
+export interface OnDevicePhoto {
+  frame: HTMLCanvasElement;
+  keepBox: HeadlessKeepBox;
+  landmarks: Array<{ x: number; y: number; visibility: number }>;
+}
+
+const ON_DEVICE_PHOTO_MAX_EDGE_PX = 1920;
+
+export function captureOnDevicePhoto(
+  source: CanvasImageSource,
+  landmarks: readonly PoseLandmarkSample[],
+  imageWidth: number,
+  imageHeight: number,
+): OnDevicePhoto | null {
+  const sourceBox = headlessKeepBox(landmarks, imageWidth, imageHeight);
+  if (!sourceBox) {
+    return null;
+  }
+  const scale = Math.min(ON_DEVICE_PHOTO_MAX_EDGE_PX / Math.max(imageWidth, imageHeight), 1);
+  const frame = document.createElement('canvas');
+  frame.width = Math.max(1, Math.round(imageWidth * scale));
+  frame.height = Math.max(1, Math.round(imageHeight * scale));
+  const context = frame.getContext('2d');
+  if (!context) {
+    return null;
+  }
+  context.drawImage(source, 0, 0, frame.width, frame.height);
+  return {
+    frame,
+    keepBox: {
+      x: sourceBox.x * scale,
+      y: sourceBox.y * scale,
+      width: sourceBox.width * scale,
+      height: sourceBox.height * scale,
+    },
+    landmarks: landmarks.map((landmark) => ({
+      x: landmark.x,
+      y: landmark.y,
+      visibility: landmark.visibility ?? 0,
+    })),
+  };
+}
+
+/** Wipe the pixels now rather than waiting for garbage collection. */
+export function releaseOnDevicePhoto(photo: OnDevicePhoto | null | undefined): void {
+  if (!photo) {
+    return;
+  }
+  photo.frame.width = 0;
+  photo.frame.height = 0;
+}
+
+/**
+ * GPU `photo_uv` (normalized to the uploaded headless WebP; v < 0 is above the
+ * head crop) → normalized coordinates in the full on-device frame.
+ */
+export function headlessUvToFrameUv(
+  u: number,
+  v: number,
+  keepBox: HeadlessKeepBox,
+  frameWidth: number,
+  frameHeight: number,
+): [number, number] {
+  return [
+    (keepBox.x + u * keepBox.width) / frameWidth,
+    (keepBox.y + v * keepBox.height) / frameHeight,
+  ];
+}
+
 export async function encodeImageFileToWebp(
   file: File,
   landmarks?: readonly PoseLandmarkSample[],

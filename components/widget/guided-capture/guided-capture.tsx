@@ -11,7 +11,11 @@ import {
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
-import type { OnDeviceFace } from '@/lib/widget/webp-encode';
+import {
+  releaseOnDevicePhoto,
+  type OnDeviceFace,
+  type OnDevicePhoto,
+} from '@/lib/widget/webp-encode';
 import {
   currentAvatarStage,
   isAvatarStageKey,
@@ -48,8 +52,13 @@ function captureErrorTitle(message: string | null): string {
 export interface GuidedCaptureResult {
   session: CaptureSession;
   parametric: FitParametricVector;
-  /** On-device face (merchant opt-in). Never uploaded; dropped with the session. */
+  /** On-device face crop. Never uploaded; dropped with the session. */
   face: OnDeviceFace | null;
+  /**
+   * Full front/side camera frames for painting the shopper's own look on the
+   * avatar. Never uploaded; the owner of this result releases them on close.
+   */
+  photos: { front: OnDevicePhoto | null; side: OnDevicePhoto | null };
 }
 
 interface GuidedCaptureProps {
@@ -87,6 +96,8 @@ export function GuidedCapture({
   const [intake, setIntake] = useState<CaptureIntakeValues | null>(null);
   const [frontBlob, setFrontBlob] = useState<Blob | null>(null);
   const [frontFace, setFrontFace] = useState<OnDeviceFace | null>(null);
+  const [frontPhoto, setFrontPhoto] = useState<OnDevicePhoto | null>(null);
+  const [sidePhoto, setSidePhoto] = useState<OnDevicePhoto | null>(null);
   const [frontGate, setFrontGate] = useState<PoseGateStatus | null>(null);
   const [sideGate, setSideGate] = useState<PoseGateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -127,19 +138,27 @@ export function GuidedCapture({
     setStep('error');
   }, [stopGpu]);
 
-  const handleFrontCaptured = useCallback((blob: Blob, gate: PoseGateStatus, face?: OnDeviceFace | null) => {
+  const handleFrontCaptured = useCallback((
+    blob: Blob,
+    gate: PoseGateStatus,
+    face?: OnDeviceFace | null,
+    photo?: OnDevicePhoto | null,
+  ) => {
     setFrontBlob(blob);
     setFrontFace(face ?? null);
+    setFrontPhoto(photo ?? null);
     setFrontGate(gate);
     setStep('side');
   }, []);
 
   const handleSideCaptured = useCallback(
-    (blob: Blob, gate: PoseGateStatus) => {
+    (blob: Blob, gate: PoseGateStatus, _face?: OnDeviceFace | null, photo?: OnDevicePhoto | null) => {
       if (!intake || !frontBlob) {
+        releaseOnDevicePhoto(photo);
         return;
       }
 
+      setSidePhoto(photo ?? null);
       setSideGate(gate);
       setStep('uploading');
 
@@ -249,7 +268,12 @@ export function GuidedCapture({
             captureGatesPassed: frontGate === 'aligned' && sideGate === 'aligned',
           };
           // Let the particles converge before the avatar reveal takes over.
-          const finished = { session, parametric: job.parametric_result, face: frontFace };
+          const finished = {
+            session,
+            parametric: job.parametric_result,
+            face: frontFace,
+            photos: { front: frontPhoto, side: sidePhoto },
+          };
           setFinishedResult(finished);
           onAvatarReadyRef.current?.(finished);
           return;
@@ -264,7 +288,19 @@ export function GuidedCapture({
         // Keep waiting until the job row is terminal or the wait budget ends.
       },
     );
-  }, [embedToken, failCapture, frontFace, frontGate, intake, jobId, sideGate, step, tenantId]);
+  }, [
+    embedToken,
+    failCapture,
+    frontFace,
+    frontGate,
+    frontPhoto,
+    intake,
+    jobId,
+    sideGate,
+    sidePhoto,
+    step,
+    tenantId,
+  ]);
 
   useEffect(() => {
     // The GPU budget ends when the job completes; building and dressing the
@@ -279,6 +315,20 @@ export function GuidedCapture({
 
     failCapture(SHOPPER_GPU_TIMEOUT_MESSAGE);
   }, [failCapture, finishedResult, step, waitSeconds]);
+
+  // Closing Try On before the avatar exists wipes the frames here; after
+  // that, the fitting room owns them.
+  const unreleasedPhotosRef = useRef({ front: frontPhoto, side: sidePhoto, handedOff: false });
+  unreleasedPhotosRef.current = { front: frontPhoto, side: sidePhoto, handedOff: finishedResult !== null };
+  useEffect(() => {
+    return () => {
+      const { front, side, handedOff } = unreleasedPhotosRef.current;
+      if (!handedOff) {
+        releaseOnDevicePhoto(front);
+        releaseOnDevicePhoto(side);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const onPageHide = (): void => {
@@ -297,6 +347,12 @@ export function GuidedCapture({
     setIntake(null);
     setFrontBlob(null);
     setFrontFace(null);
+    if (!finishedResult) {
+      releaseOnDevicePhoto(frontPhoto);
+      releaseOnDevicePhoto(sidePhoto);
+    }
+    setFrontPhoto(null);
+    setSidePhoto(null);
     setFrontGate(null);
     setSideGate(null);
     setError(null);
@@ -383,6 +439,8 @@ export function GuidedCapture({
             if (step === 'side') {
               setFrontBlob(null);
               setFrontGate(null);
+              releaseOnDevicePhoto(frontPhoto);
+              setFrontPhoto(null);
               setStep('front');
               return;
             }

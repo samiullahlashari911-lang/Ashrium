@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState, type FC } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 
 import { AnnyCanvas } from '@/components/vfr/anny-canvas';
 import { ConfidenceBadge } from '@/components/vfr/confidence-badge';
@@ -9,6 +9,7 @@ import {
   type GuidedCaptureResult,
 } from '@/components/widget/guided-capture/guided-capture';
 import { recommendFit } from '@/lib/fit/recommend';
+import { releaseOnDevicePhoto } from '@/lib/widget/webp-encode';
 import { readFitResiduals } from '@/types/hmr';
 
 export interface WidgetPreviewClientProps {
@@ -30,6 +31,15 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
     setBodySettled(false);
     setResult(next);
   }, []);
+
+  // The shopper's camera frames live only as long as this fitting.
+  useEffect(() => {
+    const photos = result?.photos;
+    return () => {
+      releaseOnDevicePhoto(photos?.front);
+      releaseOnDevicePhoto(photos?.side);
+    };
+  }, [result]);
 
   const handleRevealed = useCallback(() => {
     setRevealed(true);

@@ -19,6 +19,7 @@ import {
 } from '@/lib/widget/fit-client';
 import type { AvatarRevealStage } from '@/lib/widget/avatar-stages';
 import { postWidgetEvent, subscribeToHostEvents } from '@/lib/widget/bridge';
+import { releaseOnDevicePhoto } from '@/lib/widget/webp-encode';
 import type { FitRecommendation, StorefrontGarment } from '@/types/garment';
 import { readFitResiduals } from '@/types/hmr';
 
@@ -116,6 +117,15 @@ export function StorefrontViewport({
     setHoldExpired(false);
     setResult(next);
   }, [resetFitting]);
+
+  // The shopper's camera frames live only as long as this fitting.
+  useEffect(() => {
+    const photos = result?.photos;
+    return () => {
+      releaseOnDevicePhoto(photos?.front);
+      releaseOnDevicePhoto(photos?.side);
+    };
+  }, [result]);
 
   const handleRevealed = useCallback(() => {
     setRevealed(true);

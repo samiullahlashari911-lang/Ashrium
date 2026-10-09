@@ -13,10 +13,13 @@ import { CAPTURE_CLOTHING_TIP, CAPTURE_PRIVACY_NOTE } from '@/lib/privacy/consen
 import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
 import {
+  captureOnDevicePhoto,
   cropOnDeviceFace,
   encodeImageFileToWebp,
   encodeVideoFrameToWebp,
+  releaseOnDevicePhoto,
   type OnDeviceFace,
+  type OnDevicePhoto,
 } from '@/lib/widget/webp-encode';
 import type { CaptureSex, CaptureView, PoseGateStatus } from '@/types/hmr';
 
@@ -42,9 +45,17 @@ interface CaptureViewportProps {
   view: CaptureView;
   /** Picks the female / male / neutral outline. */
   sex: CaptureSex;
-  /** `face` is only set when the merchant enabled the on-device face; it never leaves the browser. */
-  onCaptured: (blob: Blob, gate: PoseGateStatus, face?: OnDeviceFace | null) => void;
-  /** Keep an on-device face crop from the front photo (merchant opt-in). */
+  /**
+   * `face` and `photo` stay in this browser (canvases, never uploaded): the
+   * shopper's own look painted on their avatar. Live camera captures only.
+   */
+  onCaptured: (
+    blob: Blob,
+    gate: PoseGateStatus,
+    face?: OnDeviceFace | null,
+    photo?: OnDevicePhoto | null,
+  ) => void;
+  /** Keep the on-device face crop and full frame for the shopper's own avatar. */
   captureFace?: boolean;
   onBack: () => void;
   allowGallery?: boolean;
@@ -58,6 +69,16 @@ interface PendingCapture {
   blob: Blob;
   gate: PoseGateStatus;
   previewUrl: string;
+  face?: OnDeviceFace | null;
+  photo?: OnDevicePhoto | null;
+}
+
+/** A retaken capture's preview URL and on-device frame are dropped at once. */
+function discardPending(pending: PendingCapture | null): void {
+  if (pending) {
+    URL.revokeObjectURL(pending.previewUrl);
+    releaseOnDevicePhoto(pending.photo);
+  }
 }
 
 function stopStream(stream: MediaStream | null): void {
@@ -134,9 +155,7 @@ export function CaptureViewport({
     lastHoldBucketRef.current = -1;
     setHoldProgress(0);
     setPending((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.previewUrl);
-      }
+      discardPending(current);
       return null;
     });
     setEncodeError(null);
@@ -282,6 +301,9 @@ export function CaptureViewport({
           const face = captureFace && view === 'front'
             ? cropOnDeviceFace(video, pose, video.videoWidth, video.videoHeight)
             : null;
+          const photo = captureFace
+            ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight)
+            : null;
           void encodeVideoFrameToWebp(video, pose)
             .then((blob) => {
               if (requireConfirm) {
@@ -289,6 +311,8 @@ export function CaptureViewport({
                   blob,
                   gate: 'aligned',
                   previewUrl: URL.createObjectURL(blob),
+                  face,
+                  photo,
                 });
                 stopStream(streamRef.current);
                 streamRef.current = null;
@@ -299,9 +323,10 @@ export function CaptureViewport({
               alignedSinceRef.current = null;
               setHoldProgress(1);
               setFlash(true);
-              window.setTimeout(() => onCaptured(blob, 'aligned', face), 420);
+              window.setTimeout(() => onCaptured(blob, 'aligned', face, photo), 420);
             })
             .catch(() => {
+              releaseOnDevicePhoto(photo);
               capturingRef.current = false;
               alignedSinceRef.current = null;
               setHoldProgress(0);
@@ -334,7 +359,7 @@ export function CaptureViewport({
 
   const chooseLive = (): void => {
     if (pending) {
-      URL.revokeObjectURL(pending.previewUrl);
+      discardPending(pending);
       setPending(null);
     }
     capturingRef.current = false;
@@ -389,9 +414,7 @@ export function CaptureViewport({
 
       const blob = await encodeImageFileToWebp(file, pose);
       if (requireConfirm) {
-        if (pending) {
-          URL.revokeObjectURL(pending.previewUrl);
-        }
+        discardPending(pending);
         setPending({
           blob,
           gate: 'aligned',
@@ -566,7 +589,7 @@ export function CaptureViewport({
           <button
             type="button"
             className="ash-cta py-4"
-            onClick={() => onCaptured(pending.blob, pending.gate)}
+            onClick={() => onCaptured(pending.blob, pending.gate, pending.face, pending.photo)}
           >
             Next
           </button>
