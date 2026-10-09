@@ -125,6 +125,35 @@ class GirthGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(girths["waist_cm"], torso_only["waist_cm"], places=3)
         self.assertAlmostEqual(girths["hip_cm"], torso_only["hip_cm"], places=3)
 
+    def test_chest_does_not_depend_on_where_spine1_sits(self) -> None:
+        # Production (2026-10-09 18:26 UTC, 178 cm male): MHR c_spine1 sits
+        # above the armpit, so no slice in [spine1, clavicle] showed the arm
+        # gap, the search fell back to the shoulder slice and measured 109 cm
+        # (replayed: 91 cm when the floor is below the armpit, 37.9 cm when it
+        # sits exactly on it). The chest must not care where spine1 is.
+        shouldered = self._shouldered_torso()
+        _bare, joints = _standing_torso(include_arms=False)
+        torso_only = measure_chest_waist_hip_cm(_bare, joints)
+        for spine1 in (112.0, 118.0, 124.0, 128.0, 131.0, 133.0, 136.0):
+            moved = joints.copy()
+            moved[MHR_JOINT_C_SPINE1, 1] = spine1
+            chest = measure_chest_waist_hip_cm(shouldered, moved)["chest_cm"]
+            self.assertLess(abs(chest - torso_only["chest_cm"]), 2.0, f"spine1 at {spine1}: {chest:.1f}")
+
+    @staticmethod
+    def _shouldered_torso() -> np.ndarray:
+        bare, _joints = _standing_torso(include_arms=False)
+        rings = [bare]
+        for y in np.arange(100.0, 132.0, 1.0):
+            gap = 0.5 * (132.0 - y)
+            for side in (-1.0, 1.0):
+                arm = _ellipse_ring(float(y), 4.0, 4.0, count=24)
+                arm[:, 0] += side * (16.0 + 4.0 + gap)
+                rings.append(arm)
+        for y in np.arange(132.0, 140.0, 1.0):
+            rings.append(_ellipse_ring(float(y), 24.0, 12.0))
+        return np.vstack(rings)
+
     def test_rejects_non_native_joint_count(self) -> None:
         vertices, _joints = _standing_torso(include_arms=False)
         with self.assertRaises(RuntimeError):
