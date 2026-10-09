@@ -22,10 +22,13 @@ import {
   findMhrHullMesh,
 } from '@/lib/graphics/anny-hull';
 import { disposeObject3D, disposeRendererSession } from '@/lib/graphics/dispose-session';
+import { loadBodyParts, skinFillMask } from '@/lib/graphics/body-parts';
 import {
   buildPhotoSkinAttributes,
   createPhotoSkinMaterial,
   photoFrameMeta,
+  sampleSkinColor,
+  setPhotoSkinFill,
 } from '@/lib/graphics/photo-skin';
 import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import {
@@ -40,6 +43,7 @@ import {
 } from '@/lib/graphics/print-qa';
 import { DEFAULT_EASE_CM } from '@/lib/graphics/radial-heatmap';
 import { createFitShaderMaterial } from '@/lib/graphics/strain-shader';
+import type { GarmentCategory } from '@/types/garment';
 import {
   ANNY_HULL_GLB_PUBLIC_PATH,
   MHR_HULL_GLB_PUBLIC_PATH,
@@ -54,6 +58,8 @@ import {
  */
 export interface AnnyCanvasGarment {
   easeCm: number;
+  /** Which of the shopper's own clothes the draped garment replaces. */
+  category?: GarmentCategory | null;
   albedoUrl?: string | null;
   printQaPassed?: boolean;
 }
@@ -109,6 +115,19 @@ interface SceneHandles {
   garmentMesh: THREE.Mesh | null;
   albedoMaterial: THREE.Material | null;
   heatMaterial: THREE.ShaderMaterial | null;
+  /** Body painted from the shopper's photos, and their skin colour (on-device). */
+  photoBody: THREE.Mesh | null;
+  skinColor: [number, number, number] | null;
+}
+
+let bodyPartsRequest: Promise<Uint8Array> | null = null;
+
+function bodyParts(): Promise<Uint8Array> {
+  bodyPartsRequest ??= loadBodyParts().catch((error: unknown) => {
+    bodyPartsRequest = null;
+    throw error;
+  });
+  return bodyPartsRequest;
 }
 
 const REVEAL_MS = 1400;
@@ -190,6 +209,9 @@ function removeGarment(handles: SceneHandles): void {
   handles.garmentMesh = null;
   handles.albedoMaterial = null;
   handles.heatMaterial = null;
+  if (handles.photoBody) {
+    setPhotoSkinFill(handles.photoBody, null, null);
+  }
 }
 
 export const AnnyCanvas: FC<AnnyCanvasProps> = ({
@@ -227,6 +249,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   const [garmentDraped, setGarmentDraped] = useState(false);
 
   const garmentEaseCm = garment?.easeCm;
+  const garmentCategory = garment?.category ?? null;
   const albedoUrl = garment?.albedoUrl ?? null;
   const ingestPrintQaPassed = garment?.printQaPassed;
 
@@ -314,6 +337,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       garmentMesh: null,
       albedoMaterial: null,
       heatMaterial: null,
+      photoBody: null,
+      skinColor: null,
     };
     handlesRef.current = handles;
 
@@ -372,6 +397,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         const previous = bodyMesh.material;
         bodyMesh.material = createPhotoSkinMaterial(bodyMesh.geometry, attributes, frontPhoto, sidePhoto);
         (Array.isArray(previous) ? previous : [previous]).forEach((material) => material.dispose());
+        handles.photoBody = bodyMesh;
+        handles.skinColor = sampleSkinColor(frontPhoto);
       }
       const headFrame = bodyMesh && !painted ? applyFacelessMannequin(bodyMesh) : null;
       if (bodyMesh && !painted) {
@@ -648,6 +675,21 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         done: () => {
           albedoMaterial.clippingPlanes = [];
           albedoMaterial.needsUpdate = true;
+          // Dressed: wherever the new garment replaces the shopper's own
+          // clothes but does not cover them, show their skin (on-device).
+          const photoBody = handles.photoBody;
+          if (photoBody && handles.skinColor && garmentCategory) {
+            const skinColor = handles.skinColor;
+            void bodyParts()
+              .then((labels) => {
+                if (!cancelled && handles.garmentMesh === garmentMesh) {
+                  setPhotoSkinFill(photoBody, skinFillMask(labels, garmentCategory), skinColor);
+                }
+              })
+              .catch(() => {
+                // Without labels the shopper's own clothes stay visible; never block dressing.
+              });
+          }
         },
       });
     })();
@@ -659,6 +701,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     albedoUrl,
     bodyShown,
     drapePayloadBase64,
+    garmentCategory,
     garmentEaseCm,
     ingestPrintQaPassed,
   ]);

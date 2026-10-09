@@ -339,6 +339,77 @@ export function buildPhotoSkinAttributes(
   return { uvFront, uvSide, weights, front: frontAlignment, side: sideAlignment };
 }
 
+/**
+ * The shopper's skin colour from their own face, on this device only:
+ * forehead and both cheekbones (clear of most beards and fringes). Hair, beard
+ * and glare are trimmed by brightness before the per-channel median.
+ * `pixels` is RGBA. Returns sRGB 0-255, or null with too little skin.
+ */
+export function skinColorFromPixels(pixels: Uint8ClampedArray): [number, number, number] | null {
+  const samples: Array<[number, number, number, number]> = [];
+  for (let i = 0; i + 3 < pixels.length; i += 4) {
+    const r = pixels[i]!;
+    const g = pixels[i + 1]!;
+    const b = pixels[i + 2]!;
+    samples.push([0.2126 * r + 0.7152 * g + 0.0722 * b, r, g, b]);
+  }
+  if (samples.length < 24) {
+    return null;
+  }
+  samples.sort((p, q) => p[0] - q[0]);
+  const kept = samples.slice(Math.floor(samples.length * 0.35), Math.ceil(samples.length * 0.95));
+  const median = (channel: 1 | 2 | 3): number => {
+    const values = kept.map((sample) => sample[channel]).sort((p, q) => p - q);
+    return values[Math.floor(values.length / 2)]!;
+  };
+  return [median(1), median(2), median(3)];
+}
+
+/** Where to read skin in a front frame (pixel rects), from its face landmarks. */
+export function skinPatches(frame: PhotoFrameMeta): Array<{ x: number; y: number; size: number }> {
+  const at = (index: number): { x: number; y: number } | null => {
+    const landmark = frame.landmarks[index];
+    return landmark && landmark.visibility >= LANDMARK_VISIBLE
+      ? { x: landmark.x * frame.width, y: landmark.y * frame.height }
+      : null;
+  };
+  const leftEye = at(POSE_LEFT_EYE);
+  const rightEye = at(POSE_RIGHT_EYE);
+  const mouthLeft = at(POSE_MOUTH_LEFT);
+  const mouthRight = at(POSE_MOUTH_RIGHT);
+  if (!leftEye || !rightEye || !mouthLeft || !mouthRight) {
+    return [];
+  }
+  const eyeY = (leftEye.y + rightEye.y) / 2;
+  const faceHeight = (mouthLeft.y + mouthRight.y) / 2 - eyeY;
+  if (faceHeight <= 2) {
+    return [];
+  }
+  const size = Math.max(3, Math.round(faceHeight * 0.32));
+  const midX = (leftEye.x + rightEye.x) / 2;
+  return [
+    { x: midX, y: eyeY - faceHeight * 0.6 },
+    { x: leftEye.x, y: eyeY + faceHeight * 0.42 },
+    { x: rightEye.x, y: eyeY + faceHeight * 0.42 },
+  ].map((centre) => ({ x: Math.round(centre.x - size / 2), y: Math.round(centre.y - size / 2), size }));
+}
+
+export function sampleSkinColor(photo: OnDevicePhoto): [number, number, number] | null {
+  const context = photo.frame.getContext('2d', { willReadFrequently: true });
+  if (!context) {
+    return null;
+  }
+  const patches = skinPatches(photoFrameMeta(photo));
+  const chunks = patches.map((patch) => context.getImageData(patch.x, patch.y, patch.size, patch.size).data);
+  const pixels = new Uint8ClampedArray(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    pixels.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return skinColorFromPixels(pixels);
+}
+
 export function photoFrameMeta(photo: OnDevicePhoto): PhotoFrameMeta {
   return {
     keepBox: photo.keepBox,
@@ -361,6 +432,8 @@ export function createPhotoSkinMaterial(
   geometry.setAttribute('uvFront', new THREE.Float32BufferAttribute(attributes.uvFront, 2));
   geometry.setAttribute('uvSide', new THREE.Float32BufferAttribute(attributes.uvSide, 2));
   geometry.setAttribute('photoWeight', new THREE.Float32BufferAttribute(attributes.weights, 2));
+  const vertexCount = attributes.weights.length / 2;
+  geometry.setAttribute('skinFill', new THREE.Float32BufferAttribute(new Float32Array(vertexCount), 1));
 
   const frontTexture = new THREE.CanvasTexture(front.frame);
   const sideTexture = side ? new THREE.CanvasTexture(side.frame) : frontTexture;
@@ -373,9 +446,12 @@ export function createPhotoSkinMaterial(
 
   // Photo colours are already display colours: no tone mapping on top.
   const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const skinColor = new THREE.Color(0xc89a7c);
+  material.userData.skinColor = skinColor;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.photoFront = { value: frontTexture };
     shader.uniforms.photoSide = { value: sideTexture };
+    shader.uniforms.skinColor = { value: skinColor };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -383,14 +459,17 @@ export function createPhotoSkinMaterial(
 attribute vec2 uvFront;
 attribute vec2 uvSide;
 attribute vec2 photoWeight;
+attribute float skinFill;
 varying vec2 vUvFront;
 varying vec2 vUvSide;
 varying vec2 vPhotoWeight;
-varying vec3 vPhotoNormal;`,
+varying vec3 vPhotoNormal;
+varying float vSkinFill;`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
+vSkinFill = skinFill;
 vUvFront = uvFront;
 vUvSide = uvSide;
 vPhotoWeight = photoWeight;
@@ -402,10 +481,12 @@ vPhotoNormal = normalize(normalMatrix * normal);`,
         `#include <common>
 uniform sampler2D photoFront;
 uniform sampler2D photoSide;
+uniform vec3 skinColor;
 varying vec2 vUvFront;
 varying vec2 vUvSide;
 varying vec2 vPhotoWeight;
-varying vec3 vPhotoNormal;`,
+varying vec3 vPhotoNormal;
+varying float vSkinFill;`,
       )
       .replace(
         '#include <map_fragment>',
@@ -413,11 +494,12 @@ varying vec3 vPhotoNormal;`,
 vec3 photoSideRgb = texture2D(photoSide, vUvSide).rgb;
 float photoWeightSum = max(vPhotoWeight.x + vPhotoWeight.y, 1e-4);
 vec3 photoRgb = (photoFrontRgb * vPhotoWeight.x + photoSideRgb * vPhotoWeight.y) / photoWeightSum;
+photoRgb = mix(photoRgb, skinColor, clamp(vSkinFill, 0.0, 1.0));
 float photoShade = 0.84 + 0.16 * max(normalize(vPhotoNormal).z, 0.0);
 diffuseColor.rgb *= photoRgb * photoShade;`,
       );
   };
-  material.customProgramCacheKey = () => 'ashrium-photo-skin-v1';
+  material.customProgramCacheKey = () => 'ashrium-photo-skin-v2';
   const dispose = material.dispose.bind(material);
   material.dispose = () => {
     frontTexture.dispose();
@@ -427,4 +509,31 @@ diffuseColor.rgb *= photoRgb * photoShade;`,
     dispose();
   };
   return material;
+}
+
+/**
+ * Show skin instead of the shopper's own clothes on `mask` (1 = replaced) in
+ * `color` (sRGB 0-255), or restore the photo everywhere with `mask` null.
+ */
+export function setPhotoSkinFill(
+  mesh: THREE.Mesh,
+  mask: Float32Array | null,
+  color: [number, number, number] | null,
+): void {
+  const attribute = mesh.geometry.getAttribute('skinFill');
+  const material = mesh.material;
+  if (!(attribute instanceof THREE.BufferAttribute) || Array.isArray(material)) {
+    return;
+  }
+  const values = attribute.array as Float32Array;
+  if (mask && mask.length === values.length) {
+    values.set(mask);
+  } else {
+    values.fill(0);
+  }
+  attribute.needsUpdate = true;
+  const skinColor = material.userData.skinColor;
+  if (color && skinColor instanceof THREE.Color) {
+    skinColor.setRGB(color[0] / 255, color[1] / 255, color[2] / 255, THREE.SRGBColorSpace);
+  }
 }

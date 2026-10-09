@@ -360,6 +360,7 @@ export function StorefrontViewport({
   const canvasGarment = recommendation
     ? {
         easeCm: recommendation.ease.chestCm,
+        category: activeGarment?.category ?? recommendation.category,
         albedoUrl: printQaPassed ? activeGarment?.albedoUrl ?? null : null,
         printQaPassed,
       }
