@@ -13,8 +13,9 @@ import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
 import {
   releaseOnDevicePhoto,
-  type OnDeviceFace,
+  releaseOnDevicePhotos,
   type OnDevicePhoto,
+  type OnDevicePhotos,
 } from '@/lib/widget/webp-encode';
 import {
   currentAvatarStage,
@@ -52,13 +53,11 @@ function captureErrorTitle(message: string | null): string {
 export interface GuidedCaptureResult {
   session: CaptureSession;
   parametric: FitParametricVector;
-  /** On-device face crop. Never uploaded; dropped with the session. */
-  face: OnDeviceFace | null;
   /**
    * Full front/side camera frames for painting the shopper's own look on the
    * avatar. Never uploaded; the owner of this result releases them on close.
    */
-  photos: { front: OnDevicePhoto | null; side: OnDevicePhoto | null };
+  photos: OnDevicePhotos;
 }
 
 interface GuidedCaptureProps {
@@ -78,8 +77,8 @@ interface GuidedCaptureProps {
   dressSkipped?: boolean;
   /** Merchant sandbox / preview only. Live storefront stays camera-only. */
   allowGallery?: boolean;
-  /** Merchant enabled the on-device face on the avatar. */
-  captureFace?: boolean;
+  /** Keep the full camera frames on this device to paint the shopper's own avatar. */
+  keepOnDeviceLook?: boolean;
 }
 
 export function GuidedCapture({
@@ -90,12 +89,11 @@ export function GuidedCapture({
   reveal = null,
   dressSkipped = false,
   allowGallery = false,
-  captureFace = false,
+  keepOnDeviceLook = false,
 }: GuidedCaptureProps): React.JSX.Element {
   const [step, setStep] = useState<CaptureStep>('intake');
   const [intake, setIntake] = useState<CaptureIntakeValues | null>(null);
   const [frontBlob, setFrontBlob] = useState<Blob | null>(null);
-  const [frontFace, setFrontFace] = useState<OnDeviceFace | null>(null);
   const [frontPhoto, setFrontPhoto] = useState<OnDevicePhoto | null>(null);
   const [sidePhoto, setSidePhoto] = useState<OnDevicePhoto | null>(null);
   const [frontGate, setFrontGate] = useState<PoseGateStatus | null>(null);
@@ -141,18 +139,16 @@ export function GuidedCapture({
   const handleFrontCaptured = useCallback((
     blob: Blob,
     gate: PoseGateStatus,
-    face?: OnDeviceFace | null,
     photo?: OnDevicePhoto | null,
   ) => {
     setFrontBlob(blob);
-    setFrontFace(face ?? null);
     setFrontPhoto(photo ?? null);
     setFrontGate(gate);
     setStep('side');
   }, []);
 
   const handleSideCaptured = useCallback(
-    (blob: Blob, gate: PoseGateStatus, _face?: OnDeviceFace | null, photo?: OnDevicePhoto | null) => {
+    (blob: Blob, gate: PoseGateStatus, photo?: OnDevicePhoto | null) => {
       if (!intake || !frontBlob) {
         releaseOnDevicePhoto(photo);
         return;
@@ -271,7 +267,6 @@ export function GuidedCapture({
           const finished = {
             session,
             parametric: job.parametric_result,
-            face: frontFace,
             photos: { front: frontPhoto, side: sidePhoto },
           };
           setFinishedResult(finished);
@@ -291,7 +286,6 @@ export function GuidedCapture({
   }, [
     embedToken,
     failCapture,
-    frontFace,
     frontGate,
     frontPhoto,
     intake,
@@ -324,8 +318,7 @@ export function GuidedCapture({
     return () => {
       const { front, side, handedOff } = unreleasedPhotosRef.current;
       if (!handedOff) {
-        releaseOnDevicePhoto(front);
-        releaseOnDevicePhoto(side);
+        releaseOnDevicePhotos({ front, side });
       }
     };
   }, []);
@@ -346,10 +339,8 @@ export function GuidedCapture({
     setStep('intake');
     setIntake(null);
     setFrontBlob(null);
-    setFrontFace(null);
     if (!finishedResult) {
-      releaseOnDevicePhoto(frontPhoto);
-      releaseOnDevicePhoto(sidePhoto);
+      releaseOnDevicePhotos({ front: frontPhoto, side: sidePhoto });
     }
     setFrontPhoto(null);
     setSidePhoto(null);
@@ -410,7 +401,7 @@ export function GuidedCapture({
       <div>
         {warmupBanner}
         <CaptureIntake
-          showFaceNotice={captureFace}
+          showLookNotice={keepOnDeviceLook}
           submitLabel="Next"
           onConsentPassed={() => setGpuArmed(true)}
           onSubmit={(values) => {
@@ -432,7 +423,7 @@ export function GuidedCapture({
           view={view}
           sex={intake.sex}
           allowGallery={allowGallery}
-          captureFace={captureFace}
+          keepOnDeviceLook={keepOnDeviceLook}
           flowStep={step}
           onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
           onBack={() => {

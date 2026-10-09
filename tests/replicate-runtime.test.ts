@@ -215,7 +215,7 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
   }));
 });
 
-test('MHR photo_uv: geometry for on-device painting passes through, malformed fails', () => {
+test('MHR photo_uv: geometry for on-device painting passes through, malformed is dropped', () => {
   const body = {
     topology_version: MHR_TOPOLOGY_VERSION,
     shape: Array.from({ length: MHR_BODY_IDENTITY_DIM }, () => 0),
@@ -239,6 +239,6 @@ test('MHR photo_uv: geometry for on-device painting passes through, malformed fa
 
   assert.equal(parseMhrParametricVector(body).photo_uv, undefined, 'older GPU deploys still parse');
   const tooBright = { ...photoUv, side_weight: photoUv.side_weight.map(() => 300) };
-  assert.throws(() => parseMhrParametricVector({ ...body, photo_uv: tooBright }), /photo_uv/);
-  assert.equal(readMhrParametricVector({ ...body, photo_uv: { front_uv: [] } }), null);
+  assert.equal(parseMhrParametricVector({ ...body, photo_uv: tooBright }).photo_uv, undefined, 'bad painting data drops the painting');
+  assert.equal(readMhrParametricVector({ ...body, photo_uv: { front_uv: [] } })?.photo_uv, undefined, 'never the body');
 });

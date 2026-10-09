@@ -11,14 +11,13 @@ import {
 import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import { CAPTURE_CLOTHING_TIP, CAPTURE_PRIVACY_NOTE } from '@/lib/privacy/consent-copy';
 import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
+import { FRAME_QUALITY_COPY, assessCanvasQuality } from '@/lib/widget/frame-quality';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
 import {
   captureOnDevicePhoto,
-  cropOnDeviceFace,
   encodeImageFileToWebp,
   encodeVideoFrameToWebp,
   releaseOnDevicePhoto,
-  type OnDeviceFace,
   type OnDevicePhoto,
 } from '@/lib/widget/webp-encode';
 import type { CaptureSex, CaptureView, PoseGateStatus } from '@/types/hmr';
@@ -46,17 +45,12 @@ interface CaptureViewportProps {
   /** Picks the female / male / neutral outline. */
   sex: CaptureSex;
   /**
-   * `face` and `photo` stay in this browser (canvases, never uploaded): the
-   * shopper's own look painted on their avatar. Live camera captures only.
+   * `photo` stays in this browser (a canvas, never uploaded): the shopper's
+   * own look painted on their avatar. Live camera captures only.
    */
-  onCaptured: (
-    blob: Blob,
-    gate: PoseGateStatus,
-    face?: OnDeviceFace | null,
-    photo?: OnDevicePhoto | null,
-  ) => void;
-  /** Keep the on-device face crop and full frame for the shopper's own avatar. */
-  captureFace?: boolean;
+  onCaptured: (blob: Blob, gate: PoseGateStatus, photo?: OnDevicePhoto | null) => void;
+  /** Keep the full camera frame on this device to paint the shopper's own avatar. */
+  keepOnDeviceLook?: boolean;
   onBack: () => void;
   allowGallery?: boolean;
   requireConfirm?: boolean;
@@ -69,7 +63,6 @@ interface PendingCapture {
   blob: Blob;
   gate: PoseGateStatus;
   previewUrl: string;
-  face?: OnDeviceFace | null;
   photo?: OnDevicePhoto | null;
 }
 
@@ -93,12 +86,21 @@ export function CaptureViewport({
   allowGallery = false,
   requireConfirm = false,
   flowStep,
-  captureFace = false,
+  keepOnDeviceLook = false,
 }: CaptureViewportProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // A capture waiting out its 420 ms flash; its frame is wiped if we unmount first.
+  const pendingDeliveryRef = useRef<{ timer: number; photo: OnDevicePhoto | null } | null>(null);
+  useEffect(() => () => {
+    const delivery = pendingDeliveryRef.current;
+    if (delivery) {
+      window.clearTimeout(delivery.timer);
+      releaseOnDevicePhoto(delivery.photo);
+    }
+  }, []);
   const alignedSinceRef = useRef<number | null>(null);
   const capturingRef = useRef(false);
   const lastVideoTimeRef = useRef(-1);
@@ -298,12 +300,19 @@ export function CaptureViewport({
 
         if (elapsed >= ALIGNED_HOLD_MS) {
           capturingRef.current = true;
-          const face = captureFace && view === 'front'
-            ? cropOnDeviceFace(video, pose, video.videoWidth, video.videoHeight)
-            : null;
-          const photo = captureFace
+          const photo = keepOnDeviceLook
             ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight)
             : null;
+          // Q9: a frame too dark or blurred to paint the avatar is retaken now, with the reason.
+          const quality = photo ? assessCanvasQuality(photo.frame) : 'ok';
+          if (quality !== 'ok') {
+            releaseOnDevicePhoto(photo);
+            capturingRef.current = false;
+            alignedSinceRef.current = null;
+            setHoldProgress(0);
+            setEncodeError(FRAME_QUALITY_COPY[quality]);
+            return;
+          }
           void encodeVideoFrameToWebp(video, pose)
             .then((blob) => {
               if (requireConfirm) {
@@ -311,7 +320,6 @@ export function CaptureViewport({
                   blob,
                   gate: 'aligned',
                   previewUrl: URL.createObjectURL(blob),
-                  face,
                   photo,
                 });
                 stopStream(streamRef.current);
@@ -323,7 +331,11 @@ export function CaptureViewport({
               alignedSinceRef.current = null;
               setHoldProgress(1);
               setFlash(true);
-              window.setTimeout(() => onCaptured(blob, 'aligned', face, photo), 420);
+              const delivery = window.setTimeout(() => {
+                pendingDeliveryRef.current = null;
+                onCaptured(blob, 'aligned', photo);
+              }, 420);
+              pendingDeliveryRef.current = { timer: delivery, photo };
             })
             .catch(() => {
               releaseOnDevicePhoto(photo);
@@ -349,7 +361,7 @@ export function CaptureViewport({
     }
 
     return () => cancelAnimationFrame(frameId);
-  }, [captureFace, landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
+  }, [keepOnDeviceLook, landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
 
   const title = view === 'front' ? 'Front photo' : 'Side photo';
   const hint =
@@ -589,7 +601,7 @@ export function CaptureViewport({
           <button
             type="button"
             className="ash-cta py-4"
-            onClick={() => onCaptured(pending.blob, pending.gate, pending.face, pending.photo)}
+            onClick={() => onCaptured(pending.blob, pending.gate, pending.photo)}
           >
             Next
           </button>

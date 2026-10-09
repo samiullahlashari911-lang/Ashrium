@@ -24,6 +24,10 @@ OCCLUSION_TOLERANCE_M = 0.015
 SAMPLES_PER_EDGE_PX = 1.5
 MAX_SAMPLES_PER_EDGE = 32
 UV_DECIMALS = 4
+# The upload starts under the chin; the head projects above it. The z-buffer
+# reaches this many image heights above row 0 so head vertices get real
+# visibility (the phone paints them from its full frame).
+ABOVE_IMAGE_HEIGHTS = 1.0
 
 _faces_cache: np.ndarray | None = None
 
@@ -79,10 +83,11 @@ def project_view(
     to_camera = -camera / np.linalg.norm(camera, axis=1, keepdims=True)
     facing = np.clip((normals * to_camera).sum(axis=1), 0.0, 1.0)
 
-    zbuffer = _triangle_zbuffer(camera, pixels, depth, faces, image_hw)
+    above = int(round(ABOVE_IMAGE_HEIGHTS * height))
+    zbuffer = _triangle_zbuffer(camera, pixels, depth, faces, (height, width), above)
     px = np.clip(np.floor(pixels[:, 0]).astype(np.int64), 0, width - 1)
-    py = np.clip(np.floor(pixels[:, 1]).astype(np.int64), 0, height - 1)
-    inside = (pixels[:, 0] >= 0) & (pixels[:, 0] < width) & (pixels[:, 1] >= 0) & (pixels[:, 1] < height)
+    py = np.clip(np.floor(pixels[:, 1]).astype(np.int64) + above, 0, above + height - 1)
+    inside = (pixels[:, 0] >= 0) & (pixels[:, 0] < width) & (pixels[:, 1] >= -above) & (pixels[:, 1] < height)
     visible = inside & (facing > 0.0) & (depth <= zbuffer[py, px] + OCCLUSION_TOLERANCE_M)
     weight = np.where(visible, np.round(facing * 255.0), 0.0).astype(np.uint8)
     return uv, weight
@@ -94,8 +99,12 @@ def _triangle_zbuffer(
     depth: np.ndarray,
     faces: np.ndarray,
     image_hw: tuple[int, int],
+    above: int,
 ) -> np.ndarray:
-    """Nearest camera-facing surface depth per pixel (closed mesh: back faces never win)."""
+    """Nearest camera-facing surface depth per pixel (closed mesh: back faces never win).
+
+    Rows start `above` pixels over the image so the head, above the crop, is covered.
+    """
     height, width = image_hw
     a, b, c = camera[faces[:, 0]], camera[faces[:, 1]], camera[faces[:, 2]]
     toward = -(a + b + c) / 3.0
@@ -107,7 +116,7 @@ def _triangle_zbuffer(
         np.linalg.norm(tri_px - np.roll(tri_px, -1, axis=1), axis=2), axis=1
     )
     steps = np.clip(np.ceil(longest * SAMPLES_PER_EDGE_PX), 1, MAX_SAMPLES_PER_EDGE).astype(np.int64)
-    zbuffer = np.full((height, width), np.inf)
+    zbuffer = np.full((above + height, width), np.inf)
     for n in np.unique(steps):
         group = steps == n
         i, j = np.meshgrid(np.arange(n + 1), np.arange(n + 1), indexing="ij")
@@ -118,8 +127,8 @@ def _triangle_zbuffer(
         sample_px = np.einsum("sk,tkd->tsd", bary, tri_px[group]).reshape(-1, 2)
         sample_z = (tri_z[group] @ bary.T).reshape(-1)
         sx = np.floor(sample_px[:, 0]).astype(np.int64)
-        sy = np.floor(sample_px[:, 1]).astype(np.int64)
-        on = (sx >= 0) & (sx < width) & (sy >= 0) & (sy < height)
+        sy = np.floor(sample_px[:, 1]).astype(np.int64) + above
+        on = (sx >= 0) & (sx < width) & (sy >= 0) & (sy < above + height)
         np.minimum.at(zbuffer, (sy[on], sx[on]), sample_z[on])
     return zbuffer
 

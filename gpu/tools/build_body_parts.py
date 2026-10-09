@@ -13,15 +13,19 @@ keep the shopper's own photo.
 
 from __future__ import annotations
 
-import json
-import struct
+import sys
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
-GLB = REPO / "public" / "models" / "mhr-hull.glb"
 OUT = REPO / "public" / "models" / "mhr-parts.bin"
+sys.path.insert(0, str(REPO / "gpu"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# One definition of "the arm stands clear of the torso", shared with the girths.
+from body.girths import ARM_GAP_CM, TORSO_MIN_HALF_CM  # noqa: E402
+from build_mhr_faces import read_glb_positions  # noqa: E402
 
 # Must match lib/graphics/body-parts.ts.
 HEAD = 0
@@ -31,9 +35,6 @@ ARM = 3
 HAND = 4
 FOOT = 5
 
-ARM_GAP_CM = 3.0
-# The torso edge is never this close to the midline; sparse chest rows are.
-TORSO_MIN_HALF_CM = 12.0
 SHOULDER_SEAM_PAD_CM = 0.5
 HAND_LENGTH_CM = 19.0
 ANKLE_CM = 9.0
@@ -43,12 +44,7 @@ CHIN_BELOW_NOSE_CM = 8.5
 
 
 def rest_mesh_cm() -> np.ndarray:
-    data = GLB.read_bytes()
-    json_length = struct.unpack_from("<I", data, 12)[0]
-    gltf = json.loads(data[20 : 20 + json_length])
-    count = gltf["accessors"][0]["count"]
-    vertices = np.frombuffer(data, dtype=np.float32, count=count * 3, offset=20 + json_length + 8)
-    return vertices.reshape(-1, 3).astype(np.float64) * 100.0
+    return read_glb_positions().astype(np.float64) * 100.0
 
 
 def armpit(vertices: np.ndarray, side: float) -> tuple[float, float, dict[float, float]]:

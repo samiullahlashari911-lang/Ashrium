@@ -11,7 +11,7 @@ import {
   CONSENT_BULLETS,
   CONSENT_CHECKBOX_LABEL,
   CONSENT_SUMMARY,
-  FACE_ON_DEVICE_BULLET,
+  LOOK_ON_DEVICE_BULLET,
   FITTED_CLOTHING_COPY,
   ILLINOIS_BIPA_REFUSAL,
   PRIVACY_PAGE_PATH,
@@ -42,8 +42,8 @@ interface CaptureIntakeProps {
   heading?: string;
   submitLabel?: string;
   showStep?: boolean;
-  /** Merchant enabled the on-device face: say so before consent. */
-  showFaceNotice?: boolean;
+  /** The avatar is painted from the shopper's photos on this device: say so before consent. */
+  showLookNotice?: boolean;
 }
 
 type IntakePage = 'consent' | 'height' | 'sex' | 'weight';
@@ -141,7 +141,7 @@ export function CaptureIntake({
   heading = 'Before we start',
   submitLabel = 'Next',
   showStep = true,
-  showFaceNotice = false,
+  showLookNotice = false,
 }: CaptureIntakeProps): React.JSX.Element {
   const [page, setPage] = useState<IntakePage>('consent');
   const [heightCm, setHeightCm] = useState(HEIGHT_CM_DEFAULT);
@@ -268,7 +268,7 @@ export function CaptureIntake({
             </PageTitle>
 
             <ul className="flex flex-col gap-3.5">
-              {(showFaceNotice ? [...CONSENT_BULLETS, FACE_ON_DEVICE_BULLET] : CONSENT_BULLETS).map((bullet, index) => (
+              {(showLookNotice ? [...CONSENT_BULLETS, LOOK_ON_DEVICE_BULLET] : CONSENT_BULLETS).map((bullet, index) => (
                 <li key={bullet.title} className="flex items-start gap-3.5">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ash-accent-soft text-ash-accent">
                     <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true">

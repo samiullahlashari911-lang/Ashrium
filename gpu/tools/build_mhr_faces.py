@@ -22,7 +22,8 @@ VERTEX_COUNT = 18439
 COMPONENT_DTYPES = {5121: np.uint8, 5123: np.uint16, 5125: np.uint32}
 
 
-def read_glb_indices(path: Path) -> np.ndarray:
+def _read_accessor(path: Path, which: str) -> np.ndarray:
+    """The hull primitive's POSITION (metres, (V, 3) float32) or triangle indices ((F, 3))."""
     data = path.read_bytes()
     magic, _version, _length = struct.unpack_from("<4sII", data, 0)
     if magic != b"glTF":
@@ -35,14 +36,26 @@ def read_glb_indices(path: Path) -> np.ndarray:
     primitive = gltf["meshes"][0]["primitives"][0]
     if primitive.get("mode", 4) != 4:
         raise RuntimeError("MHR hull must be a triangle list.")
-    if gltf["accessors"][primitive["attributes"]["POSITION"]]["count"] != VERTEX_COUNT:
-        raise RuntimeError(f"MHR hull must have {VERTEX_COUNT} vertices.")
-    accessor = gltf["accessors"][primitive["indices"]]
+    position = gltf["accessors"][primitive["attributes"]["POSITION"]]
+    if position["count"] != VERTEX_COUNT or position.get("type") != "VEC3" or position["componentType"] != 5126:
+        raise RuntimeError(f"MHR hull POSITION must be {VERTEX_COUNT} float32 VEC3.")
+    accessor = position if which == "POSITION" else gltf["accessors"][primitive["indices"]]
     view = gltf["bufferViews"][accessor["bufferView"]]
+    if view.get("byteStride") not in (None, 12) and which == "POSITION":
+        raise RuntimeError("Interleaved MHR hull positions are not supported.")
     offset = bin_start + view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    if which == "POSITION":
+        return np.frombuffer(data, dtype=np.float32, count=VERTEX_COUNT * 3, offset=offset).reshape(-1, 3)
     dtype = COMPONENT_DTYPES[accessor["componentType"]]
-    indices = np.frombuffer(data, dtype=dtype, count=accessor["count"], offset=offset)
-    return indices.reshape(-1, 3)
+    return np.frombuffer(data, dtype=dtype, count=accessor["count"], offset=offset).reshape(-1, 3)
+
+
+def read_glb_positions(path: Path = GLB) -> np.ndarray:
+    return _read_accessor(path, "POSITION")
+
+
+def read_glb_indices(path: Path = GLB) -> np.ndarray:
+    return _read_accessor(path, "indices")
 
 
 def main() -> None:

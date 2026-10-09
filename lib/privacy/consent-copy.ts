@@ -37,7 +37,7 @@ export const CONSENT_BULLETS: ReadonlyArray<{ title: string; body: string }> = [
  * own clothes, painted on the avatar from their photos in this browser. The
  * full photos are never uploaded; servers get only the headless pair.
  */
-export const FACE_ON_DEVICE_BULLET = {
+export const LOOK_ON_DEVICE_BULLET = {
   title: 'Your look stays on your phone',
   body: 'Your avatar shows your face, hair and clothes, painted from your photos on this phone only. The full photos are never uploaded and are gone when you close Try On.',
 } as const;

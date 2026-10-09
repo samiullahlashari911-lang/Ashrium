@@ -416,10 +416,8 @@ export function readMhrParametricVector(value: unknown): MhrParametricVector | n
     result.fit_diagnostics = diagnostics;
   }
 
+  // Malformed painting data drops the painting, never the body.
   const photoUv = readMhrPhotoUv(value.photo_uv);
-  if (photoUv === null) {
-    return null;
-  }
   if (photoUv) {
     result.photo_uv = photoUv;
   }

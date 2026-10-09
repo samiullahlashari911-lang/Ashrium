@@ -192,3 +192,28 @@ test('every vertex gets a colour source; the unseen back of the head uses the si
   assert.ok(attributes.front && attributes.side);
   assert.ok(attributes.side.used < attributes.front.used, 'profile uses only the near-side points');
 });
+
+test('without a side photo the back of the head takes the crown hair, never the face', () => {
+  const { positions, frame, photoUv } = scene();
+  const frontSeen = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => (positions[i * 3 + 2]! > 0 ? 200 : 0));
+  const uv: MhrPhotoUv = {
+    front_uv: photoUv,
+    front_weight: frontSeen,
+    side_uv: photoUv,
+    side_weight: Array.from({ length: MHR_VERTEX_COUNT }, () => 0),
+  };
+  const attributes = buildPhotoSkinAttributes(positions, uv, frame, null);
+  let crown = 0;
+  for (let i = 1; i < MHR_VERTEX_COUNT; i += 1) {
+    if (positions[i * 3 + 1]! > positions[crown * 3 + 1]!) crown = i;
+  }
+  let checked = 0;
+  for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
+    if (frontSeen[i] === 0 && photoUv[i * 2 + 1]! < 0) {
+      assert.equal(attributes.uvFront[i * 2], attributes.uvFront[crown * 2]);
+      assert.equal(attributes.uvFront[i * 2 + 1], attributes.uvFront[crown * 2 + 1]);
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 100);
+});

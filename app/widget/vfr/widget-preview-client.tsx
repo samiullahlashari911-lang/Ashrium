@@ -9,7 +9,7 @@ import {
   type GuidedCaptureResult,
 } from '@/components/widget/guided-capture/guided-capture';
 import { recommendFit } from '@/lib/fit/recommend';
-import { releaseOnDevicePhoto } from '@/lib/widget/webp-encode';
+import { releaseOnDevicePhotos } from '@/lib/widget/webp-encode';
 import { readFitResiduals } from '@/types/hmr';
 
 export interface WidgetPreviewClientProps {
@@ -35,10 +35,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
   // The shopper's camera frames live only as long as this fitting.
   useEffect(() => {
     const photos = result?.photos;
-    return () => {
-      releaseOnDevicePhoto(photos?.front);
-      releaseOnDevicePhoto(photos?.side);
-    };
+    return () => releaseOnDevicePhotos(photos);
   }, [result]);
 
   const handleRevealed = useCallback(() => {
@@ -73,7 +70,6 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
             garment={{
               easeCm: recommendation.ease.chestCm,
             }}
-            faceImage={result.face}
             photos={result.photos}
             revealed={revealed}
             onBodyReady={() => setBodySettled(true)}
@@ -109,7 +105,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
             tenantId={tenantId}
             embedToken={embedToken}
             allowGallery
-            captureFace
+            keepOnDeviceLook
             onAvatarReady={handleAvatarReady}
             reveal={result ? (bodySettled ? 'ready' : 'place') : null}
             dressSkipped

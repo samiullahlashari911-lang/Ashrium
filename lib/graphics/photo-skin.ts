@@ -266,7 +266,9 @@ export function frameUvForView(
   }
   const eyes = frame.landmarks[POSE_LEFT_EYE];
   const mouth = frame.landmarks[POSE_MOUTH_LEFT];
-  const faceHeightPx = eyes && mouth ? Math.abs(mouth.y - eyes.y) * frame.height : 1;
+  const faceHeightPx = eyes && mouth && eyes.visibility >= LANDMARK_VISIBLE && mouth.visibility >= LANDMARK_VISIBLE
+    ? Math.abs(mouth.y - eyes.y) * frame.height
+    : 1;
 
   for (let i = 0; i < count; i += 1) {
     const weight = headBlend(positions[i * 3 + 1]!, anchors.noseY);
@@ -317,6 +319,15 @@ export function buildPhotoSkinAttributes(
     ? frameUvForView(photoUv.side_uv, side, positions, anchors, uvSide, photoUv.side_weight)
     : null;
 
+  // Without a side photo the back of the head must not take the face (the
+  // front projection runs straight through it): use the hair at the crown.
+  let crown = 0;
+  for (let i = 1; i < count; i += 1) {
+    if (positions[i * 3 + 1]! > positions[crown * 3 + 1]!) {
+      crown = i;
+    }
+  }
+
   const weights = new Float32Array(count * 2);
   for (let i = 0; i < count; i += 1) {
     let wf = photoUv.front_weight[i]! / 255;
@@ -329,10 +340,17 @@ export function buildPhotoSkinAttributes(
         ws = UNSEEN_WEIGHT;
       } else {
         wf = UNSEEN_WEIGHT;
+        if (aboveCrop) {
+          uvFront[i * 2] = uvFront[crown * 2]!;
+          uvFront[i * 2 + 1] = uvFront[crown * 2 + 1]!;
+        }
       }
     }
     weights[i * 2] = wf;
     weights[i * 2 + 1] = ws;
+  }
+  // three.js textures are flipY: v runs up. After the crown copy above.
+  for (let i = 0; i < count; i += 1) {
     uvFront[i * 2 + 1] = 1 - uvFront[i * 2 + 1]!;
     uvSide[i * 2 + 1] = 1 - uvSide[i * 2 + 1]!;
   }
@@ -348,6 +366,9 @@ export function buildPhotoSkinAttributes(
 export function skinColorFromPixels(pixels: Uint8ClampedArray): [number, number, number] | null {
   const samples: Array<[number, number, number, number]> = [];
   for (let i = 0; i + 3 < pixels.length; i += 4) {
+    if (pixels[i + 3]! < 255) {
+      continue; // outside the frame (transparent), never skin
+    }
     const r = pixels[i]!;
     const g = pixels[i + 1]!;
     const b = pixels[i + 2]!;
@@ -391,7 +412,10 @@ export function skinPatches(frame: PhotoFrameMeta): Array<{ x: number; y: number
     { x: midX, y: eyeY - faceHeight * 0.6 },
     { x: leftEye.x, y: eyeY + faceHeight * 0.42 },
     { x: rightEye.x, y: eyeY + faceHeight * 0.42 },
-  ].map((centre) => ({ x: Math.round(centre.x - size / 2), y: Math.round(centre.y - size / 2), size }));
+  ]
+    .map((centre) => ({ x: Math.round(centre.x - size / 2), y: Math.round(centre.y - size / 2), size }))
+    .filter((patch) => patch.x >= 0 && patch.y >= 0
+      && patch.x + patch.size <= frame.width && patch.y + patch.size <= frame.height);
 }
 
 export function sampleSkinColor(photo: OnDevicePhoto): [number, number, number] | null {

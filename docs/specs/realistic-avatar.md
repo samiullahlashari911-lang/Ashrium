@@ -18,6 +18,10 @@ changes below.
 | Q8 | Fit shown by: drape on you + tight/loose toggle + one plain line from regional clearance (e.g. "Snug at chest · relaxed at waist") + label "3D simulation of you from your measurements". |
 | Q9 | If the photo cannot texture the avatar (blur, dark, face not found) → retake that photo with the reason. Capture gates check light and sharpness first. Never the mannequin. |
 | Q10 | Always on. No merchant or shopper switch. |
+| Q11 | **Suits = two linked pieces** (jacket + trousers ingested and draped together, replacing top and bottom). Built after this release; until then a store's separate jacket/trousers products work, and a single-product suit shows Best match (size only, no 3D). |
+| Q12 | **Outerwear layers over** the shopper's own top (their shirt shows at the open front/collar); it replaces nothing. |
+| Q13 | **One garment at a time** in this release; top + bottom together comes with Q11's two-piece drape. |
+| Q14 | Where the shopper's own outfit cannot be replaced cleanly (a dress under a tried top), the photo shows as it is; the capture tip asks for a fitted T-shirt and trousers. |
 
 ## Why the current face looks cut and stretched (facts)
 
@@ -68,6 +72,15 @@ changes below.
 | S6 Fit line + label + capture copy | Visible in the sandbox and storefront |
 
 S1 needs a Modal deploy by the owner (production deploys are blocked for the agent).
+
+## Known deviations (after code review, 2026-10-09)
+
+- Reveal cap is the server drape budget (`GPU_HOLD_DURING_DRAPE_MS`) + 15 s,
+  not a measured p95 + 20 %: no drape timings are recorded yet. Revisit with
+  the GPU cost work.
+- Body part labels are traced geometrically on the MHR mean A-pose
+  (`gpu/tools/build_body_parts.py`), not from skinning weights: the weights
+  live in the gated 696 MB MHR model, which is not on the dev machine.
 
 ## AGENTS.md lock changes (need the owner's explicit yes)
 

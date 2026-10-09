@@ -103,6 +103,21 @@ class PhotoUvTests(unittest.TestCase):
                 blocked = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & ~own & (t > 0) & (t < distance - 0.01)
                 self.assertFalse(blocked.any(), f"vertex {vertex} is shown but hidden")
 
+    def test_head_above_the_headless_crop_is_still_seen(self) -> None:
+        # The upload starts at the chin, so every head vertex projects above
+        # the image (v < 0). They must still get a visibility weight: the
+        # phone paints the head from its full frame and snaps the face onto
+        # its landmarks using exactly these weights (all-zero disabled both).
+        chin_at_top = np.array([0.0, 1.5 - 320.0 * 3.2 / FOCAL, 3.2])
+        uv, weight = project_view(self.rest, FOCAL, chin_at_top, IMAGE_HW)
+        y, z = self.rest[:, 1], self.rest[:, 2]
+        face = (y > 152) & (y < 165) & (np.abs(self.rest[:, 0]) < 4) & (z > np.percentile(z[y > 152], 85))
+        back_of_head = (y > 152) & (z < z[y > 152].min() + 4.0)
+        self.assertLess(uv[face, 1].max(), 0.0, "face is above the headless upload")
+        self.assertGreater((weight[face] > 0).mean(), 0.9)
+        self.assertGreater(float(np.median(weight[face])), 128.0)
+        self.assertEqual(int(weight[back_of_head].max()), 0)
+
     def test_payload_is_flat_json_with_one_entry_per_vertex(self) -> None:
         payload = photo_uv_payload(
             self.rest,

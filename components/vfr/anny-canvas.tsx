@@ -6,11 +6,10 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { RadialHeatmapLegend } from '@/components/vfr/radial-heatmap-legend';
-import type { OnDeviceFace, OnDevicePhoto } from '@/lib/widget/webp-encode';
+import type { OnDevicePhotos } from '@/lib/widget/webp-encode';
 import {
   applyFacelessMannequin,
   applyMannequinMaterial,
-  buildFaceDecalGeometry,
   createGarmentAlbedoMaterial,
   garmentCodeUvsFromPositions,
   paintMannequinUndergarment,
@@ -65,6 +64,8 @@ export interface AnnyCanvasGarment {
   printQaPassed?: boolean;
 }
 
+export type PaintUnavailableReason = 'not_painted' | 'face_not_found';
+
 export interface AnnyCanvasProps {
   parametric: FitParametricVector;
   heightCm: number;
@@ -85,13 +86,17 @@ export interface AnnyCanvasProps {
   onBodyError?: () => void;
   /** Hold the body invisible until true, then fade it in; the garment dresses after. */
   revealed?: boolean;
-  /** On-device face crop, used only when the full photos cannot paint the body. */
-  faceImage?: OnDeviceFace | null;
   /**
    * The shopper's own front/side camera frames. With the GPU's `photo_uv`
    * they paint the whole avatar (face, hair, skin, clothes) on this device.
    */
-  photos?: { front: OnDevicePhoto | null; side: OnDevicePhoto | null } | null;
+  photos?: OnDevicePhotos | null;
+  /**
+   * `photos` were given but cannot paint the avatar (no GPU photo_uv, frame
+   * gone, or the face could not be found in the frame). The storefront asks
+   * for a retake instead of ever showing the fallback mannequin (spec Q9).
+   */
+  onPaintUnavailable?: (reason: PaintUnavailableReason) => void;
   className?: string;
 }
 
@@ -121,15 +126,25 @@ interface SceneHandles {
   /** Body painted from the shopper's photos, and their skin colour (on-device). */
   photoBody: THREE.Mesh | null;
   skinColor: [number, number, number] | null;
+  /** The body has finished fading in; until then a garment fades in with it. */
+  bodyRevealed: boolean;
+  /** Opacity of the body's reveal fade, shared with a garment added before it ends. */
+  revealOpacity: number;
 }
 
 let bodyPartsRequest: Promise<Uint8Array> | null = null;
+let bodyPartsLoaded: Uint8Array | null = null;
 
 function bodyParts(): Promise<Uint8Array> {
-  bodyPartsRequest ??= loadBodyParts().catch((error: unknown) => {
-    bodyPartsRequest = null;
-    throw error;
-  });
+  bodyPartsRequest ??= loadBodyParts()
+    .then((labels) => {
+      bodyPartsLoaded = labels;
+      return labels;
+    })
+    .catch((error: unknown) => {
+      bodyPartsRequest = null;
+      throw error;
+    });
   return bodyPartsRequest;
 }
 
@@ -226,10 +241,10 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   turntable = true,
   onPrintQaFail,
   onFitSummary,
+  onPaintUnavailable,
   onBodyReady,
   onBodyError,
   revealed = true,
-  faceImage = null,
   photos = null,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
@@ -238,6 +253,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   const printQaFailRef = useRef(onPrintQaFail);
   const fitSummaryRef = useRef(onFitSummary);
   fitSummaryRef.current = onFitSummary;
+  const paintUnavailableRef = useRef(onPaintUnavailable);
+  paintUnavailableRef.current = onPaintUnavailable;
   const bodyReadyRef = useRef(onBodyReady);
   const bodyErrorRef = useRef(onBodyError);
   const revealedRef = useRef(revealed);
@@ -251,7 +268,6 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   heatmapRef.current = showClearanceHeatmap;
   turntableRef.current = turntable;
   const [bodyVersion, setBodyVersion] = useState(0);
-  const [bodyShown, setBodyShown] = useState(false);
   const [garmentDraped, setGarmentDraped] = useState(false);
 
   const garmentEaseCm = garment?.easeCm;
@@ -267,7 +283,6 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     }
 
     mountElement.innerHTML = '';
-    setBodyShown(false);
     startRevealRef.current = null;
     const width = mountElement.clientWidth || 800;
     const height = mountElement.clientHeight || 560;
@@ -345,6 +360,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       heatMaterial: null,
       photoBody: null,
       skinColor: null,
+      bodyRevealed: false,
+      revealOpacity: 0,
     };
     handlesRef.current = handles;
 
@@ -405,10 +422,18 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         (Array.isArray(previous) ? previous : [previous]).forEach((material) => material.dispose());
         handles.photoBody = bodyMesh;
         handles.skinColor = sampleSkinColor(frontPhoto);
+        if (!attributes.front) {
+          paintUnavailableRef.current?.('face_not_found');
+        }
+        void bodyParts().catch(() => undefined);
       }
-      const headFrame = bodyMesh && !painted ? applyFacelessMannequin(bodyMesh) : null;
       if (bodyMesh && !painted) {
+        // Sandbox / gallery debug only: the storefront retakes instead (Q9).
+        applyFacelessMannequin(bodyMesh);
         paintMannequinUndergarment(bodyMesh);
+        if (photos) {
+          paintUnavailableRef.current?.('not_painted');
+        }
       }
 
       const bounds = new THREE.Box3().setFromObject(hull);
@@ -437,27 +462,6 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
           fadeMaterials.push(node.material);
         }
       });
-      if (faceImage && bodyMesh && headFrame) {
-        const decalGeometry = buildFaceDecalGeometry(bodyMesh, headFrame);
-        if (decalGeometry) {
-          const faceTexture = new THREE.CanvasTexture(faceImage);
-          faceTexture.colorSpace = THREE.SRGBColorSpace;
-          const decal = new THREE.Mesh(
-            decalGeometry,
-            new THREE.MeshStandardMaterial({
-              map: faceTexture,
-              transparent: true,
-              depthWrite: false,
-              roughness: 0.6,
-              metalness: 0,
-              polygonOffset: true,
-              polygonOffsetFactor: -2,
-            }),
-          );
-          bodyMesh.add(decal);
-        }
-      }
-
       // Reveal: fade the body in while the camera glides to its resting orbit.
       // It waits, invisible, until the parent says the loader is done.
       fadeMaterials.forEach((material) => {
@@ -469,23 +473,29 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
           startedAt: performance.now(),
           durationMs: REVEAL_MS,
           update: (eased) => {
-            fadeMaterials.forEach((material) => {
-              material.opacity = Math.min(1, eased * 1.6);
+            handles.revealOpacity = Math.min(1, eased * 1.6);
+            [...fadeMaterials, handles.albedoMaterial].forEach((material) => {
+              if (material) {
+                material.opacity = handles.revealOpacity;
+              }
             });
             camera.position.lerpVectors(startPosition, restPosition, eased);
           },
           done: () => {
-            fadeMaterials.forEach((material) => {
-              material.opacity = 1;
-              material.transparent = false;
-              material.needsUpdate = true;
+            handles.revealOpacity = 1;
+            handles.bodyRevealed = true;
+            [...fadeMaterials, handles.albedoMaterial].forEach((material) => {
+              if (material) {
+                material.opacity = 1;
+                material.transparent = false;
+                material.needsUpdate = true;
+              }
             });
             if (turntableRef.current) {
               lastAzimuth = controls.getAzimuthalAngle();
               turnRemaining = Math.PI * 2;
               controls.autoRotate = true;
             }
-            setBodyShown(true);
           },
         });
       };
@@ -581,7 +591,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         mountElement,
       });
     };
-  }, [faceImage, heightCm, parametric, photos]);
+  }, [heightCm, parametric, photos]);
 
   useEffect(() => {
     if (revealed && startRevealRef.current) {
@@ -591,10 +601,12 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   }, [bodyVersion, revealed]);
 
   // Layer 2 — the garment. Rebuilds on drape / size / albedo changes without
-  // touching the body; it dresses only once the body has faded in.
+  // touching the body. The first drape fades in with the body, so the shopper
+  // first sees themselves dressed; a size switch swaps in place; only a drape
+  // landing after the body is already showing pours on.
   useEffect(() => {
     const handles = handlesRef.current;
-    if (!handles || !bodyShown) {
+    if (!handles || bodyVersion === 0) {
       return;
     }
 
@@ -652,6 +664,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         return;
       }
 
+      const swapping = handles.garmentMesh !== null;
       removeGarment(handles);
       const heatMaterial = createFitShaderMaterial(garmentEaseCm ?? DEFAULT_EASE_CM);
       const garmentMesh = new THREE.Mesh(
@@ -681,6 +694,40 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         easeCm: garmentEaseCm ?? DEFAULT_EASE_CM,
       })));
 
+      // Wherever the new garment replaces the shopper's own clothes but does
+      // not cover them, show their skin (on-device).
+      const fillSkin = (): void => {
+        const photoBody = handles.photoBody;
+        const skinColor = handles.skinColor;
+        if (!photoBody || !skinColor || !garmentCategory) {
+          return;
+        }
+        if (bodyPartsLoaded) {
+          setPhotoSkinFill(photoBody, skinFillMask(bodyPartsLoaded, garmentCategory), skinColor);
+          return;
+        }
+        void bodyParts()
+          .then((labels) => {
+            if (!cancelled && handles.garmentMesh === garmentMesh) {
+              setPhotoSkinFill(photoBody, skinFillMask(labels, garmentCategory), skinColor);
+            }
+          })
+          .catch(() => {
+            // Without labels the shopper's own clothes stay visible; never block dressing.
+          });
+      };
+
+      if (!handles.bodyRevealed) {
+        albedoMaterial.transparent = true;
+        albedoMaterial.opacity = handles.revealOpacity;
+        fillSkin();
+        return;
+      }
+      if (swapping) {
+        fillSkin();
+        return;
+      }
+
       // Dressing: a clipping plane sweeps from the collar down so the garment
       // "pours" onto the body. The fit shader has no clipping chunk, so the
       // sweep runs on the fabric material only.
@@ -696,21 +743,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         done: () => {
           albedoMaterial.clippingPlanes = [];
           albedoMaterial.needsUpdate = true;
-          // Dressed: wherever the new garment replaces the shopper's own
-          // clothes but does not cover them, show their skin (on-device).
-          const photoBody = handles.photoBody;
-          if (photoBody && handles.skinColor && garmentCategory) {
-            const skinColor = handles.skinColor;
-            void bodyParts()
-              .then((labels) => {
-                if (!cancelled && handles.garmentMesh === garmentMesh) {
-                  setPhotoSkinFill(photoBody, skinFillMask(labels, garmentCategory), skinColor);
-                }
-              })
-              .catch(() => {
-                // Without labels the shopper's own clothes stay visible; never block dressing.
-              });
-          }
+          fillSkin();
         },
       });
     })();
@@ -720,7 +753,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     };
   }, [
     albedoUrl,
-    bodyShown,
+    bodyVersion,
     drapePayloadBase64,
     garmentCategory,
     garmentEaseCm,

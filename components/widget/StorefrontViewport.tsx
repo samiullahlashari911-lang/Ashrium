@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AshriumWordmark } from '@/components/brand/ashrium-logo';
-import { AnnyCanvas } from '@/components/vfr/anny-canvas';
+import { AnnyCanvas, type PaintUnavailableReason } from '@/components/vfr/anny-canvas';
 import { ConfidenceBadge, approximateReasons } from '@/components/vfr/confidence-badge';
 import {
   GuidedCapture,
@@ -19,7 +19,7 @@ import {
 } from '@/lib/widget/fit-client';
 import { REVEAL_HOLD_MAX_MS, type AvatarRevealStage } from '@/lib/widget/avatar-stages';
 import { postWidgetEvent, subscribeToHostEvents } from '@/lib/widget/bridge';
-import { releaseOnDevicePhoto } from '@/lib/widget/webp-encode';
+import { releaseOnDevicePhotos } from '@/lib/widget/webp-encode';
 import type { FitRecommendation, StorefrontGarment } from '@/types/garment';
 import { readFitResiduals } from '@/types/hmr';
 
@@ -91,6 +91,9 @@ export function StorefrontViewport({
   const [clientPrintQaPassed, setClientPrintQaPassed] = useState<boolean | null>(null);
   const [addedSize, setAddedSize] = useState<string | null>(null);
   const [fitLine, setFitLine] = useState<string | null>(null);
+  // Q9: photos that cannot paint the avatar mean a retake, never the mannequin.
+  const [paintFailure, setPaintFailure] = useState<PaintUnavailableReason | null>(null);
+  const [captureAttempt, setCaptureAttempt] = useState(0);
 
   const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
@@ -116,10 +119,7 @@ export function StorefrontViewport({
   // The shopper's camera frames live only as long as this fitting.
   useEffect(() => {
     const photos = result?.photos;
-    return () => {
-      releaseOnDevicePhoto(photos?.front);
-      releaseOnDevicePhoto(photos?.side);
-    };
+    return () => releaseOnDevicePhotos(photos);
   }, [result]);
 
   const handleRevealed = useCallback(() => {
@@ -396,13 +396,13 @@ export function StorefrontViewport({
               garment={canvasGarment}
               drapePayloadBase64={drapePayloadBase64}
               showClearanceHeatmap={showHeatmap && heatmapAvailable}
-              faceImage={result.face}
               photos={result.photos}
               revealed={revealed}
               onBodyReady={() => setBodySettled(true)}
               onBodyError={() => setBodySettled(true)}
               onPrintQaFail={() => setClientPrintQaPassed(false)}
               onFitSummary={setFitLine}
+              onPaintUnavailable={setPaintFailure}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
             />
             <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
@@ -422,7 +422,7 @@ export function StorefrontViewport({
               </span>
             </div>
             <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/70 px-3 py-1 text-[11px] text-ash-muted">
-              3D simulation of you from your measurements · drag to turn
+              Drag to turn · pinch to zoom
             </p>
           </section>
 
@@ -461,6 +461,7 @@ export function StorefrontViewport({
               {fitLine && drapePayloadBase64 ? (
                 <p className="text-sm font-medium text-ash-ink">{fitLine}</p>
               ) : null}
+              <p className="text-[11px] text-ash-subtle">3D simulation of you from your measurements</p>
             </div>
 
             {sizeOptions.length > 1 ? (
@@ -583,15 +584,41 @@ export function StorefrontViewport({
           </aside>
         </div>
       ) : null}
+      {paintFailure ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ash-canvas p-6">
+          <div className="ash-card flex max-w-sm flex-col gap-4 p-6 text-center">
+            <h2 className="text-lg font-semibold tracking-tight">Let’s retake your photos</h2>
+            <p className="text-sm text-ash-muted">
+              {paintFailure === 'face_not_found'
+                ? 'We could not see your face clearly enough to put you on your avatar. Face the camera in good light, without anything covering your face.'
+                : 'We could not build your avatar from these photos. Stand in good light and hold still while the photo is taken.'}
+            </p>
+            <button
+              type="button"
+              className="ash-cta py-4"
+              onClick={() => {
+                setPaintFailure(null);
+                setResult(null);
+                setRevealed(false);
+                resetFitting();
+                setCaptureAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Retake photos
+            </button>
+          </div>
+        </div>
+      ) : null}
       {/* Same element before and after the job completes, so the loader keeps
           its particles while it covers the avatar being built underneath. */}
-      {!revealed ? (
+      {!revealed && !paintFailure ? (
         <div className={result ? 'fixed inset-0 z-40 overflow-hidden bg-ash-canvas' : undefined}>
           <GuidedCapture
+            key={captureAttempt}
             tenantId={tenantId}
             embedToken={embedToken}
             allowGallery={allowGallery}
-            captureFace
+            keepOnDeviceLook
             onAvatarReady={handleAvatarReady}
             reveal={result ? revealStage : null}
             dressSkipped={dressSkipped}

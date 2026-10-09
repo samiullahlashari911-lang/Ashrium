@@ -168,6 +168,12 @@ export function captureOnDevicePhoto(
   };
 }
 
+/** The front and side frames of one fitting. */
+export interface OnDevicePhotos {
+  front: OnDevicePhoto | null;
+  side: OnDevicePhoto | null;
+}
+
 /** Wipe the pixels now rather than waiting for garbage collection. */
 export function releaseOnDevicePhoto(photo: OnDevicePhoto | null | undefined): void {
   if (!photo) {
@@ -175,6 +181,11 @@ export function releaseOnDevicePhoto(photo: OnDevicePhoto | null | undefined): v
   }
   photo.frame.width = 0;
   photo.frame.height = 0;
+}
+
+export function releaseOnDevicePhotos(photos: OnDevicePhotos | null | undefined): void {
+  releaseOnDevicePhoto(photos?.front);
+  releaseOnDevicePhoto(photos?.side);
 }
 
 /**
@@ -213,79 +224,4 @@ export async function encodeImageFileToWebp(
   } finally {
     bitmap.close();
   }
-}
-
-/**
- * On-device face for the shopper's own avatar (merchant opt-in, default off).
- * Returned as a canvas, never a Blob, so it cannot be uploaded by accident:
- * it is only ever drawn as a texture in this browser and is dropped when Try
- * On closes. The crop spans chin to crown and ear to ear, with a soft oval
- * alpha so the edges melt into the mannequin head.
- */
-export type OnDeviceFace = HTMLCanvasElement;
-
-const FACE_TEXTURE_WIDTH_PX = 256;
-
-export function cropOnDeviceFace(
-  source: CanvasImageSource,
-  landmarks: readonly PoseLandmarkSample[],
-  imageWidth: number,
-  imageHeight: number,
-): OnDeviceFace | null {
-  const point = (index: number): { x: number; y: number } | null => {
-    const landmark = landmarks[index];
-    return isVisibleFace(landmark) ? { x: landmark.x * imageWidth, y: landmark.y * imageHeight } : null;
-  };
-  const nose = point(0);
-  const leftEye = point(2);
-  const rightEye = point(5);
-  const mouthLeft = point(9);
-  const mouthRight = point(10);
-  if (!nose || !leftEye || !rightEye || !mouthLeft || !mouthRight) {
-    return null;
-  }
-
-  const eyeY = (leftEye.y + rightEye.y) / 2;
-  const mouthY = (mouthLeft.y + mouthRight.y) / 2;
-  const faceHeight = mouthY - eyeY;
-  if (faceHeight <= 2) {
-    return null;
-  }
-  const leftEar = point(7);
-  const rightEar = point(8);
-  const earHalf = leftEar && rightEar ? Math.abs(leftEar.x - rightEar.x) / 2 : 0;
-  const halfWidth = Math.max(earHalf * 1.2, faceHeight * 1.45);
-  const top = Math.max(0, eyeY - faceHeight * 1.8);
-  const bottom = Math.min(imageHeight, mouthY + faceHeight * 1.1);
-  const left = Math.max(0, nose.x - halfWidth);
-  const right = Math.min(imageWidth, nose.x + halfWidth);
-  const width = right - left;
-  const height = bottom - top;
-  if (width <= 4 || height <= 4) {
-    return null;
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = FACE_TEXTURE_WIDTH_PX;
-  canvas.height = Math.round((FACE_TEXTURE_WIDTH_PX * height) / width);
-  const context = canvas.getContext('2d');
-  if (!context) {
-    return null;
-  }
-  context.drawImage(source, left, top, width, height, 0, 0, canvas.width, canvas.height);
-
-  // Soft oval mask: opaque face, feathered edges.
-  context.globalCompositeOperation = 'destination-in';
-  const radius = Math.max(canvas.width, canvas.height) / 2;
-  const gradient = context.createRadialGradient(0, 0, radius * 0.72, 0, 0, radius);
-  gradient.addColorStop(0, 'rgba(0,0,0,1)');
-  gradient.addColorStop(1, 'rgba(0,0,0,0)');
-  context.save();
-  context.translate(canvas.width / 2, canvas.height / 2);
-  context.scale(canvas.width / (2 * radius), canvas.height / (2 * radius));
-  context.fillStyle = gradient;
-  context.fillRect(-radius, -radius, radius * 2, radius * 2);
-  context.restore();
-  context.globalCompositeOperation = 'source-over';
-  return canvas;
 }

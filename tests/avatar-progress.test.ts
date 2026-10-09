@@ -108,7 +108,7 @@ test('two shoppers share one A100: containers scale to ceil(occupancy / 2)', asy
   assert.equal(shopperGpuCapacity(3), 6);
 });
 
-test('on-device face never reaches an upload path and is shown to every shopper', async () => {
+test('full on-device photos never reach an upload path and paint every avatar', async () => {
   const { readFileSync } = await import('node:fs');
   const path = await import('node:path');
   const read = (file: string): string => readFileSync(path.join(process.cwd(), file), 'utf8');
@@ -117,16 +117,20 @@ test('on-device face never reaches an upload path and is shown to every shopper'
   const viewport = read('components/widget/StorefrontViewport.tsx');
   const encoder = read('lib/widget/webp-encode.ts');
 
-  // The upload/dispatch client has no notion of a face at all.
-  assert.doesNotMatch(fitClient, /OnDeviceFace|frontFace|faceImage/);
+  // The upload/dispatch client has no notion of the on-device frames.
+  assert.doesNotMatch(fitClient, /OnDevicePhoto|frontPhoto|sidePhoto|photos/);
   // The dispatch call is built from the headless blobs only.
   assert.match(capture, /frontBlob,\s*\n\s*sideBlob: blob,/);
-  assert.doesNotMatch(capture, /uploadDualWebpAndDispatch\([^)]*frontFace/);
-  // Face crops are canvases, not Blobs, so FormData/fetch cannot take them by accident.
-  assert.match(encoder, /export type OnDeviceFace = HTMLCanvasElement;/);
-  // No merchant or shopper switch: the storefront always keeps the face on device.
-  assert.match(viewport, /faceImage=\{result\.face\}/);
-  assert.match(viewport, /^\s*captureFace$/m);
+  assert.doesNotMatch(capture, /uploadDualWebpAndDispatch\([^)]*Photo/);
+  // Full frames are canvases, not Blobs, so FormData/fetch cannot take them by accident.
+  assert.match(encoder, /frame: HTMLCanvasElement;/);
+  // The face sticker is retired (spec Q4).
+  assert.doesNotMatch(encoder + capture + viewport, /OnDeviceFace|cropOnDeviceFace|faceImage/);
+  // No merchant or shopper switch: the storefront always paints from the photos.
+  assert.match(viewport, /photos=\{result\.photos\}/);
+  assert.match(viewport, /^\s*keepOnDeviceLook$/m);
+  // Q9: a paint failure asks for a retake instead of showing the mannequin.
+  assert.match(viewport, /onPaintUnavailable=\{setPaintFailure\}/);
 });
 
 test('the loader never gives up on a drape the server still allows', () => {

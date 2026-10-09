@@ -227,7 +227,7 @@ Shopify Admin directly.
 | Area | Files |
 |---|---|
 | Types | `types/hmr.ts` (`MhrParametricVector`; stop writing new ANNY rows), `types/graphics.ts`, `types/garment.ts`, `types/database.ts` |
-| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/height-units.ts`, `lib/widget/weight-units.ts`, `lib/widget/capture-progress.ts`, `lib/widget/capture-outlines.ts` (generated), `components/widget/ui/*` (wheel picker, segmented toggle), `lib/widget/avatar-stages.ts` + `components/widget/loading/avatar-loading.tsx` (particle loader; real stages only), `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
+| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `app/widget/vfr/widget-preview-client.tsx` (first-party sandbox), `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop; on-device full frames `OnDevicePhoto`), `lib/widget/pose-gates.ts`, `lib/widget/height-units.ts`, `lib/widget/weight-units.ts`, `lib/widget/capture-progress.ts`, `lib/widget/capture-outlines.ts` (generated), `lib/widget/frame-quality.ts` (light/sharpness retake gate), `components/widget/ui/*` (wheel picker, segmented toggle), `lib/widget/avatar-stages.ts` + `components/widget/loading/avatar-loading.tsx` (particle loader; real stages only), `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/fit-summary.ts` (one plain fit line from drape clearance; never changes the size), `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
 | Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (fallback mannequin, undergarment, GarmentCode UVs), `lib/graphics/photo-skin.ts` (on-device photo painting + head alignment), `lib/graphics/body-parts.ts` + `public/models/mhr-parts.bin` (per-vertex parts from `gpu/tools/build_body_parts.py`; skin fill where a tried garment replaces the shopper's own clothes), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
 | GPU (Python) | `gpu/pipeline.py`, `gpu/modal_app.py` + `gpu/body/pins.py` (git sources pinned to reviewed SHAs), `gpu/requirements.txt`, `gpu/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, joint-informed ISO girths, stage timings / fit diagnostics), `gpu/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `gpu/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject), `gpu/tools/build_outlines.py` (offline: capture outlines from the MHR mesh), `gpu/body/photo_uv.py` (per-vertex photo coordinates + 0-255 visibility per view for on-device painting; geometry only), `gpu/tools/build_mhr_faces.py` → `gpu/body/mhr_lod1_faces.npy` (offline: LOD 1 triangles from `mhr-hull.glb`), `gpu/progress.py` (signed stage callbacks; never blocks inference). Never `NvidiaWarp-GarmentCode`. |
@@ -282,9 +282,15 @@ patterns to replicate, not copy pixel-for-pixel:
   store appearance; no server or stored artifact ever carries a face or skin
   colour. The selected garment (Newton drape) covers what it replaces. The
   consent bullet and `/privacy` section always say so. Counsel review (BIPA /
-  GDPR) before a paying store goes live. Jobs without `photo_uv` (older GPU
-  deploys) fall back to the porcelain mannequin. Avatar and garment centered
-  with generous negative space; rotate/zoom only in v1.
+  GDPR) before a paying store goes live. **Never the mannequin on the
+  storefront (Q9):** if the photos cannot paint the avatar (no `photo_uv`,
+  face not found), or a capture is too dark or blurred
+  (`lib/widget/frame-quality.ts`), the shopper retakes with the reason. The
+  face-decal path is retired; the porcelain mannequin remains only for the
+  dashboard sandbox / gallery debug. A tried top, bottom or dress replaces
+  what the shopper wore; outerwear layers over it (Q12); suits become two
+  linked pieces (Q11, next). Avatar and garment centered with generous
+  negative space; rotate/zoom only in v1.
   **Clearance heatmap** (loose = blue) is a **toggle**, not always-on over
   the product texture. Legend sits at the edge, not overlapping the model.
   Strain is not a verdict.

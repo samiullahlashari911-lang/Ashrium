@@ -173,69 +173,6 @@ export function applyFacelessMannequin(mesh: THREE.Mesh): MannequinHeadFrame | n
   return frame;
 }
 
-/**
- * Face decal for the on-device face: the front half of the sculpted head,
- * lifted 1.5 mm off the surface, with UVs projected straight on from the
- * camera so the shopper's front photo lands where it was taken.
- */
-export function buildFaceDecalGeometry(
-  mesh: THREE.Mesh,
-  frame: MannequinHeadFrame,
-): THREE.BufferGeometry | null {
-  const position = mesh.geometry.getAttribute('position');
-  const normal = mesh.geometry.getAttribute('normal');
-  const index = mesh.geometry.getIndex();
-  if (!position || !normal || !index) {
-    return null;
-  }
-
-  const inFront = (vertex: number): boolean =>
-    position.getY(vertex) >= frame.chinY - frame.semiY * 0.15
-    && position.getZ(vertex) >= frame.centreZ - frame.semiZ * 0.1;
-
-  const remap = new Map<number, number>();
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const faces: number[] = [];
-  const lift = 0.0015;
-  const keep = (vertex: number): number => {
-    const known = remap.get(vertex);
-    if (known !== undefined) {
-      return known;
-    }
-    const x = position.getX(vertex);
-    const y = position.getY(vertex);
-    const z = position.getZ(vertex);
-    positions.push(x + normal.getX(vertex) * lift, y + normal.getY(vertex) * lift, z + normal.getZ(vertex) * lift);
-    uvs.push(
-      0.5 + (x - frame.centreX) / (2.1 * frame.semiX),
-      (y - (frame.chinY - frame.semiY * 0.15)) / (frame.crownY - frame.chinY + frame.semiY * 0.15),
-    );
-    const next = remap.size;
-    remap.set(vertex, next);
-    return next;
-  };
-
-  for (let cursor = 0; cursor + 2 < index.count; cursor += 3) {
-    const a = index.getX(cursor);
-    const b = index.getX(cursor + 1);
-    const c = index.getX(cursor + 2);
-    if (inFront(a) && inFront(b) && inFront(c)) {
-      faces.push(keep(a), keep(b), keep(c));
-    }
-  }
-  if (faces.length < 3) {
-    return null;
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(faces);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
 export function createMannequinMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color: MANNEQUIN_COLOR,
