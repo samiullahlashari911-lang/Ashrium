@@ -382,13 +382,17 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   Until drape lands, show the girth-based size with an **Approximate**
   badge. When Newton or a cache hit lands — at any wait — re-evaluate the
   AND-gate; do not discard a late drape.
-  **Owner decision (2026-10-08):** the shopper never sees a half-built
-  avatar. The particle loader and its real stage list stay up after
-  `task=body` completes — "Putting your avatar together" until the 3D body
-  is rendered, then "Dressing you in your size" until the recommended
-  size's drape lands or is known not to come — capped at 90 s after the job
-  completes (`REVEAL_HOLD_MAX_MS`). Past the cap the avatar shows and a late
-  drape still pours on. The GPU wait budget ends when the job completes.
+  **Owner decision (2026-10-08, cap changed 2026-10-09):** the shopper never
+  sees a half-built avatar; the first thing they see is themselves dressed.
+  The particle loader and its real stage list stay up after `task=body`
+  completes — "Putting your avatar together" until the 3D body is rendered,
+  then "Dressing you in your size" until the recommended size's drape lands
+  or is known not to come — capped at the server's drape budget
+  (`GPU_HOLD_DURING_DRAPE_MS`) + 15 s (`REVEAL_HOLD_MAX_MS`); a shorter cap
+  showed an undressed avatar while a still-allowed drape ran. Past the cap
+  or on drape failure the shopper sees themselves in their own clothes with
+  an honest message, and a late drape still pours on. The GPU wait budget
+  ends when the job completes.
 - **Client-side compositing:** `V_final = V_0 + ΔX`. Heatmap is
   **clearance** (loose regions = blue). Strain may exist as a debug channel;
   it is not a size verdict. Keep `lib/graphics/pbd-cloth.ts` /

@@ -17,7 +17,7 @@ import {
   type FitRecommendResponse,
   type FitResolveResponse,
 } from '@/lib/widget/fit-client';
-import type { AvatarRevealStage } from '@/lib/widget/avatar-stages';
+import { REVEAL_HOLD_MAX_MS, type AvatarRevealStage } from '@/lib/widget/avatar-stages';
 import { postWidgetEvent, subscribeToHostEvents } from '@/lib/widget/bridge';
 import { releaseOnDevicePhoto } from '@/lib/widget/webp-encode';
 import type { FitRecommendation, StorefrontGarment } from '@/types/garment';
@@ -36,12 +36,6 @@ interface StorefrontViewportProps {
 const RECOMMENDED_DRAPE_KEY = '__recommended__';
 
 type DrapeEntry = FitResolveResponse | 'loading' | 'failed';
-
-/**
- * Longest the loader holds after the GPU job completes while the avatar is
- * built and dressed. Past it the avatar shows and a late drape still pours on.
- */
-const REVEAL_HOLD_MAX_MS = 90_000;
 
 function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation {
   return {
@@ -377,8 +371,8 @@ export function StorefrontViewport({
       ? `Dressing you in size ${activeSize ?? ''}…`
       : drapePayloadBase64
         ? `Size ${activeSize ?? ''} on your avatar`
-        : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64)
-          ? `Approximate preview of size ${activeSize ?? ''}`
+        : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64) || holdExpired
+          ? `We couldn't dress you in size ${activeSize ?? ''}. This is you in your own clothes`
           : 'Building your fitting';
 
   return (

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { gpuProgressCallbackUrl, verifyGpuCallback } from '@/lib/server/gpu-callback-auth';
+import { GPU_HOLD_DURING_DRAPE_MS } from '@/lib/ml/session-gpu';
 import {
+  REVEAL_HOLD_MAX_MS,
   avatarStageViews,
   currentAvatarStage,
   isAvatarStageKey,
@@ -125,4 +127,10 @@ test('on-device face never reaches an upload path and is shown to every shopper'
   // No merchant or shopper switch: the storefront always keeps the face on device.
   assert.match(viewport, /faceImage=\{result\.face\}/);
   assert.match(viewport, /^\s*captureFace$/m);
+});
+
+test('the loader never gives up on a drape the server still allows', () => {
+  // A 90 s cap revealed an undressed avatar while a 120 s Newton drape ran.
+  assert.ok(REVEAL_HOLD_MAX_MS > GPU_HOLD_DURING_DRAPE_MS);
+  assert.ok(REVEAL_HOLD_MAX_MS - GPU_HOLD_DURING_DRAPE_MS <= 30_000, 'but not open-ended');
 });

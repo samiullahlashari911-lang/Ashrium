@@ -1,3 +1,5 @@
+import { GPU_HOLD_DURING_DRAPE_MS } from '@/lib/ml/session-gpu';
+
 /**
  * Shopper-facing avatar build stages. Every label maps to something that is
  * really happening — the loader never advances on a timer. Fine-grained GPU
@@ -104,3 +106,13 @@ export function currentAvatarStage(input: {
   }
   return 'gpu';
 }
+
+/**
+ * The shopper first sees themselves dressed (spec Q3). The server gives a
+ * Newton drape at most `GPU_HOLD_DURING_DRAPE_MS`; the loader waits that long
+ * plus network slack, so a drape that is still allowed to land is never cut
+ * off (a 90 s cap here showed an undressed avatar while a 120 s drape ran).
+ * Past it the drape is treated as failed: the shopper in their own clothes,
+ * with an honest message; a late drape still pours on.
+ */
+export const REVEAL_HOLD_MAX_MS = GPU_HOLD_DURING_DRAPE_MS + 15_000;
