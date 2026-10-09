@@ -31,6 +31,37 @@ function scheduleFollowUp(work: () => Promise<void>): void {
   }
 }
 
+/**
+ * Colourways of one product share one pattern: the same chart graded once
+ * per product, not once per colour (a 13-product store had 48 colourways).
+ * Kept per server instance and bounded; a miss just grades again.
+ */
+const PATTERN_MEMO_LIMIT = 200;
+const patternMemo = new Map<string, Promise<PatternIngestResult>>();
+
+function gradeOncePerPattern(
+  productKey: string,
+  request: Parameters<typeof runPatternPrediction>[0],
+): Promise<PatternIngestResult> {
+  const key = `${productKey}\u0000${JSON.stringify(request.sizeVariants)}\u0000${request.category}`;
+  const cached = patternMemo.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  if (patternMemo.size >= PATTERN_MEMO_LIMIT) {
+    const oldest = patternMemo.keys().next().value;
+    if (oldest !== undefined) {
+      patternMemo.delete(oldest);
+    }
+  }
+  const pending = runPatternPrediction(request);
+  patternMemo.set(key, pending);
+  // A failed call must not be reused: the next sync should try again.
+  pending.catch(() => patternMemo.delete(key));
+  return pending;
+}
+
 async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
   meshes: RestLengthMesh[];
   approximateFit: boolean;
@@ -45,19 +76,21 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
     return { meshes: [], approximateFit: true };
   }
 
+  const request = {
+    category: draft.category,
+    productText: patternProductText(draft),
+    sizeVariants: draft.sizeVariants.map((variant) => ({
+      sizeCode: variant.sizeCode,
+      chestCm: variant.chestCm ?? 0,
+      waistCm: variant.waistCm ?? 0,
+      hipCm: variant.hipCm ?? 0,
+      lengthCm: variant.lengthCm ?? 0,
+    })),
+  };
+
   let result: PatternIngestResult;
   try {
-    result = await runPatternPrediction({
-      category: draft.category,
-      productText: patternProductText(draft),
-      sizeVariants: draft.sizeVariants.map((variant) => ({
-        sizeCode: variant.sizeCode,
-        chestCm: variant.chestCm ?? 0,
-        waistCm: variant.waistCm ?? 0,
-        hipCm: variant.hipCm ?? 0,
-        lengthCm: variant.lengthCm ?? 0,
-      })),
-    });
+    result = await gradeOncePerPattern(draft.shopifyProductId ?? draft.sku, request);
   } catch (error) {
     throw rewritePatternCogError(error);
   }

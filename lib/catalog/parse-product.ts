@@ -89,11 +89,12 @@ function inferCategory(product: ShopifyProduct): GarmentCategory {
   if (/\b(dress|gown|jumpsuit|romper|bodysuit|catsuit)\b/.test(haystack)) {
     return 'dress';
   }
-  if (/\b(jacket|coat|parka|hoodie|outerwear|blazer|sweater|cardigan)\b/.test(haystack)) {
+  if (/\b(jacket|coat|parka|outerwear|blazer|cardigan)\b/.test(haystack)) {
     return 'outerwear';
   }
+  // Pullovers are tops: sweater, sweatshirt and hoodie fit like a long-sleeve tee.
   if (
-    /\b(tee|tees|t shirts?|tshirts?|tops?|polo|polos|shirts?|blouse|blouses|tanks?|camisole|vest|crop)\b/.test(
+    /\b(tee|tees|t shirts?|tshirts?|tops?|polo|polos|shirts?|blouse|blouses|tanks?|camisole|vest|crop|sweaters?|sweatshirts?|hoodies?|pullovers?)\b/.test(
       haystack,
     )
   ) {

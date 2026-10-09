@@ -34,8 +34,12 @@ function parsePublishedGirth(raw: string): number | null {
     return null;
   }
 
+  // An elastic range such as "27.6-38.6" is relaxed to fully stretched;
+  // shoppers wear it around the middle, so the midpoint is what fits.
   if (finite.length >= 2 && /[-–]/.test(raw)) {
-    return finite[finite.length - 1] ?? null;
+    const low = finite[0] ?? 0;
+    const high = finite[finite.length - 1] ?? 0;
+    return (low + high) / 2;
   }
 
   return finite[0] ?? null;
@@ -328,16 +332,72 @@ function mergeCharts(
   return merged;
 }
 
+/** Below this a chest or hip cannot be an adult circumference: it was measured flat. */
+const FLAT_MEASUREMENT_MAX_CM = 76.2;
+
+/**
+ * Brand charts often give chest or hip measured flat (half the
+ * circumference). When every size of a column is below an adult
+ * circumference, the column is doubled. Values are rounded to 0.1 cm.
+ */
+export function normalizeChartMeasurements(
+  chart: Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>,
+): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
+  const rows = [...chart.values()];
+  const small = (key: GirthKey): boolean => {
+    const values = rows
+      .map((row) => row[key])
+      .filter((value): value is number => typeof value === 'number' && value > 0);
+    return values.length > 0 && values.every((value) => value < FLAT_MEASUREMENT_MAX_CM);
+  };
+  // A small chart for a petite size is still a full circumference, so a
+  // second signal is needed: chest flat when no other girth is given or it
+  // is under 3/4 of the hip; hip flat when it is under the waist.
+  const below = (key: GirthKey, other: GirthKey, ratio: number): boolean =>
+    rows.every((row) => {
+      const value = row[key];
+      const reference = row[other];
+      return typeof value !== 'number' || typeof reference !== 'number' || value < reference * ratio;
+    });
+  const hasOther = (key: GirthKey): boolean => rows.some((row) => typeof row[key] === 'number');
+  const doubled = new Set<GirthKey>();
+  if (small('chestCm') && (!hasOther('hipCm') || below('chestCm', 'hipCm', 0.75))) {
+    doubled.add('chestCm');
+  }
+  if (small('hipCm') && hasOther('waistCm') && below('hipCm', 'waistCm', 1)) {
+    doubled.add('hipCm');
+  }
+  const normalized = new Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>>();
+  for (const [sizeCode, row] of chart) {
+    const next: Partial<Pick<CatalogSizeVariantInput, GirthKey>> = {};
+    for (const key of ['chestCm', 'waistCm', 'hipCm', 'lengthCm'] as const) {
+      const value = row[key];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        next[key] = Math.round((doubled.has(key) ? value * 2 : value) * 10) / 10;
+      }
+    }
+    normalized.set(sizeCode, next);
+  }
+  return normalized;
+}
+
 export function scanSizeChartFromPage(
   htmlOrText: string,
 ): Map<string, Partial<Pick<CatalogSizeVariantInput, GirthKey>>> {
+  // A real table is the merchant's chart; the text heuristics below would
+  // also read things like the model's own measurements, so they only run
+  // when there is no table.
+  const tables = parseHtmlTables(htmlOrText);
+  if (tables.size > 0) {
+    return normalizeChartMeasurements(tables);
+  }
+
   const text = stripHtml(htmlOrText);
-  return mergeCharts(
-    parseHtmlTables(htmlOrText),
+  return normalizeChartMeasurements(mergeCharts(
     parseTripletLines(text),
     parseLabeledGirthRows(text),
     parseSizeColonGirths(text),
-  );
+  ));
 }
 
 export function parseCompositionText(
@@ -345,18 +405,32 @@ export function parseCompositionText(
   options?: { allowBareFiber?: boolean },
 ): GarmentFiberComposition | null {
   const composition: GarmentFiberComposition = {};
-  const percentFirst = Array.from(text.matchAll(/(\d+(?:\.\d+)?)\s*%\s*([A-Za-z][A-Za-z\-\s]+)/g));
-  const nameFirst = Array.from(text.matchAll(/([A-Za-z][A-Za-z\-\s]+?)\s+(\d+(?:\.\d+)?)\s*%/g));
-  const matches = percentFirst.length >= nameFirst.length ? percentFirst : nameFirst;
+  // "Cotton content is at least 80% but less than 90%" (US labelling ranges).
+  const ranged = /\b([A-Za-z]+)\s+content\s+is\s+at\s+least\s+(\d+(?:\.\d+)?)\s*%\s*(?:and|but)\s+less\s+than\s+(\d+(?:\.\d+)?)\s*%/i.exec(text);
+  if (ranged) {
+    const amount = Math.round((Number(ranged[2]) + Number(ranged[3])) / 2);
+    composition[normalizeFiberName(ranged[1])] = amount;
+    composition.other = 100 - amount;
+    return composition;
+  }
 
+  // One word per fibre: "95%cotton,5%spandex", "Cotton 60%".
+  const percentFirst = Array.from(text.matchAll(/(\d+(?:\.\d+)?)\s*%\s*([A-Za-z]+)/g));
+  const nameFirst = Array.from(text.matchAll(/\b([A-Za-z]+)\s+(\d+(?:\.\d+)?)\s*%/g));
+  const usePercentFirst = percentFirst.length >= nameFirst.length;
+  const matches = usePercentFirst ? percentFirst : nameFirst;
+
+  let total = 0;
   for (const match of matches) {
-    const amount = Number(percentFirst.length >= nameFirst.length ? match[1] : match[2]);
-    const fiber = normalizeFiberName(percentFirst.length >= nameFirst.length ? match[2] : match[1]);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const amount = Number(usePercentFirst ? match[1] : match[2]);
+    const fiber = normalizeFiberName(usePercentFirst ? match[2] : match[1]);
+    // A second block (lining, trim) starts once the first adds up to 100%.
+    if (!Number.isFinite(amount) || amount <= 0 || total >= 100) {
       continue;
     }
 
     composition[fiber] = (composition[fiber] ?? 0) + amount;
+    total += amount;
   }
 
   if (Object.keys(composition).length === 0 && (options?.allowBareFiber ?? true)) {
@@ -382,7 +456,10 @@ export function scanMaterialFromPage(htmlOrText: string): GarmentFiberCompositio
     match = labelRe.exec(text);
   }
 
-  for (const chunk of labeled) {
+  for (const rawChunk of labeled) {
+    const chunk = rawChunk
+      .split(/\b(?:care\s+instructions?|imported|features?|stretch|sheer|model\s+information|product\s+measurements|size)\b/i)[0]
+      ?.split(/\blining\b/i)[0] ?? '';
     const parsed = parseCompositionText(chunk, { allowBareFiber: true });
     if (parsed) {
       return parsed;

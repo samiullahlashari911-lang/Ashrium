@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+/** Charts are stored in centimetres rounded to 0.1. */
+const inchesToCm = (inches: number): number => Math.round(inches * 25.4) / 10;
+
 import { draftsFromShopifyProduct } from '@/lib/catalog/parse-product';
 import {
   extractStorefrontProductJsHtml,
@@ -244,8 +247,8 @@ test('Legendary inch tables persist category-complete charts without inventing g
   assert.equal(pant.sizeVariants[0]?.chestCm, null);
 
   const annie = scanSizeChartFromPage('Measurements by inches. S:Bust 34-36 in, Waist 26-28 in');
-  assert.equal(annie.get('S')?.chestCm, 36 * 2.54);
-  assert.equal(annie.get('S')?.waistCm, 28 * 2.54);
+  assert.equal(annie.get('S')?.chestCm, inchesToCm(36));
+  assert.equal(annie.get('S')?.waistCm, inchesToCm(28));
 });
 
 test('short-sleeve tees are not classified as pants', () => {
@@ -341,8 +344,8 @@ test('Shopify product.js description HTML is used when body_html is absent', () 
     }),
   );
   const chart = scanSizeChartFromPage(html);
-  assert.equal(chart.get('S')?.chestCm, 37.8 * 2.54);
-  assert.equal(chart.get('S')?.lengthCm, 23.6 * 2.54);
+  assert.equal(chart.get('S')?.chestCm, inchesToCm(37.8));
+  assert.equal(chart.get('S')?.lengthCm, inchesToCm(23.6));
   assert.equal(extractStorefrontProductJsHtml(JSON.stringify({ title: 'No chart' })), '');
 });
 
@@ -567,10 +570,10 @@ test('brand prose charts split consecutive sizes on one line', () => {
   const chart = scanSizeChartFromPage(
     'XS: front length 55 in, bust 26 in, waist 21 in, hip 29 in S: front length 56 in, bust 28 in, waist 22 in, hip 30 in',
   );
-  assert.equal(chart.get('XS')?.lengthCm, 55 * 2.54);
-  assert.equal(chart.get('XS')?.chestCm, 26 * 2.54);
-  assert.equal(chart.get('S')?.lengthCm, 56 * 2.54);
-  assert.equal(chart.get('S')?.chestCm, 28 * 2.54);
+  assert.equal(chart.get('XS')?.lengthCm, inchesToCm(55));
+  assert.equal(chart.get('XS')?.chestCm, inchesToCm(26));
+  assert.equal(chart.get('S')?.lengthCm, inchesToCm(56));
+  assert.equal(chart.get('S')?.chestCm, inchesToCm(28));
 });
 
 test('sleeve length does not overwrite garment top length', () => {
@@ -581,7 +584,7 @@ test('sleeve length does not overwrite garment top length', () => {
       <tr><td>M</td><td>28</td><td>16</td><td>44</td><td>8</td></tr>
     </table>
   `);
-  assert.equal(chart.get('M')?.lengthCm, 28 * 2.54);
-  assert.equal(chart.get('M')?.chestCm, 44 * 2.54);
+  assert.equal(chart.get('M')?.lengthCm, inchesToCm(28));
+  assert.equal(chart.get('M')?.chestCm, inchesToCm(44));
 });
 
