@@ -41,6 +41,7 @@ import {
   failedPrintQa,
   type PrintQaResult,
 } from '@/lib/graphics/print-qa';
+import { fitSummaryLine, summarizeFit } from '@/lib/fit/fit-summary';
 import { DEFAULT_EASE_CM } from '@/lib/graphics/radial-heatmap';
 import { createFitShaderMaterial } from '@/lib/graphics/strain-shader';
 import type { GarmentCategory } from '@/types/garment';
@@ -76,6 +77,8 @@ export interface AnnyCanvasProps {
   turntable?: boolean;
   /** Client pixel QA can still fail after ingest; parent ORs this into Approximate. */
   onPrintQaFail?: () => void;
+  /** One plain line about how the draped garment sits, or null without a drape. */
+  onFitSummary?: (line: string | null) => void;
   /** Fires once the avatar body is in the scene (still hidden until `revealed`). */
   onBodyReady?: () => void;
   /** The body could not be built (asset or vertex buffer failed). */
@@ -222,6 +225,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   showClearanceHeatmap = false,
   turntable = true,
   onPrintQaFail,
+  onFitSummary,
   onBodyReady,
   onBodyError,
   revealed = true,
@@ -232,6 +236,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   const mountRef = useRef<HTMLDivElement | null>(null);
   const handlesRef = useRef<SceneHandles | null>(null);
   const printQaFailRef = useRef(onPrintQaFail);
+  const fitSummaryRef = useRef(onFitSummary);
+  fitSummaryRef.current = onFitSummary;
   const bodyReadyRef = useRef(onBodyReady);
   const bodyErrorRef = useRef(onBodyError);
   const revealedRef = useRef(revealed);
@@ -594,6 +600,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
 
     let cancelled = false;
     setGarmentDraped(false);
+    fitSummaryRef.current?.(null);
 
     void (async () => {
       const visualizationOff = ingestPrintQaPassed === false;
@@ -659,6 +666,20 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       handles.albedoMaterial = albedoMaterial;
       handles.heatMaterial = heatMaterial;
       setGarmentDraped(true);
+      const positionAttribute = geometry.getAttribute('position');
+      const clearanceAttribute = geometry.getAttribute('aClearanceCm');
+      const heightsY = new Float32Array(positionAttribute.count);
+      for (let i = 0; i < positionAttribute.count; i += 1) {
+        heightsY[i] = positionAttribute.getY(i) + handles.hullOffset.y;
+      }
+      fitSummaryRef.current?.(fitSummaryLine(summarizeFit({
+        positionsY: heightsY,
+        clearanceCm: clearanceAttribute.array as Float32Array,
+        floorY: handles.bodyBottomY,
+        statureM: handles.bodyTopY - handles.bodyBottomY,
+        category: garmentCategory,
+        easeCm: garmentEaseCm ?? DEFAULT_EASE_CM,
+      })));
 
       // Dressing: a clipping plane sweeps from the collar down so the garment
       // "pours" onto the body. The fit shader has no clipping chunk, so the

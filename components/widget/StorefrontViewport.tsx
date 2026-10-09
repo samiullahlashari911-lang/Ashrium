@@ -90,6 +90,7 @@ export function StorefrontViewport({
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [clientPrintQaPassed, setClientPrintQaPassed] = useState<boolean | null>(null);
   const [addedSize, setAddedSize] = useState<string | null>(null);
+  const [fitLine, setFitLine] = useState<string | null>(null);
 
   const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
@@ -372,7 +373,7 @@ export function StorefrontViewport({
       : drapePayloadBase64
         ? `Size ${activeSize ?? ''} on your avatar`
         : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64) || holdExpired
-          ? `We couldn't dress you in size ${activeSize ?? ''}. This is you in your own clothes`
+          ? `Couldn't dress you in size ${activeSize ?? ''}`
           : 'Building your fitting';
 
   return (
@@ -401,6 +402,7 @@ export function StorefrontViewport({
               onBodyReady={() => setBodySettled(true)}
               onBodyError={() => setBodySettled(true)}
               onPrintQaFail={() => setClientPrintQaPassed(false)}
+              onFitSummary={setFitLine}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
             />
             <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
@@ -420,7 +422,7 @@ export function StorefrontViewport({
               </span>
             </div>
             <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/70 px-3 py-1 text-[11px] text-ash-muted">
-              Drag to turn · pinch to zoom
+              3D simulation of you from your measurements · drag to turn
             </p>
           </section>
 
@@ -455,6 +457,9 @@ export function StorefrontViewport({
                 <p className="text-xs text-ash-muted">
                   Measured from your body and this product’s size chart, and confirmed by a cloth simulation.
                 </p>
+              ) : null}
+              {fitLine && drapePayloadBase64 ? (
+                <p className="text-sm font-medium text-ash-ink">{fitLine}</p>
               ) : null}
             </div>
 

@@ -27,8 +27,8 @@ export const CONSENT_BULLETS: ReadonlyArray<{ title: string; body: string }> = [
     body: 'Your photos are not sold and are never used to train models.',
   },
   {
-    title: 'Fitted clothes work best',
-    body: 'Skip coats and hoodies so the outline is you, not your jacket.',
+    title: 'Fitted T-shirt and trousers',
+    body: 'A fitted short-sleeve T-shirt and fitted trousers or leggings: the outline is you, and the clothes you try replace them cleanly.',
   },
 ];
 
@@ -65,7 +65,7 @@ export const UNDER_16_REFUSAL =
 
 /** Shown on the camera screen itself, where the shopper is dressing for the photo. */
 export const CAPTURE_CLOTHING_TIP =
-  'Wear fitted clothes. Loose tops, jackets or hoodies make your avatar bigger than you are.';
+  'Wear a fitted short-sleeve T-shirt and fitted trousers or leggings. Loose tops, jackets or hoodies make your avatar bigger than you are.';
 
 /** Shown on the camera screen so the promise is in front of the shopper when it matters. */
 export const CAPTURE_PRIVACY_NOTE =
