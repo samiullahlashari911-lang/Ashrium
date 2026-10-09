@@ -139,7 +139,7 @@ writeFileSync(tomlPath, appToml({ clientId, name: appName, appBaseUrl }));
 ok(`App ${clientId} configured: install → ${appBaseUrl}/api/v1/shopify/install, scopes ${SCOPES}, webhooks on.`);
 
 step('Deploying the app settings and the Try On theme block');
-if (!runInteractive(`${SHOPIFY} app deploy --config ${configName} --force --message "client:new ${slug}"`)) {
+if (!runInteractive(`${SHOPIFY} app deploy --config ${configName} --allow-updates --message "client:new ${slug}"`)) {
   fail('Shopify did not accept the deploy.', 'Read the Shopify error above, fix it, and run the command again.');
 }
 ok('Deployed.');
@@ -147,7 +147,13 @@ ok('Deployed.');
 step('Reading the app secret');
 let clientSecret = '';
 try {
-  const envOutput = execSync(`${SHOPIFY} app env show --config ${configName}`, { cwd: ROOT, encoding: 'utf8' });
+  // stdin ignored: with a terminal attached the CLI waits on it and never returns.
+  const envOutput = execSync(`${SHOPIFY} app env show --config ${configName}`, {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 120_000,
+  });
   clientSecret = envOutput.match(/SHOPIFY_API_SECRET\s*=\s*(\S+)/)?.[1] ?? '';
 } catch {
   clientSecret = '';
@@ -225,5 +231,5 @@ if (payload.inviteEmailSent) {
 console.log(`\nDone. ${companyName} can now:`);
 console.log('  1. Open the invite and set a password.');
 console.log('  2. Press Connect Shopify; Shopify asks them to approve Ashrium on their store.');
-console.log('  3. Their products come in automatically.');
+console.log('  3. Press Sync catalog on Garments to bring their products in.');
 console.log(`\nCommit shopify.app.${configName}.toml so the next deploy keeps this client's settings.`);

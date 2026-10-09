@@ -60,14 +60,11 @@ export async function completePasswordSetup(
   }
 
   const supabase = await createClient();
-  // A previous submit may have verified the token and then had the password
-  // refused (e.g. a leaked password). The session from that verify still holds.
-  const { data: existing } = await supabase.auth.getUser();
-  if (!existing.user) {
-    const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
-    if (error) {
-      return { error: EXPIRED_LINK_COPY };
-    }
+  // Always verify: the browser may already be signed in as another merchant,
+  // and the new password must land on the account this link belongs to.
+  const { error: verifyError } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
+  if (verifyError) {
+    return { error: EXPIRED_LINK_COPY };
   }
 
   const access = await readMerchantPortalAccess(supabase);
