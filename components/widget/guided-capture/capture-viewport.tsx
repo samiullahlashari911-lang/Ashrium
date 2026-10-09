@@ -9,6 +9,7 @@ import {
   usePoseLandmarker,
 } from '@/components/widget/guided-capture/use-pose-landmarker';
 import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
+import { CAPTURE_CLOTHING_TIP, CAPTURE_PRIVACY_NOTE } from '@/lib/privacy/consent-copy';
 import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
 import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
 import {
@@ -434,6 +435,10 @@ export function CaptureViewport({
         </div>
         <CaptureFlowMeter step={flowStep} />
         <p className="text-[13px] leading-relaxed text-ash-muted">{hint}</p>
+        <ul className="flex flex-col gap-1 text-[12px] leading-snug text-ash-subtle">
+          <li>{CAPTURE_CLOTHING_TIP}</li>
+          <li>{CAPTURE_PRIVACY_NOTE}</li>
+        </ul>
       </header>
 
       <div className="relative mx-4 mb-2 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift">

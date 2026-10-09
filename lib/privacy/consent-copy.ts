@@ -62,6 +62,14 @@ export const WEIGHT_WHY_COPY = WEIGHT_PRIOR_LIVE
 export const UNDER_16_REFUSAL =
   'Ashrium fittings are not available if you are under 16. We do not collect photos, height, sex, or weight from children (COPPA).';
 
+/** Shown on the camera screen itself, where the shopper is dressing for the photo. */
+export const CAPTURE_CLOTHING_TIP =
+  'Wear fitted clothes. Loose tops, jackets or hoodies make your avatar bigger than you are.';
+
+/** Shown on the camera screen so the promise is in front of the shopper when it matters. */
+export const CAPTURE_PRIVACY_NOTE =
+  'Your photos are never saved. Your head is removed on this phone, and the photos are deleted as soon as your avatar is built, within 15 minutes at most.';
+
 export const FITTED_CLOTHING_COPY =
   'Wear fitted clothing — not bulky coats, hoodies, or outerwear. The camera silhouette must not become the body, or the size result will stay approximate.';
 
