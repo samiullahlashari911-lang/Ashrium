@@ -20,12 +20,13 @@ import {
   findAnnyHullMesh,
   findMhrHullMesh,
 } from '@/lib/graphics/anny-hull';
-import { disposeObject3D, disposeRendererSession } from '@/lib/graphics/dispose-session';
+import { disposeMaterial, disposeObject3D, disposeRendererSession } from '@/lib/graphics/dispose-session';
 import { loadBodyParts, skinFillMask } from '@/lib/graphics/body-parts';
 import {
   buildPhotoSkinAttributes,
   createPhotoSkinMaterial,
   photoFrameMeta,
+  releaseFrameMeta,
   sampleSkinColor,
   setPhotoSkinFill,
 } from '@/lib/graphics/photo-skin';
@@ -74,7 +75,7 @@ export interface AnnyCanvasProps {
   drapePayloadBase64?: string | null;
   /** Clearance heatmap on the draped garment (toggle lives in the parent panel). */
   showClearanceHeatmap?: boolean;
-  /** One slow turn on first reveal; any touch stops it. */
+  /** A slow sway on first reveal (within what the photos saw); any touch stops it. */
   turntable?: boolean;
   /** Client pixel QA can still fail after ingest; parent ORs this into Approximate. */
   onPrintQaFail?: () => void;
@@ -150,7 +151,11 @@ function bodyParts(): Promise<Uint8Array> {
 
 const REVEAL_MS = 1400;
 const DRESS_MS = 1500;
-const TURNTABLE_SECONDS_PER_TURN = 9;
+/** Orbit stops 65 deg each side of front: past that one side only has the front photo at a grazing angle, and the back was never photographed. */
+const ORBIT_LIMIT_RAD = (65 * Math.PI) / 180;
+/** First-reveal sway: +-30 deg and back to front. */
+const SWAY_RAD = (30 * Math.PI) / 180;
+const SWAY_MS = 6000;
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -315,14 +320,15 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     controls.minPolarAngle = Math.PI * 0.18;
     controls.maxPolarAngle = Math.PI * 0.62;
     controls.target.set(0, 0.85, 0);
-    controls.autoRotateSpeed = 60 / TURNTABLE_SECONDS_PER_TURN;
+    // Two photos see the front and one side: never turn far enough to show
+    // the back, which no photo saw.
+    controls.minAzimuthAngle = -ORBIT_LIMIT_RAD;
+    controls.maxAzimuthAngle = ORBIT_LIMIT_RAD;
     controls.update();
 
-    let turnRemaining = 0;
-    let lastAzimuth = controls.getAzimuthalAngle();
+    let swaying = false;
     const stopTurntable = (): void => {
-      controls.autoRotate = false;
-      turnRemaining = 0;
+      swaying = false;
     };
     controls.addEventListener('start', stopTurntable);
 
@@ -411,18 +417,23 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       if (bodyMesh && photoUv && frontPhoto && painted) {
         const sidePhoto = photos?.side && photos.side.frame.width > 0 ? photos.side : null;
         bodyMesh.geometry.computeVertexNormals();
+        // Each frame's pixels are read once here and wiped right after.
+        const frontMeta = photoFrameMeta(frontPhoto);
+        const sideMeta = sidePhoto ? photoFrameMeta(sidePhoto) : null;
         const attributes = buildPhotoSkinAttributes(
           bodyMesh.geometry.getAttribute('position').array as Float32Array,
           photoUv,
-          photoFrameMeta(frontPhoto),
-          sidePhoto ? photoFrameMeta(sidePhoto) : null,
+          frontMeta,
+          sideMeta,
           bodyMesh.geometry.getIndex()?.array ?? [],
         );
+        handles.skinColor = sampleSkinColor(frontMeta);
+        releaseFrameMeta(frontMeta);
+        releaseFrameMeta(sideMeta);
         const previous = bodyMesh.material;
         bodyMesh.material = createPhotoSkinMaterial(bodyMesh.geometry, attributes, frontPhoto, sidePhoto);
-        (Array.isArray(previous) ? previous : [previous]).forEach((material) => material.dispose());
+        (Array.isArray(previous) ? previous : [previous]).forEach(disposeMaterial);
         handles.photoBody = bodyMesh;
-        handles.skinColor = sampleSkinColor(frontPhoto);
         if (!attributes.front) {
           paintUnavailableRef.current?.('face_not_found');
         }
@@ -480,11 +491,17 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
                 material.opacity = handles.revealOpacity;
               }
             });
+            if (handles.heatMaterial) {
+              handles.heatMaterial.uniforms.uOpacity.value = 0.9 * handles.revealOpacity;
+            }
             camera.position.lerpVectors(startPosition, restPosition, eased);
           },
           done: () => {
             handles.revealOpacity = 1;
             handles.bodyRevealed = true;
+            if (handles.heatMaterial) {
+              handles.heatMaterial.uniforms.uOpacity.value = 0.9;
+            }
             [...fadeMaterials, handles.albedoMaterial].forEach((material) => {
               if (material) {
                 material.opacity = 1;
@@ -493,9 +510,26 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
               }
             });
             if (turntableRef.current) {
-              lastAzimuth = controls.getAzimuthalAngle();
-              turnRemaining = Math.PI * 2;
-              controls.autoRotate = true;
+              // A slow sway to each side and back, within what the photos saw.
+              const offset = camera.position.clone().sub(controls.target);
+              const radius = Math.hypot(offset.x, offset.z);
+              const base = Math.atan2(offset.x, offset.z);
+              swaying = true;
+              handles.tweens.push({
+                startedAt: performance.now(),
+                durationMs: SWAY_MS,
+                update: (eased) => {
+                  if (!swaying) {
+                    return;
+                  }
+                  const angle = base + SWAY_RAD * Math.sin(eased * Math.PI * 2);
+                  camera.position.x = controls.target.x + radius * Math.sin(angle);
+                  camera.position.z = controls.target.z + radius * Math.cos(angle);
+                },
+                done: () => {
+                  swaying = false;
+                },
+              });
             }
           },
         });
@@ -536,19 +570,6 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         }
         return true;
       });
-
-      if (controls.autoRotate) {
-        const azimuth = controls.getAzimuthalAngle();
-        let delta = Math.abs(azimuth - lastAzimuth);
-        if (delta > Math.PI) {
-          delta = Math.PI * 2 - delta;
-        }
-        lastAzimuth = azimuth;
-        turnRemaining -= delta;
-        if (turnRemaining <= 0) {
-          stopTurntable();
-        }
-      }
 
       controls.update();
       renderer.render(scene, camera);
@@ -658,7 +679,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         geometry = null;
       }
 
-      if (!geometry || cancelled) {
+      if (!geometry || cancelled || handlesRef.current !== handles) {
         geometry?.dispose();
         albedoMaterial.dispose();
         loadedAlbedo?.texture?.dispose();
@@ -721,6 +742,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       if (!handles.bodyRevealed) {
         albedoMaterial.transparent = true;
         albedoMaterial.opacity = handles.revealOpacity;
+        heatMaterial.uniforms.uOpacity.value = 0.9 * handles.revealOpacity;
         fillSkin();
         return;
       }

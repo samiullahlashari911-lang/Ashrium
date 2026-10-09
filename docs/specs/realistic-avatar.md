@@ -75,6 +75,16 @@ S1 needs a Modal deploy by the owner (production deploys are blocked for the age
 
 ## Known deviations (after code review, 2026-10-09)
 
+- Q6 as built: unseen areas are a **smooth diffused colour** from confidently
+  seen neighbours (mesh Laplacian), with the measured hair colour seeded on
+  the back of the head, and the photo fades into it over a feathered band.
+  Projecting through the body (the original wording) put buttons on the back
+  and the face on the back of the head; copying single texels streaked.
+- The viewer turns at most **65 degrees** each side and sways +-30 degrees on
+  reveal (it used to spin 360 and showed the never-photographed back first).
+- Camera capture asks for 1920x1440 (was 960x720); the side photo is matched
+  to the front photo's exposure; a soft fixed key light shades the body.
+
 - Reveal cap is the server drape budget (`GPU_HOLD_DURING_DRAPE_MS`) + 15 s,
   not a measured p95 + 20 %: no drape timings are recorded yet. Revisit with
   the GPU cost work.

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-function disposeMaterial(material: THREE.Material): void {
+export function disposeMaterial(material: THREE.Material): void {
   Object.values(material).forEach((value) => {
     if (value instanceof THREE.Texture) {
       value.dispose();

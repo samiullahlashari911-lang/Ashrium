@@ -21,6 +21,7 @@ DIAGNOSTIC_METRIC_KEYS: tuple[str, ...] = (
     "native_joint_rmse_cm",
     "height_residual_cm",
     "silhouette_residual",
+    "chest_from_armpit",
 )
 
 

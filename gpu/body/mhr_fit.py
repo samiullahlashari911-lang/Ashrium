@@ -491,6 +491,7 @@ def fit_two_view_mhr(
             vertices_cm.detach().cpu().numpy(),
             canon_joints.detach().cpu().numpy(),
         )
+        chest_from_armpit = float(girths.pop("chest_from_armpit", 0.0))
         height_hat = float(skeleton_height_cm(canon_skel)[0].cpu())
         quats = F.normalize(skeleton_quaternions(canon_skel)[0], p=2, dim=-1)
         joint_rotations = quats.detach().cpu().numpy().astype(np.float32).reshape(-1)
@@ -563,6 +564,7 @@ def fit_two_view_mhr(
             native_joint_rmse_cm=float(joint_rmse.detach().cpu()),
             height_residual_cm=height_residual,
             silhouette_residual=float(silhouette_residual.detach().cpu()),
+            chest_from_armpit=chest_from_armpit,
             stage_timings_ms={
                 "photo_uv": photo_uv_ms,
                 "serialization": elapsed_ms(serialize_started),

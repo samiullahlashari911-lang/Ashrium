@@ -203,12 +203,19 @@ export interface PhotoFrameMeta {
   landmarks: OnDevicePhoto['landmarks'];
   /** Top of the hair in this frame (normalized y), found against the background. */
   hairTopY?: number | null;
+  /** The frame's RGBA pixels, read once on the device and wiped after painting. */
+  pixels?: FramePixels | null;
   /**
-   * The frame above the head crop (rows 0 .. `height`, RGBA) and its wall
-   * colour. The server never sees the head, so it cannot mask it: head
-   * vertices whose pixel is the wall are treated as unseen here instead.
+   * Wall colour behind the head. The server never sees the head, so it cannot
+   * mask it: head vertices whose pixel is the wall count as unseen instead.
    */
-  head?: { rgba: ArrayLike<number>; width: number; height: number; background: [number, number, number] } | null;
+  wall?: [number, number, number] | null;
+}
+
+export interface FramePixels {
+  rgba: Uint8ClampedArray | Uint8Array;
+  width: number;
+  height: number;
 }
 
 /** Colour distance (sRGB 0-255) under which a pixel counts as the background. */
@@ -219,6 +226,17 @@ const BACKGROUND_DISTANCE = 45;
  * a beige wall, so it is never tested: that blotched the cheeks.
  */
 const WALL_TEST_MAX_WEIGHT = 140;
+/**
+ * Photo detail is trusted from this blend confidence up; below it the surface
+ * fades to the diffused fill. Feathering over a few rings of vertices hides
+ * the edge between photo and fill (hard 0/1 edges read as seams).
+ */
+const CONFIDENT = 0.6;
+const CONFIDENCE_FEATHER_PASSES = 3;
+/** Smoothing passes of the unseen-area fill colour (mesh Laplacian, seeds fixed). */
+const FILL_DIFFUSION_PASSES = 120;
+/** Side photo colour gain is fitted on vertices both photos see at least this well. */
+const BOTH_SEEN = 0.35;
 
 export interface HeadAlignment {
   /** Landmarks used for the fit. */
@@ -340,7 +358,7 @@ function stretchHeadToHairTop(
       continue;
     }
     const t = Math.min(1, above / span);
-    out[i * 2 + 1] = eyeV - above * (1 + (stretch - 1) * t * t);
+    out[i * 2 + 1] = Math.max(hairTopY, eyeV - above * (1 + (stretch - 1) * t * t));
   }
 }
 
@@ -419,7 +437,8 @@ export function hairTopFromPixels(
 
 /**
  * Hair top and wall colour from the frame region above the head crop
- * (`rows` rows of RGBA). Pure, so the same analysis runs in tests and tools.
+ * (`rows` rows of RGBA). Centred between the nose and the ears, so a profile
+ * finds the crown rather than the front hairline. Pure, for tests and tools.
  */
 export function analyseHeadRegion(
   rgba: ArrayLike<number>,
@@ -427,33 +446,40 @@ export function analyseHeadRegion(
   rows: number,
   frameHeight: number,
   landmarks: OnDevicePhoto['landmarks'],
-): Pick<PhotoFrameMeta, 'hairTopY' | 'head'> {
+): { hairTopY: number | null; wall: [number, number, number] | null } {
   const nose = landmarks[POSE_NOSE];
   const leftEye = landmarks[POSE_LEFT_EYE];
   const rightEye = landmarks[POSE_RIGHT_EYE];
   if (!nose || !leftEye || !rightEye || nose.visibility < LANDMARK_VISIBLE || rows < 4) {
-    return { hairTopY: null, head: null };
+    return { hairTopY: null, wall: null };
   }
-  const centreX = nose.x * width;
-  const halfWidth = 0.8 * Math.max(Math.abs(leftEye.x - rightEye.x) * width, width * 0.02);
-  const background = wallColour(rgba, width, rows, centreX, halfWidth);
-  if (!background) {
-    return { hairTopY: null, head: null };
+  const ears = [landmarks[POSE_LEFT_EAR], landmarks[POSE_RIGHT_EAR]]
+    .filter((ear): ear is NonNullable<typeof ear> => ear !== undefined && ear.visibility >= LANDMARK_VISIBLE);
+  const earX = ears.length > 0 ? ears.reduce((sum, ear) => sum + ear.x, 0) / ears.length : nose.x;
+  const centreX = ((nose.x + earX) / 2) * width;
+  const eyeSpan = Math.max(Math.abs(leftEye.x - rightEye.x) * width, width * 0.02);
+  const halfWidth = Math.max(0.8 * eyeSpan, 0.5 * Math.abs(nose.x - earX) * width);
+  const wall = wallColour(rgba, width, rows, centreX, halfWidth);
+  if (!wall) {
+    return { hairTopY: null, wall: null };
   }
   const eyeRow = Math.min(rows - 1, Math.round(Math.min(leftEye.y, rightEye.y) * frameHeight));
-  const top = hairTopFromPixels(rgba, width, rows, centreX, halfWidth, eyeRow, background);
-  return {
-    hairTopY: top === null ? null : top / frameHeight,
-    head: { rgba, width, height: rows, background },
-  };
+  const top = hairTopFromPixels(rgba, width, rows, centreX, halfWidth, eyeRow, wall);
+  return { hairTopY: top === null ? null : top / frameHeight, wall };
 }
 
 export interface PhotoSkinAttributes {
   /** Texture coordinates (v up, three.js `flipY`) into the front frame. */
   uvFront: Float32Array;
   uvSide: Float32Array;
-  /** Per vertex (front, side) weights; never both zero. */
+  /** Per vertex (front, side) photo weights, sharpened towards face-on. */
   weights: Float32Array;
+  /** Per vertex 0-1: how much of the photo shows; the rest is `fillColor`. */
+  confidence: Float32Array;
+  /** Per vertex linear RGB of the smooth fill for what no photo saw. */
+  fillColor: Float32Array;
+  /** Linear RGB gain that brings the side photo to the front photo's exposure. */
+  sideGain: [number, number, number];
   front: HeadAlignment | null;
   side: HeadAlignment | null;
 }
@@ -481,13 +507,42 @@ export function buildPhotoSkinAttributes(
     ? frameUvForView(photoUv.side_uv, side, positions, anchors, uvSide, photoUv.side_weight)
     : null;
 
+  // Photo weights, the wall rejected on the head, sharpened towards face-on so
+  // the view that sees a surface squarely wins (soft linear blends ghosted).
   const weights = new Float32Array(count * 2);
   for (let i = 0; i < count; i += 1) {
     const wf = photoUv.front_weight[i]!;
     const ws = side ? photoUv.side_weight[i]! : 0;
-    weights[i * 2] = wf < WALL_TEST_MAX_WEIGHT && onWall(front, uvFront, i) ? 0 : wf / 255;
-    weights[i * 2 + 1] = side && !(ws < WALL_TEST_MAX_WEIGHT && onWall(side, uvSide, i)) ? ws / 255 : 0;
+    const f = wf < WALL_TEST_MAX_WEIGHT && onWall(front, uvFront, i) ? 0 : wf / 255;
+    const sd = side && !(ws < WALL_TEST_MAX_WEIGHT && onWall(side, uvSide, i)) ? ws / 255 : 0;
+    weights[i * 2] = f * f;
+    weights[i * 2 + 1] = sd * sd;
   }
+
+  const mesh = meshNeighbours(triangles, count);
+  const confidence = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const seen = weights[i * 2]! + weights[i * 2 + 1]!;
+    confidence[i] = Math.min(1, Math.max(0, (seen - 0.05) / 0.3));
+  }
+  featherConfidence(confidence, mesh);
+
+  const sideGain = side ? fitSideGain(front, side, uvFront, uvSide, weights, count) : ([1, 1, 1] as [number, number, number]);
+  const fillColor = diffuseFillColor(
+    positions,
+    anchors,
+    front,
+    side,
+    uvFront,
+    uvSide,
+    weights,
+    confidence,
+    sideGain,
+    mesh,
+  );
+
+  // Unseen vertices still need sane photo coordinates for the triangles they
+  // share with seen ones; the colour there comes from the fill.
   fillUnseenFromNearestSeen(uvFront, uvSide, weights, triangles, count);
 
   // three.js textures are flipY: v runs up.
@@ -495,26 +550,291 @@ export function buildPhotoSkinAttributes(
     uvFront[i * 2 + 1] = 1 - uvFront[i * 2 + 1]!;
     uvSide[i * 2 + 1] = 1 - uvSide[i * 2 + 1]!;
   }
-  return { uvFront, uvSide, weights, front: frontAlignment, side: sideAlignment };
+  return {
+    uvFront,
+    uvSide,
+    weights,
+    confidence,
+    fillColor,
+    sideGain,
+    front: frontAlignment,
+    side: sideAlignment,
+  };
+}
+
+interface MeshNeighbours {
+  offsets: Uint32Array;
+  neighbours: Uint32Array;
+}
+
+function meshNeighbours(triangles: ArrayLike<number>, count: number): MeshNeighbours {
+  const offsets = new Uint32Array(count + 1);
+  for (let i = 0; i < triangles.length; i += 1) {
+    offsets[triangles[i]! + 1] += 2;
+  }
+  for (let i = 0; i < count; i += 1) {
+    offsets[i + 1] += offsets[i]!;
+  }
+  const neighbours = new Uint32Array(offsets[count]!);
+  const cursor = offsets.slice(0, count);
+  const link = (from: number, to: number): void => {
+    neighbours[cursor[from]!] = to;
+    cursor[from] += 1;
+  };
+  for (let f = 0; f + 2 < triangles.length; f += 3) {
+    const a = triangles[f]!;
+    const b = triangles[f + 1]!;
+    const c = triangles[f + 2]!;
+    link(a, b);
+    link(a, c);
+    link(b, a);
+    link(b, c);
+    link(c, a);
+    link(c, b);
+  }
+  return { offsets, neighbours };
+}
+
+/** Pull confidence down next to unseen vertices so the photo fades out, never cuts off. */
+function featherConfidence(confidence: Float32Array, mesh: MeshNeighbours): void {
+  const next = new Float32Array(confidence.length);
+  for (let pass = 0; pass < CONFIDENCE_FEATHER_PASSES; pass += 1) {
+    for (let i = 0; i < confidence.length; i += 1) {
+      let sum = 0;
+      let n = 0;
+      for (let k = mesh.offsets[i]!; k < mesh.offsets[i + 1]!; k += 1) {
+        sum += confidence[mesh.neighbours[k]!]!;
+        n += 1;
+      }
+      next[i] = n > 0 ? Math.min(confidence[i]!, 0.5 * confidence[i]! + 0.5 * (sum / n)) : confidence[i]!;
+    }
+    confidence.set(next);
+  }
+}
+
+function srgbToLinear(value: number): number {
+  const c = value / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/** Linear RGB of a 3x3 patch at frame-normalized (u, v), or null outside the frame. */
+function samplePhoto(frame: PhotoFrameMeta, u: number, v: number): [number, number, number] | null {
+  const pixels = frame.pixels;
+  if (!pixels) {
+    return null;
+  }
+  const cx = Math.round(u * pixels.width);
+  const cy = Math.round(v * pixels.height);
+  if (cx < 1 || cy < 1 || cx >= pixels.width - 1 || cy >= pixels.height - 1) {
+    return null;
+  }
+  const out: [number, number, number] = [0, 0, 0];
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const i = ((cy + dy) * pixels.width + cx + dx) * 4;
+      out[0] += srgbToLinear(pixels.rgba[i]!);
+      out[1] += srgbToLinear(pixels.rgba[i + 1]!);
+      out[2] += srgbToLinear(pixels.rgba[i + 2]!);
+    }
+  }
+  return [out[0] / 9, out[1] / 9, out[2] / 9];
+}
+
+/**
+ * The two photos are taken seconds apart, often facing a window: exposure and
+ * white balance differ, and the seam between them shows. Fit a per-channel
+ * gain on the surface both photos see well.
+ */
+function fitSideGain(
+  front: PhotoFrameMeta,
+  side: PhotoFrameMeta,
+  uvFront: Float32Array,
+  uvSide: Float32Array,
+  weights: Float32Array,
+  count: number,
+): [number, number, number] {
+  const sumFront = [0, 0, 0];
+  const sumSide = [0, 0, 0];
+  let n = 0;
+  for (let i = 0; i < count; i += 1) {
+    if (Math.sqrt(weights[i * 2]!) < BOTH_SEEN || Math.sqrt(weights[i * 2 + 1]!) < BOTH_SEEN) {
+      continue;
+    }
+    const f = samplePhoto(front, uvFront[i * 2]!, uvFront[i * 2 + 1]!);
+    const sd = samplePhoto(side, uvSide[i * 2]!, uvSide[i * 2 + 1]!);
+    if (!f || !sd) {
+      continue;
+    }
+    for (let c = 0; c < 3; c += 1) {
+      sumFront[c] += f[c]!;
+      sumSide[c] += sd[c]!;
+    }
+    n += 1;
+  }
+  if (n < 50) {
+    return [1, 1, 1];
+  }
+  const gain = (c: number): number => Math.min(1.5, Math.max(0.67, sumFront[c]! / Math.max(sumSide[c]!, 1e-6)));
+  return [gain(0), gain(1), gain(2)];
+}
+
+/**
+ * Q6 "nearest seen colour", smooth: confidently seen vertices are seeds with
+ * their photo colour; everything else diffuses from them across the mesh
+ * (BFS start, then Laplacian passes), so the back reads as the shirt or
+ * trousers rather than streaks of single texels. On the head, unseen vertices
+ * above the ears are seeded with the measured hair colour, not the face.
+ */
+function diffuseFillColor(
+  positions: Float32Array,
+  anchors: HeadAnchors | null,
+  front: PhotoFrameMeta,
+  side: PhotoFrameMeta | null,
+  uvFront: Float32Array,
+  uvSide: Float32Array,
+  weights: Float32Array,
+  confidence: Float32Array,
+  sideGain: [number, number, number],
+  mesh: MeshNeighbours,
+): Float32Array {
+  const count = confidence.length;
+  const color = new Float32Array(count * 3);
+  const fixed = new Uint8Array(count);
+  for (let i = 0; i < count; i += 1) {
+    if (confidence[i]! < CONFIDENT) {
+      continue;
+    }
+    const wf = weights[i * 2]!;
+    const ws = weights[i * 2 + 1]!;
+    const f = wf > 0 ? samplePhoto(front, uvFront[i * 2]!, uvFront[i * 2 + 1]!) : null;
+    const sd = side && ws > 0 ? samplePhoto(side, uvSide[i * 2]!, uvSide[i * 2 + 1]!) : null;
+    const total = (f ? wf : 0) + (sd ? ws : 0);
+    if (total <= 0) {
+      continue;
+    }
+    for (let c = 0; c < 3; c += 1) {
+      color[i * 3 + c] = ((f ? f[c]! * wf : 0) + (sd ? sd[c]! * sideGain[c]! * ws : 0)) / total;
+    }
+    fixed[i] = 1;
+  }
+
+  const hair = anchors ? hairColour(front) : null;
+  if (anchors && hair) {
+    let crownY = -Infinity;
+    for (let i = 0; i < count; i += 1) {
+      crownY = Math.max(crownY, positions[i * 3 + 1]!);
+    }
+    const eyeY = 0.5 * (positions[anchors.leftEye * 3 + 1]! + positions[anchors.rightEye * 3 + 1]!);
+    const hairLine = eyeY + 0.3 * (crownY - eyeY);
+    for (let i = 0; i < count; i += 1) {
+      if (!fixed[i] && positions[i * 3 + 1]! > hairLine) {
+        color.set(hair, i * 3);
+        fixed[i] = 1;
+      }
+    }
+  }
+
+  // Start every free vertex at its nearest seed, then relax.
+  const queue = new Uint32Array(count);
+  const reached = new Uint8Array(count);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < count; i += 1) {
+    if (fixed[i]) {
+      queue[tail] = i;
+      tail += 1;
+      reached[i] = 1;
+    }
+  }
+  while (head < tail) {
+    const vertex = queue[head]!;
+    head += 1;
+    for (let k = mesh.offsets[vertex]!; k < mesh.offsets[vertex + 1]!; k += 1) {
+      const next = mesh.neighbours[k]!;
+      if (!reached[next]) {
+        reached[next] = 1;
+        color.copyWithin(next * 3, vertex * 3, vertex * 3 + 3);
+        queue[tail] = next;
+        tail += 1;
+      }
+    }
+  }
+  const scratch = new Float32Array(color.length);
+  for (let pass = 0; pass < FILL_DIFFUSION_PASSES; pass += 1) {
+    for (let i = 0; i < count; i += 1) {
+      if (fixed[i]) {
+        scratch[i * 3] = color[i * 3]!;
+        scratch[i * 3 + 1] = color[i * 3 + 1]!;
+        scratch[i * 3 + 2] = color[i * 3 + 2]!;
+        continue;
+      }
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let k = mesh.offsets[i]!; k < mesh.offsets[i + 1]!; k += 1) {
+        const j = mesh.neighbours[k]!;
+        r += color[j * 3]!;
+        g += color[j * 3 + 1]!;
+        b += color[j * 3 + 2]!;
+        n += 1;
+      }
+      scratch[i * 3] = n > 0 ? r / n : color[i * 3]!;
+      scratch[i * 3 + 1] = n > 0 ? g / n : color[i * 3 + 1]!;
+      scratch[i * 3 + 2] = n > 0 ? b / n : color[i * 3 + 2]!;
+    }
+    color.set(scratch);
+  }
+  return color;
+}
+
+/** Linear RGB median of the hair just under the hair top, or null without one. */
+function hairColour(frame: PhotoFrameMeta): [number, number, number] | null {
+  const pixels = frame.pixels;
+  const nose = frame.landmarks[POSE_NOSE];
+  const leftEye = frame.landmarks[POSE_LEFT_EYE];
+  const rightEye = frame.landmarks[POSE_RIGHT_EYE];
+  if (!pixels || frame.hairTopY === null || frame.hairTopY === undefined || !nose || !leftEye || !rightEye) {
+    return null;
+  }
+  const top = Math.round(frame.hairTopY * pixels.height);
+  const eyeRow = Math.round(Math.min(leftEye.y, rightEye.y) * pixels.height);
+  const bottom = Math.round(top + 0.35 * (eyeRow - top));
+  const half = Math.max(2, Math.round(0.5 * Math.abs(leftEye.x - rightEye.x) * pixels.width));
+  const cx = Math.round(nose.x * pixels.width);
+  const samples: Array<[number, number, number]> = [];
+  for (let y = Math.max(0, top); y < Math.min(pixels.height, bottom); y += 1) {
+    for (let x = Math.max(0, cx - half); x < Math.min(pixels.width, cx + half); x += 1) {
+      const i = (y * pixels.width + x) * 4;
+      samples.push([pixels.rgba[i]!, pixels.rgba[i + 1]!, pixels.rgba[i + 2]!]);
+    }
+  }
+  if (samples.length < 9) {
+    return null;
+  }
+  const median = (c: 0 | 1 | 2): number => srgbToLinear(samples.map((sample) => sample[c]).sort((a, b) => a - b)[samples.length >> 1]!);
+  return [median(0), median(1), median(2)];
 }
 
 /** A head vertex (above the crop) whose pixel in this frame is the wall behind the shopper. */
 function onWall(frame: PhotoFrameMeta, uv: Float32Array, vertex: number): boolean {
-  const head = frame.head;
-  if (!head) {
+  const pixels = frame.pixels;
+  const wall = frame.wall;
+  if (!pixels || !wall) {
     return false;
   }
-  const x = Math.floor(uv[vertex * 2]! * frame.width);
-  const y = Math.floor(uv[vertex * 2 + 1]! * frame.height);
-  if (y < 0 || y >= head.height || x < 0 || x >= head.width) {
+  const x = Math.floor(uv[vertex * 2]! * pixels.width);
+  const y = Math.floor(uv[vertex * 2 + 1]! * pixels.height);
+  const cropRow = Math.floor((frame.keepBox.y / frame.height) * pixels.height);
+  if (y >= cropRow || x < 0 || x >= pixels.width) {
     return false;
   }
-  const i = (y * head.width + x) * 4;
-  return Math.hypot(
-    head.rgba[i]! - head.background[0],
-    head.rgba[i + 1]! - head.background[1],
-    head.rgba[i + 2]! - head.background[2],
-  ) < BACKGROUND_DISTANCE;
+  if (y < 0) {
+    return true; // above the frame: nothing of the shopper there
+  }
+  const i = (y * pixels.width + x) * 4;
+  return Math.hypot(pixels.rgba[i]! - wall[0], pixels.rgba[i + 1]! - wall[1], pixels.rgba[i + 2]! - wall[2])
+    < BACKGROUND_DISTANCE;
 }
 
 /**
@@ -659,36 +979,54 @@ export function skinPatches(frame: PhotoFrameMeta): Array<{ x: number; y: number
       && patch.x + patch.size <= frame.width && patch.y + patch.size <= frame.height);
 }
 
-export function sampleSkinColor(photo: OnDevicePhoto): [number, number, number] | null {
-  const context = photo.frame.getContext('2d', { willReadFrequently: true });
-  if (!context) {
+export function sampleSkinColor(frame: PhotoFrameMeta): [number, number, number] | null {
+  const pixels = frame.pixels;
+  if (!pixels) {
     return null;
   }
-  const patches = skinPatches(photoFrameMeta(photo));
-  const chunks = patches.map((patch) => context.getImageData(patch.x, patch.y, patch.size, patch.size).data);
-  const pixels = new Uint8ClampedArray(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    pixels.set(chunk, offset);
-    offset += chunk.length;
+  const chunks: number[] = [];
+  for (const patch of skinPatches(frame)) {
+    const scaleX = pixels.width / frame.width;
+    const scaleY = pixels.height / frame.height;
+    for (let y = Math.round(patch.y * scaleY); y < Math.round((patch.y + patch.size) * scaleY); y += 1) {
+      for (let x = Math.round(patch.x * scaleX); x < Math.round((patch.x + patch.size) * scaleX); x += 1) {
+        const i = (y * pixels.width + x) * 4;
+        chunks.push(pixels.rgba[i]!, pixels.rgba[i + 1]!, pixels.rgba[i + 2]!, pixels.rgba[i + 3]!);
+      }
+    }
   }
-  return skinColorFromPixels(pixels);
+  return skinColorFromPixels(new Uint8ClampedArray(chunks));
 }
 
+/**
+ * Everything painting needs from one on-device frame, with its pixels read
+ * once. Call `releaseFrameMeta` when painting is done: the copy holds the
+ * shopper's face.
+ */
 export function photoFrameMeta(photo: OnDevicePhoto): PhotoFrameMeta {
   const { frame } = photo;
+  const context = frame.getContext('2d', { willReadFrequently: true });
+  const rgba = context && frame.width > 0 && frame.height > 0
+    ? context.getImageData(0, 0, frame.width, frame.height).data
+    : null;
+  const pixels = rgba ? { rgba, width: frame.width, height: frame.height } : null;
   const rows = Math.max(0, Math.min(frame.height, Math.floor(photo.keepBox.y)));
-  const context = rows >= 4 ? frame.getContext('2d', { willReadFrequently: true }) : null;
-  const head = context
-    ? analyseHeadRegion(context.getImageData(0, 0, frame.width, rows).data, frame.width, rows, frame.height, photo.landmarks)
-    : { hairTopY: null, head: null };
+  const head = rgba && rows >= 4
+    ? analyseHeadRegion(rgba, frame.width, rows, frame.height, photo.landmarks)
+    : { hairTopY: null, wall: null };
   return {
     keepBox: photo.keepBox,
     width: frame.width,
     height: frame.height,
     landmarks: photo.landmarks,
+    pixels,
     ...head,
   };
+}
+
+/** Wipe the frame copy (it holds the shopper's face) as soon as painting is done. */
+export function releaseFrameMeta(frame: PhotoFrameMeta | null): void {
+  frame?.pixels?.rgba.fill(0);
 }
 
 /**
@@ -704,6 +1042,8 @@ export function createPhotoSkinMaterial(
   geometry.setAttribute('uvFront', new THREE.Float32BufferAttribute(attributes.uvFront, 2));
   geometry.setAttribute('uvSide', new THREE.Float32BufferAttribute(attributes.uvSide, 2));
   geometry.setAttribute('photoWeight', new THREE.Float32BufferAttribute(attributes.weights, 2));
+  geometry.setAttribute('photoConfidence', new THREE.Float32BufferAttribute(attributes.confidence, 1));
+  geometry.setAttribute('fillColor', new THREE.Float32BufferAttribute(attributes.fillColor, 3));
   const vertexCount = attributes.weights.length / 2;
   geometry.setAttribute('skinFill', new THREE.Float32BufferAttribute(new Float32Array(vertexCount), 1));
 
@@ -724,6 +1064,7 @@ export function createPhotoSkinMaterial(
     shader.uniforms.photoFront = { value: frontTexture };
     shader.uniforms.photoSide = { value: sideTexture };
     shader.uniforms.skinColor = { value: skinColor };
+    shader.uniforms.sideGain = { value: new THREE.Vector3(...attributes.sideGain) };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -732,6 +1073,10 @@ attribute vec2 uvFront;
 attribute vec2 uvSide;
 attribute vec2 photoWeight;
 attribute float skinFill;
+attribute float photoConfidence;
+attribute vec3 fillColor;
+varying float vPhotoConfidence;
+varying vec3 vFillColor;
 varying vec2 vUvFront;
 varying vec2 vUvSide;
 varying vec2 vPhotoWeight;
@@ -742,10 +1087,12 @@ varying float vSkinFill;`,
         '#include <begin_vertex>',
         `#include <begin_vertex>
 vSkinFill = skinFill;
+vPhotoConfidence = photoConfidence;
+vFillColor = fillColor;
 vUvFront = uvFront;
 vUvSide = uvSide;
 vPhotoWeight = photoWeight;
-vPhotoNormal = normalize(normalMatrix * normal);`,
+vPhotoNormal = normalize(mat3(modelMatrix) * normal);`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -754,6 +1101,9 @@ vPhotoNormal = normalize(normalMatrix * normal);`,
 uniform sampler2D photoFront;
 uniform sampler2D photoSide;
 uniform vec3 skinColor;
+uniform vec3 sideGain;
+varying float vPhotoConfidence;
+varying vec3 vFillColor;
 varying vec2 vUvFront;
 varying vec2 vUvSide;
 varying vec2 vPhotoWeight;
@@ -765,13 +1115,16 @@ varying float vSkinFill;`,
         `vec3 photoFrontRgb = texture2D(photoFront, vUvFront).rgb;
 vec3 photoSideRgb = texture2D(photoSide, vUvSide).rgb;
 float photoWeightSum = max(vPhotoWeight.x + vPhotoWeight.y, 1e-4);
-vec3 photoRgb = (photoFrontRgb * vPhotoWeight.x + photoSideRgb * vPhotoWeight.y) / photoWeightSum;
+vec3 photoRgb = (photoFrontRgb * vPhotoWeight.x + photoSideRgb * sideGain * vPhotoWeight.y) / photoWeightSum;
+photoRgb = mix(vFillColor, photoRgb, clamp(vPhotoConfidence, 0.0, 1.0));
 photoRgb = mix(photoRgb, skinColor, clamp(vSkinFill, 0.0, 1.0));
-float photoShade = 0.84 + 0.16 * max(normalize(vPhotoNormal).z, 0.0);
+// A soft fixed key light (world space) so the form reads like the garment
+// next to it; the photos already carry real light, so it stays gentle.
+float photoShade = 0.8 + 0.22 * max(dot(normalize(vPhotoNormal), normalize(vec3(0.35, 0.75, 0.55))), 0.0);
 diffuseColor.rgb *= photoRgb * photoShade;`,
       );
   };
-  material.customProgramCacheKey = () => 'ashrium-photo-skin-v2';
+  material.customProgramCacheKey = () => 'ashrium-photo-skin-v3';
   const dispose = material.dispose.bind(material);
   material.dispose = () => {
     frontTexture.dispose();

@@ -86,6 +86,8 @@ export interface MhrFitDiagnostics {
   native_joint_rmse_cm?: number;
   height_residual_cm?: number;
   silhouette_residual?: number;
+  /** 1 = chest measured under the armpit; 0 = arms touch the torso (fallback). */
+  chest_from_armpit?: number;
   stage_timings_ms?: MhrFitStageTimingsMs;
 }
 
@@ -286,6 +288,11 @@ export function readMhrFitDiagnostics(value: unknown): MhrFitDiagnostics | null 
   const silhouetteResidual = readOptionalFinite(value.silhouette_residual);
   if (silhouetteResidual !== undefined && silhouetteResidual >= 0) {
     diagnostics.silhouette_residual = silhouetteResidual;
+  }
+
+  const chestFromArmpit = readOptionalFinite(value.chest_from_armpit);
+  if (chestFromArmpit === 0 || chestFromArmpit === 1) {
+    diagnostics.chest_from_armpit = chestFromArmpit;
   }
 
   if (isRecord(value.stage_timings_ms)) {

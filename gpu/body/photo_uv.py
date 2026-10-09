@@ -32,7 +32,7 @@ ABOVE_IMAGE_HEIGHTS = 1.0
 # whose projection is not this many pixels inside the SAM 2 person mask would
 # sample the wall, so it gets no weight (the phone fills it from its nearest
 # seen neighbour). Only a yes/no per vertex leaves the GPU, never the mask.
-MASK_ERODE_PX = 2
+MASK_ERODE_PX = 4  # at the GPU's 640 px working size, ~1.5 % of the image
 
 _faces_cache: np.ndarray | None = None
 

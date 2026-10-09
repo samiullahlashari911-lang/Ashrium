@@ -64,10 +64,10 @@ test('on-device photo keeps the full frame as a canvas, never a Blob', () => {
 
 test('large frames are scaled, and the head-crop box with them', () => {
   withFakeCanvas(() => {
-    const photo = captureOnDevicePhoto({} as CanvasImageSource, POSE, 2160, 3840);
+    const photo = captureOnDevicePhoto({} as CanvasImageSource, POSE, 2880, 5120);
     assert.ok(photo);
-    assert.equal(photo.frame.height, 1920);
-    const box = headlessKeepBox(POSE, 2160, 3840);
+    assert.equal(photo.frame.height, 2560);
+    const box = headlessKeepBox(POSE, 2880, 5120);
     assert.ok(box);
     assert.equal(photo.keepBox.y, box.y / 2);
     assert.equal(photo.keepBox.height, box.height / 2);

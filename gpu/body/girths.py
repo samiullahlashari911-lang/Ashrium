@@ -406,6 +406,7 @@ def measure_chest_waist_hip_cm(
     windows["hip"] = _clamp_window(windows["hip"], y_min, y_min + stature)
     lateral = windows["lateral"]
     chest = _chest_girth_cm(vertices, up_axis, y_min, stature)
+    chest_from_armpit = chest is not None
     if chest is None:
         chest = _search_girth_cm(
             vertices,
@@ -438,4 +439,7 @@ def measure_chest_waist_hip_cm(
         "chest_cm": float(chest),
         "waist_cm": float(waist),
         "hip_cm": float(hip),
+        # 1 = measured under the armpit; 0 = arms touch the torso, joint-window
+        # fallback (the path that read the shoulders as 109 cm). Diagnostic only.
+        "chest_from_armpit": 1.0 if chest_from_armpit else 0.0,
     }

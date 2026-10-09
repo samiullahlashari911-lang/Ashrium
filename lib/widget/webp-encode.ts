@@ -131,7 +131,7 @@ export interface OnDevicePhoto {
   landmarks: Array<{ x: number; y: number; visibility: number }>;
 }
 
-const ON_DEVICE_PHOTO_MAX_EDGE_PX = 1920;
+const ON_DEVICE_PHOTO_MAX_EDGE_PX = 2560;
 
 export function captureOnDevicePhoto(
   source: CanvasImageSource,
@@ -147,7 +147,8 @@ export function captureOnDevicePhoto(
   const frame = document.createElement('canvas');
   frame.width = Math.max(1, Math.round(imageWidth * scale));
   frame.height = Math.max(1, Math.round(imageHeight * scale));
-  const context = frame.getContext('2d');
+  // Painting reads these pixels back on the CPU; without this hint phones do a slow GPU readback.
+  const context = frame.getContext('2d', { willReadFrequently: true });
   if (!context) {
     return null;
   }

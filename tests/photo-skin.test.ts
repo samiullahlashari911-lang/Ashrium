@@ -235,30 +235,43 @@ test('hair top is found against a plain wall, and the head is stretched to reach
   assert.equal(wild[crown * 2 + 1], plain[crown * 2 + 1], 'an absurd hair top is ignored');
 });
 
-test('head edges that land on the wall are refilled from the head, never painted wall-coloured', () => {
-  const { positions, frame, photoUv, anchors } = scene();
-  const rows = Math.floor(frame.keepBox.y);
-  const rgba = new Uint8ClampedArray(WIDTH * rows * 4);
+const WALL: [number, number, number] = [236, 230, 222];
+
+/** Full frame: wall around a hair/face ellipse above the crop, a blue shirt below it. */
+function framePixels(positions: Float32Array, anchors: NonNullable<ReturnType<typeof findHeadAnchors>>, rows: number, shirt = [40, 60, 160]): Uint8ClampedArray {
+  const rgba = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
   const [noseX, noseY] = truePx(positions, anchors.nose);
-  for (let y = 0; y < rows; y += 1) {
+  for (let y = 0; y < HEIGHT; y += 1) {
     for (let x = 0; x < WIDTH; x += 1) {
       // The real head is a little narrower than the fitted one: its outer ring is wall.
       const onHead = Math.hypot((x - noseX) / 82, (y - (noseY - 20)) / 150) < 1;
-      rgba.set(onHead ? [70, 50, 40, 255] : [236, 230, 222, 255], (y * WIDTH + x) * 4);
+      const colour = y >= rows ? shirt : onHead ? (y < noseY - 60 ? [30, 22, 18] : [190, 140, 115]) : WALL;
+      rgba.set([colour[0]!, colour[1]!, colour[2]!, 255], (y * WIDTH + x) * 4);
     }
   }
-  const head = { rgba, width: WIDTH, height: rows, background: [236, 230, 222] as [number, number, number] };
-  // Facing weight like the GPU's: face-on high, the outline low.
-  const seen = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => {
+  return rgba;
+}
+
+/** Facing weight like the GPU's: face-on high, the outline low. */
+function facingWeights(positions: Float32Array): number[] {
+  return Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => {
     const z = positions[i * 3 + 2]!;
     return z > 0 ? Math.max(1, Math.min(255, Math.round(z * 2000))) : 0;
   });
+}
+
+test('head edges that land on the wall are refilled from the head, never painted wall-coloured', () => {
+  const { positions, frame, photoUv, anchors } = scene();
+  const rows = Math.floor(frame.keepBox.y);
+  const rgba = framePixels(positions, anchors, rows);
+  const pixels = { rgba, width: WIDTH, height: HEIGHT };
+  const seen = facingWeights(positions);
   const uv: MhrPhotoUv = { front_uv: photoUv, front_weight: seen, side_uv: photoUv, side_weight: seen.map(() => 0) };
-  const attributes = buildPhotoSkinAttributes(positions, uv, { ...frame, head }, null, restTriangles());
+  const attributes = buildPhotoSkinAttributes(positions, uv, { ...frame, pixels, wall: WALL }, null, restTriangles());
   // Face-on vertices are never tested against the wall, even if skin is wall-pale.
-  const pale = new Uint8ClampedArray(rgba).fill(0);
-  for (let k = 0; k < pale.length; k += 4) pale.set([236, 230, 222, 255], k);
-  const paleFace = buildPhotoSkinAttributes(positions, uv, { ...frame, head: { ...head, rgba: pale } }, null, restTriangles());
+  const pale = new Uint8ClampedArray(rgba.length);
+  for (let k = 0; k < pale.length; k += 4) pale.set([...WALL, 255], k);
+  const paleFace = buildPhotoSkinAttributes(positions, uv, { ...frame, pixels: { ...pixels, rgba: pale }, wall: WALL }, null, restTriangles());
   assert.ok(paleFace.weights[anchors.nose * 2]! > 0.5, 'the nose keeps its own photo even on a pale wall');
   let checked = 0;
   for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
@@ -266,8 +279,74 @@ test('head edges that land on the wall are refilled from the head, never painted
     const y = Math.floor((1 - attributes.uvFront[i * 2 + 1]!) * HEIGHT);
     if (y < 0 || y >= rows || x < 0 || x >= WIDTH) continue;
     const k = (y * WIDTH + x) * 4;
-    assert.notDeepEqual([rgba[k], rgba[k + 1], rgba[k + 2]], [236, 230, 222], `head vertex ${i} shows the wall`);
+    assert.notDeepEqual([rgba[k], rgba[k + 1], rgba[k + 2]], WALL, `head vertex ${i} shows the wall`);
     checked += 1;
   }
   assert.ok(checked > 1000);
+});
+
+test('what no photo saw is a smooth fill of the nearby clothes, and hair on the back of the head', () => {
+  const { positions, frame, photoUv, anchors } = scene();
+  const rows = Math.floor(frame.keepBox.y);
+  const pixels = { rgba: framePixels(positions, anchors, rows), width: WIDTH, height: HEIGHT };
+  const seen = facingWeights(positions);
+  const uv: MhrPhotoUv = { front_uv: photoUv, front_weight: seen, side_uv: photoUv, side_weight: seen.map(() => 0) };
+  let crown = 0;
+  for (let i = 1; i < MHR_VERTEX_COUNT; i += 1) {
+    if (positions[i * 3 + 1]! > positions[crown * 3 + 1]!) crown = i;
+  }
+  const [, crownPx] = truePx(positions, crown);
+  const meta = { ...frame, pixels, wall: WALL, hairTopY: (crownPx - 8) / HEIGHT };
+  const attributes = buildPhotoSkinAttributes(positions, uv, meta, null, restTriangles());
+  const linear = (c: number): number => ((c / 255 + 0.055) / 1.055) ** 2.4;
+  const shirt = [linear(40), linear(60), linear(160)];
+  const hair = [linear(30), linear(22), linear(18)];
+  const near = (i: number, target: number[], tolerance: number): boolean =>
+    Math.hypot(...[0, 1, 2].map((c) => attributes.fillColor[i * 3 + c]! - target[c]!)) < tolerance;
+
+  let back = 0;
+  let backOfHead = 0;
+  for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
+    const y = positions[i * 3 + 1]!;
+    const z = positions[i * 3 + 2]!;
+    if (attributes.confidence[i]! > 0.05) continue;
+    if (z < -0.06 && y > 1.05 && y < 1.3 && Math.abs(positions[i * 3]!) < 0.1) {
+      assert.ok(near(i, shirt, 0.05), `back vertex ${i} is the shirt colour`);
+      back += 1;
+    }
+    if (y > anchors.noseY + 0.06 && z < -0.03) {
+      assert.ok(near(i, hair, 0.05), `back-of-head vertex ${i} is the hair colour`);
+      backOfHead += 1;
+    }
+  }
+  assert.ok(back > 30 && backOfHead > 10, `checked ${back} back and ${backOfHead} back-of-head vertices`);
+  // The photo fades out over a few rings instead of stopping at a hard edge.
+  const mid = Array.from(attributes.confidence).filter((c) => c > 0.05 && c < 0.95).length;
+  assert.ok(mid > 200, 'a feathered band between photo and fill');
+});
+
+test('the side photo is brought to the front photo exposure', () => {
+  const { positions, frame, photoUv, anchors } = scene();
+  const rows = Math.floor(frame.keepBox.y);
+  const front = framePixels(positions, anchors, rows, [120, 120, 120]);
+  const dim = new Uint8ClampedArray(front.length);
+  for (let k = 0; k < front.length; k += 4) {
+    dim.set([front[k]! * 0.9, front[k + 1]! * 0.9, front[k + 2]! * 0.9, 255], k);
+  }
+  const seen = facingWeights(positions);
+  const uv: MhrPhotoUv = { front_uv: photoUv, front_weight: seen, side_uv: photoUv, side_weight: seen };
+  const build = (side: Uint8ClampedArray) => buildPhotoSkinAttributes(
+    positions,
+    uv,
+    { ...frame, pixels: { rgba: front, width: WIDTH, height: HEIGHT } },
+    { ...frame, pixels: { rgba: side, width: WIDTH, height: HEIGHT } },
+    restTriangles(),
+  ).sideGain;
+  const darker = build(dim);
+  for (const gain of darker) {
+    assert.ok(gain > 1.18 && gain < 1.35, `a 10 % darker side photo is lifted (${gain.toFixed(3)})`);
+  }
+  for (const gain of build(front)) {
+    assert.ok(Math.abs(gain - 1) < 1e-6, 'identical photos need no gain');
+  }
 });

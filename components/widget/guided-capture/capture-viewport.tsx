@@ -189,8 +189,10 @@ export function CaptureViewport({
           audio: false,
           video: {
             facingMode: { ideal: 'user' },
-            width: { ideal: 960 },
-            height: { ideal: 720 },
+            // The avatar is painted from this frame: ~4x the face pixels of
+            // 960x720. Pose detection downsamples internally either way.
+            width: { ideal: 1920 },
+            height: { ideal: 1440 },
           },
         });
 
