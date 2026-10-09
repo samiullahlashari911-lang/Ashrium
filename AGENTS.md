@@ -269,12 +269,14 @@ patterns to replicate, not copy pixel-for-pixel:
   approximate result to look identical to a confident one.
 - **3D drape viewport:** faceless, **non-skin-toned** mannequin (do not
   infer skin; GDPR Art. 9) — porcelain finish, sculpted ellipsoid head — with
-  a painted neutral undergarment. **Owner-approved exception (2026-10-07):**
-  when the merchant turns on `tenants.on_device_face_enabled` (default off;
-  counsel review before any live store), the shopper's own face crop is kept
-  in browser memory as a canvas (`OnDeviceFace`, never a Blob), drawn on the
+  a painted neutral undergarment. **Owner decision (2026-10-08, replaces the
+  2026-10-07 merchant opt-in):** every storefront fitting shows the shopper
+  their own face, automatically — no merchant or shopper switch
+  (`tenants.on_device_face_enabled` is unused). The face crop is kept in
+  browser memory as a canvas (`OnDeviceFace`, never a Blob), drawn on the
   avatar head on their device only, and dropped when Try On closes. Servers
-  still receive only headless photos. Avatar and
+  still receive only headless photos. The consent bullet and `/privacy`
+  section always say so. Counsel should still review (BIPA / GDPR). Avatar and
   garment centered with generous negative space; rotate/zoom only in v1.
   **Clearance heatmap** (loose = blue) is a **toggle**, not always-on over
   the product texture. Legend sits at the edge, not overlapping the model.
@@ -375,6 +377,13 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   Until drape lands, show the girth-based size with an **Approximate**
   badge. When Newton or a cache hit lands — at any wait — re-evaluate the
   AND-gate; do not discard a late drape.
+  **Owner decision (2026-10-08):** the shopper never sees a half-built
+  avatar. The particle loader and its real stage list stay up after
+  `task=body` completes — "Putting your avatar together" until the 3D body
+  is rendered, then "Dressing you in your size" until the recommended
+  size's drape lands or is known not to come — capped at 90 s after the job
+  completes (`REVEAL_HOLD_MAX_MS`). Past the cap the avatar shows and a late
+  drape still pours on. The GPU wait budget ends when the job completes.
 - **Client-side compositing:** `V_final = V_0 + ΔX`. Heatmap is
   **clearance** (loose regions = blue). Strain may exist as a debug channel;
   it is not a size verdict. Keep `lib/graphics/pbd-cloth.ts` /
@@ -434,8 +443,8 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   Per-SKU ingest is the primary path; bulk sync is secondary.
 - **Mannequin:** faceless and non-skin-toned on every server and in every
   stored artifact. Do not infer skin color. The only face ever shown is the
-  on-device exception above (merchant opt-in, never uploaded, consent bullet
-  and `/privacy` section shown when on).
+  shopper's own on-device face above (always on, never uploaded, consent
+  bullet and `/privacy` section always shown).
 
 ---
 

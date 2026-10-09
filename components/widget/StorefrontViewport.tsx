@@ -17,6 +17,7 @@ import {
   type FitRecommendResponse,
   type FitResolveResponse,
 } from '@/lib/widget/fit-client';
+import type { AvatarRevealStage } from '@/lib/widget/avatar-stages';
 import { postWidgetEvent, subscribeToHostEvents } from '@/lib/widget/bridge';
 import type { FitRecommendation, StorefrontGarment } from '@/types/garment';
 import { readFitResiduals } from '@/types/hmr';
@@ -28,14 +29,18 @@ interface StorefrontViewportProps {
   tenantId: string;
   embedToken: string;
   allowGallery?: boolean;
-  /** Merchant enabled the on-device face on the avatar (default off). */
-  showFace?: boolean;
 }
 
 /** Drape for the recommended size is fetched before its size code is known. */
 const RECOMMENDED_DRAPE_KEY = '__recommended__';
 
 type DrapeEntry = FitResolveResponse | 'loading' | 'failed';
+
+/**
+ * Longest the loader holds after the GPU job completes while the avatar is
+ * built and dressed. Past it the avatar shows and a late drape still pours on.
+ */
+const REVEAL_HOLD_MAX_MS = 90_000;
 
 function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation {
   return {
@@ -74,7 +79,6 @@ export function StorefrontViewport({
   tenantId,
   embedToken,
   allowGallery = false,
-  showFace = false,
 }: StorefrontViewportProps): React.JSX.Element {
   const rootRef = useRef<HTMLElement | null>(null);
   const emittedSizeRef = useRef<string | null>(null);
@@ -82,6 +86,9 @@ export function StorefrontViewport({
     garments.some((garment) => garment.sku === initialSku) ? initialSku : garments[0]?.sku ?? '',
   );
   const [result, setResult] = useState<GuidedCaptureResult | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [bodySettled, setBodySettled] = useState(false);
+  const [holdExpired, setHoldExpired] = useState(false);
   const [remoteRecommendation, setRemoteRecommendation] = useState<FitRecommendation | null>(null);
   const [drapes, setDrapes] = useState<Record<string, DrapeEntry>>({});
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
@@ -101,10 +108,26 @@ export function StorefrontViewport({
     setAddedSize(null);
   }, []);
 
-  const handleComplete = useCallback((next: GuidedCaptureResult) => {
+  // The GPU job is done: build the avatar behind the still-running loader.
+  const handleAvatarReady = useCallback((next: GuidedCaptureResult) => {
     resetFitting();
+    setRevealed(false);
+    setBodySettled(false);
+    setHoldExpired(false);
     setResult(next);
   }, [resetFitting]);
+
+  const handleRevealed = useCallback(() => {
+    setRevealed(true);
+  }, []);
+
+  useEffect(() => {
+    if (!result || revealed) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => setHoldExpired(true), REVEAL_HOLD_MAX_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [result, revealed]);
 
   useEffect(() => {
     return subscribeToHostEvents(targetOrigin, (event) => {
@@ -304,6 +327,20 @@ export function StorefrontViewport({
     );
   }, [activeSku, recommendation, targetOrigin]);
 
+  // The loader stays up until the body is rendered and the recommended size
+  // has been dressed on (or the drape is known not to be coming).
+  const drapeSettled = !printQaPassed
+    || !activeSku
+    || (recommendedDrape !== undefined && recommendedDrape !== 'loading');
+  const revealStage: AvatarRevealStage = holdExpired
+    ? 'ready'
+    : !bodySettled
+      ? 'place'
+      : !drapeSettled
+        ? 'dress'
+        : 'ready';
+  const dressSkipped = !drapeReady(recommendedDrape) && (drapeSettled || holdExpired);
+
   const drapePayloadBase64 = drapeReady(activeDrapeEntry) && printQaPassed
     ? activeDrapeEntry.payloadBase64
     : null;
@@ -343,7 +380,9 @@ export function StorefrontViewport({
       }
     >
       {result ? (
-        <div className="ash-page-in mx-auto grid w-full max-w-5xl gap-4 p-3 md:min-h-[100dvh] md:grid-cols-[minmax(0,1fr)_340px] md:gap-6 md:p-6">
+        <div
+          aria-hidden={!revealed}
+          className="ash-page-in mx-auto grid w-full max-w-5xl gap-4 p-3 md:min-h-[100dvh] md:grid-cols-[minmax(0,1fr)_340px] md:gap-6 md:p-6">
           <section className="relative overflow-hidden rounded-[28px] bg-[radial-gradient(120%_80%_at_50%_15%,#ffffff_0%,#f4f1ec_70%)] shadow-card">
             <AnnyCanvas
               parametric={result.parametric}
@@ -351,7 +390,10 @@ export function StorefrontViewport({
               garment={canvasGarment}
               drapePayloadBase64={drapePayloadBase64}
               showClearanceHeatmap={showHeatmap && heatmapAvailable}
-              faceImage={showFace ? result.face : null}
+              faceImage={result.face}
+              revealed={revealed}
+              onBodyReady={() => setBodySettled(true)}
+              onBodyError={() => setBodySettled(true)}
               onPrintQaFail={() => setClientPrintQaPassed(false)}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
             />
@@ -515,6 +557,7 @@ export function StorefrontViewport({
                 type="button"
                 onClick={() => {
                   setResult(null);
+                  setRevealed(false);
                   resetFitting();
                 }}
                 className="rounded-xl py-2 text-sm font-semibold text-ash-muted transition hover:text-ash-ink"
@@ -528,15 +571,23 @@ export function StorefrontViewport({
             </p>
           </aside>
         </div>
-      ) : (
-        <GuidedCapture
-          tenantId={tenantId}
-          embedToken={embedToken}
-          allowGallery={allowGallery}
-          captureFace={showFace}
-          onComplete={handleComplete}
-        />
-      )}
+      ) : null}
+      {/* Same element before and after the job completes, so the loader keeps
+          its particles while it covers the avatar being built underneath. */}
+      {!revealed ? (
+        <div className={result ? 'fixed inset-0 z-40 overflow-hidden bg-ash-canvas' : undefined}>
+          <GuidedCapture
+            tenantId={tenantId}
+            embedToken={embedToken}
+            allowGallery={allowGallery}
+            captureFace
+            onAvatarReady={handleAvatarReady}
+            reveal={result ? revealStage : null}
+            dressSkipped={dressSkipped}
+            onComplete={handleRevealed}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }

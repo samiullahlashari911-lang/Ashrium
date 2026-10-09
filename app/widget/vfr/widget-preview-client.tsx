@@ -21,9 +21,18 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
   embedToken,
 }) => {
   const [result, setResult] = useState<GuidedCaptureResult | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [bodySettled, setBodySettled] = useState(false);
 
-  const handleComplete = useCallback((next: GuidedCaptureResult) => {
+  // The GPU job is done: build the avatar behind the still-running loader.
+  const handleAvatarReady = useCallback((next: GuidedCaptureResult) => {
+    setRevealed(false);
+    setBodySettled(false);
     setResult(next);
+  }, []);
+
+  const handleRevealed = useCallback(() => {
+    setRevealed(true);
   }, []);
 
   const recommendation = useMemo(() => {
@@ -47,13 +56,17 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
   return (
     <main className="relative min-h-screen bg-ash-canvas text-ash-ink">
       {result && recommendation ? (
-        <div className="flex min-h-screen flex-col">
+        <div aria-hidden={!revealed} className="flex min-h-screen flex-col">
           <AnnyCanvas
             parametric={result.parametric}
             heightCm={result.session.heightCm}
             garment={{
               easeCm: recommendation.ease.chestCm,
             }}
+            faceImage={result.face}
+            revealed={revealed}
+            onBodyReady={() => setBodySettled(true)}
+            onBodyError={() => setBodySettled(true)}
             className="min-h-[520px] flex-1 w-full"
           />
           <div className="flex items-start justify-between gap-3 px-5 py-4">
@@ -67,7 +80,10 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
               />
               <button
                 type="button"
-                onClick={() => setResult(null)}
+                onClick={() => {
+                  setResult(null);
+                  setRevealed(false);
+                }}
                 className="rounded-full border border-ash-line px-3 py-1.5 text-xs text-ash-muted"
               >
                 Recapture
@@ -75,14 +91,21 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
             </div>
           </div>
         </div>
-      ) : (
-        <GuidedCapture
-          tenantId={tenantId}
-          embedToken={embedToken}
-          allowGallery
-          onComplete={handleComplete}
-        />
-      )}
+      ) : null}
+      {!revealed ? (
+        <div className={result ? 'fixed inset-0 z-40 overflow-hidden bg-ash-canvas' : undefined}>
+          <GuidedCapture
+            tenantId={tenantId}
+            embedToken={embedToken}
+            allowGallery
+            captureFace
+            onAvatarReady={handleAvatarReady}
+            reveal={result ? (bodySettled ? 'ready' : 'place') : null}
+            dressSkipped
+            onComplete={handleRevealed}
+          />
+        </div>
+      ) : null}
     </main>
   );
 };

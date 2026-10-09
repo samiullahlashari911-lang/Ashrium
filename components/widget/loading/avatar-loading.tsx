@@ -11,6 +11,8 @@ interface AvatarLoadingProps {
   /** Front outline the shopper stood in; shapes the particle body. */
   outline?: CaptureOutline | null;
   stage: AvatarStageKey;
+  /** Stages that did not happen for this fitting; never listed as done. */
+  skippedStages?: ReadonlySet<AvatarStageKey>;
   elapsedSeconds: number;
   /** When true the particles converge, then `onFinished` fires. */
   finishing?: boolean;
@@ -90,6 +92,7 @@ export function AvatarLoading({
   photo,
   outline = null,
   stage,
+  skippedStages,
   elapsedSeconds,
   finishing = false,
   onFinished,
@@ -355,10 +358,10 @@ export function AvatarLoading({
     };
   }, [outline, photo, reducedMotion]);
 
-  const views = avatarStageViews(stage);
+  const views = avatarStageViews(stage, skippedStages);
   const active = views.find((view) => view.state === 'active');
   const done = views.filter((view) => view.state === 'done').slice(-3);
-  const slowStart = elapsedSeconds >= SLOW_START_SECONDS && stage !== 'ready';
+  const slowStart = elapsedSeconds >= SLOW_START_SECONDS && stage === 'gpu';
 
   return (
     <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col items-center px-6 pb-8 pt-8 text-ash-ink">

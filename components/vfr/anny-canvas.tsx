@@ -65,8 +65,12 @@ export interface AnnyCanvasProps {
   turntable?: boolean;
   /** Client pixel QA can still fail after ingest; parent ORs this into Approximate. */
   onPrintQaFail?: () => void;
-  /** Fires once the avatar body is in the scene. */
+  /** Fires once the avatar body is in the scene (still hidden until `revealed`). */
   onBodyReady?: () => void;
+  /** The body could not be built (asset or vertex buffer failed). */
+  onBodyError?: () => void;
+  /** Hold the body invisible until true, then fade it in; the garment dresses after. */
+  revealed?: boolean;
   /** On-device face (merchant opt-in). Drawn here only; never uploaded. */
   faceImage?: OnDeviceFace | null;
   className?: string;
@@ -187,6 +191,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   turntable = true,
   onPrintQaFail,
   onBodyReady,
+  onBodyError,
+  revealed = true,
   faceImage = null,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
@@ -194,13 +200,19 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   const handlesRef = useRef<SceneHandles | null>(null);
   const printQaFailRef = useRef(onPrintQaFail);
   const bodyReadyRef = useRef(onBodyReady);
+  const bodyErrorRef = useRef(onBodyError);
+  const revealedRef = useRef(revealed);
+  const startRevealRef = useRef<(() => void) | null>(null);
   const heatmapRef = useRef(showClearanceHeatmap);
   const turntableRef = useRef(turntable);
   printQaFailRef.current = onPrintQaFail;
   bodyReadyRef.current = onBodyReady;
+  bodyErrorRef.current = onBodyError;
+  revealedRef.current = revealed;
   heatmapRef.current = showClearanceHeatmap;
   turntableRef.current = turntable;
   const [bodyVersion, setBodyVersion] = useState(0);
+  const [bodyShown, setBodyShown] = useState(false);
   const [garmentDraped, setGarmentDraped] = useState(false);
 
   const garmentEaseCm = garment?.easeCm;
@@ -215,6 +227,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     }
 
     mountElement.innerHTML = '';
+    setBodyShown(false);
+    startRevealRef.current = null;
     const width = mountElement.clientWidth || 800;
     const height = mountElement.clientHeight || 560;
     let disposed = false;
@@ -302,6 +316,9 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       try {
         gltf = await loader.loadAsync(hullPath);
       } catch {
+        if (!disposed) {
+          bodyErrorRef.current?.();
+        }
         return;
       }
 
@@ -321,6 +338,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         }
       } catch {
         disposeObject3D(hull);
+        bodyErrorRef.current?.();
         return;
       }
 
@@ -380,32 +398,41 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       }
 
       // Reveal: fade the body in while the camera glides to its resting orbit.
+      // It waits, invisible, until the parent says the loader is done.
       fadeMaterials.forEach((material) => {
         material.transparent = true;
         material.opacity = 0;
       });
-      handles.tweens.push({
-        startedAt: performance.now(),
-        durationMs: REVEAL_MS,
-        update: (eased) => {
-          fadeMaterials.forEach((material) => {
-            material.opacity = Math.min(1, eased * 1.6);
-          });
-          camera.position.lerpVectors(startPosition, restPosition, eased);
-        },
-        done: () => {
-          fadeMaterials.forEach((material) => {
-            material.opacity = 1;
-            material.transparent = false;
-            material.needsUpdate = true;
-          });
-          if (turntableRef.current) {
-            lastAzimuth = controls.getAzimuthalAngle();
-            turnRemaining = Math.PI * 2;
-            controls.autoRotate = true;
-          }
-        },
-      });
+      const startReveal = (): void => {
+        handles.tweens.push({
+          startedAt: performance.now(),
+          durationMs: REVEAL_MS,
+          update: (eased) => {
+            fadeMaterials.forEach((material) => {
+              material.opacity = Math.min(1, eased * 1.6);
+            });
+            camera.position.lerpVectors(startPosition, restPosition, eased);
+          },
+          done: () => {
+            fadeMaterials.forEach((material) => {
+              material.opacity = 1;
+              material.transparent = false;
+              material.needsUpdate = true;
+            });
+            if (turntableRef.current) {
+              lastAzimuth = controls.getAzimuthalAngle();
+              turnRemaining = Math.PI * 2;
+              controls.autoRotate = true;
+            }
+            setBodyShown(true);
+          },
+        });
+      };
+      if (revealedRef.current) {
+        startReveal();
+      } else {
+        startRevealRef.current = startReveal;
+      }
 
       bodyReadyRef.current?.();
       setBodyVersion((version) => version + 1);
@@ -495,10 +522,18 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     };
   }, [faceImage, heightCm, parametric]);
 
-  // Layer 2 — the garment. Rebuilds on drape / size / albedo changes without touching the body.
+  useEffect(() => {
+    if (revealed && startRevealRef.current) {
+      startRevealRef.current();
+      startRevealRef.current = null;
+    }
+  }, [bodyVersion, revealed]);
+
+  // Layer 2 — the garment. Rebuilds on drape / size / albedo changes without
+  // touching the body; it dresses only once the body has faded in.
   useEffect(() => {
     const handles = handlesRef.current;
-    if (!handles || bodyVersion === 0) {
+    if (!handles || !bodyShown) {
       return;
     }
 
@@ -594,7 +629,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     };
   }, [
     albedoUrl,
-    bodyVersion,
+    bodyShown,
     drapePayloadBase64,
     garmentEaseCm,
     ingestPrintQaPassed,

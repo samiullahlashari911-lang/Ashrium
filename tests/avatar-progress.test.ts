@@ -34,6 +34,18 @@ test('stage views mark earlier stages done and later ones pending', () => {
   assert.equal(isAvatarStageKey('dance'), false);
 });
 
+test('after the GPU job the loader holds until the avatar is built and dressed', () => {
+  const completed = { uploading: false, jobStatus: 'completed', gpuStage: 'measure' } as const;
+  assert.equal(currentAvatarStage({ ...completed, reveal: 'place' }), 'place');
+  assert.equal(currentAvatarStage({ ...completed, reveal: 'dress' }), 'dress');
+  assert.equal(currentAvatarStage({ ...completed, reveal: 'ready' }), 'ready');
+  // Not every product gets a drape: a skipped stage is never claimed as done.
+  const views = avatarStageViews('ready', new Set(['dress']));
+  assert.equal(views.some((view) => view.key === 'dress'), false);
+  assert.equal(views.find((view) => view.key === 'place')?.state, 'done');
+  assert.equal(avatarStageViews('dress').find((view) => view.key === 'dress')?.state, 'active');
+});
+
 test('GPU stage callbacks verify the Modal HMAC and reject stale or tampered calls', () => {
   const previous = process.env.ASHRIUM_GPU_HMAC;
   process.env.ASHRIUM_GPU_HMAC = SECRET;
@@ -94,13 +106,13 @@ test('two shoppers share one A100: containers scale to ceil(occupancy / 2)', asy
   assert.equal(shopperGpuCapacity(3), 6);
 });
 
-test('on-device face never reaches an upload path and is off by default', async () => {
+test('on-device face never reaches an upload path and is shown to every shopper', async () => {
   const { readFileSync } = await import('node:fs');
   const path = await import('node:path');
   const read = (file: string): string => readFileSync(path.join(process.cwd(), file), 'utf8');
   const fitClient = read('lib/widget/fit-client.ts');
   const capture = read('components/widget/guided-capture/guided-capture.tsx');
-  const migration = read('supabase/migrations/20261007130000_tenant_on_device_face.sql');
+  const viewport = read('components/widget/StorefrontViewport.tsx');
   const encoder = read('lib/widget/webp-encode.ts');
 
   // The upload/dispatch client has no notion of a face at all.
@@ -110,5 +122,7 @@ test('on-device face never reaches an upload path and is off by default', async 
   assert.doesNotMatch(capture, /uploadDualWebpAndDispatch\([^)]*frontFace/);
   // Face crops are canvases, not Blobs, so FormData/fetch cannot take them by accident.
   assert.match(encoder, /export type OnDeviceFace = HTMLCanvasElement;/);
-  assert.match(migration, /on_device_face_enabled boolean NOT NULL DEFAULT false/);
+  // No merchant or shopper switch: the storefront always keeps the face on device.
+  assert.match(viewport, /faceImage=\{result\.face\}/);
+  assert.match(viewport, /^\s*captureFace$/m);
 });

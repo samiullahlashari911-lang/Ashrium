@@ -11,6 +11,8 @@ export type AvatarStageKey =
   | 'silhouettes'
   | 'body'
   | 'measure'
+  | 'place'
+  | 'dress'
   | 'ready';
 
 export const AVATAR_STAGE_ORDER: readonly AvatarStageKey[] = [
@@ -20,6 +22,8 @@ export const AVATAR_STAGE_ORDER: readonly AvatarStageKey[] = [
   'silhouettes',
   'body',
   'measure',
+  'place',
+  'dress',
   'ready',
 ];
 
@@ -30,6 +34,8 @@ export const AVATAR_STAGE_LABEL: Record<AvatarStageKey, { active: string; done: 
   silhouettes: { active: 'Finding your outline', done: 'Outline found' },
   body: { active: 'Building your 3D body', done: '3D body built' },
   measure: { active: 'Taking your measurements', done: 'Measurements taken' },
+  place: { active: 'Putting your avatar together', done: 'Avatar put together' },
+  dress: { active: 'Dressing you in your size', done: 'Dressed in your size' },
   ready: { active: 'Your avatar is ready', done: 'Your avatar is ready' },
 };
 
@@ -50,9 +56,17 @@ export interface AvatarStageView {
   state: 'done' | 'active' | 'pending';
 }
 
-export function avatarStageViews(current: AvatarStageKey): AvatarStageView[] {
-  const currentIndex = AVATAR_STAGE_ORDER.indexOf(current);
-  return AVATAR_STAGE_ORDER.map((key, index) => {
+/**
+ * Stages that did not happen (e.g. no drape for this product) are skipped,
+ * never shown as done.
+ */
+export function avatarStageViews(
+  current: AvatarStageKey,
+  skipped: ReadonlySet<AvatarStageKey> = new Set(),
+): AvatarStageView[] {
+  const order = AVATAR_STAGE_ORDER.filter((key) => key === current || !skipped.has(key));
+  const currentIndex = order.indexOf(current);
+  return order.map((key, index) => {
     const state = index < currentIndex ? 'done' : index === currentIndex ? 'active' : 'pending';
     return {
       key,
@@ -62,20 +76,25 @@ export function avatarStageViews(current: AvatarStageKey): AvatarStageView[] {
   });
 }
 
+/** What the fitting room still has to prove after the GPU job completes. */
+export type AvatarRevealStage = 'place' | 'dress' | 'ready';
+
 /**
  * Derives the current stage from what the client can prove: upload progress,
- * the job's public status, and (when present) the GPU-reported stage.
+ * the job's public status, (when present) the GPU-reported stage, and — once
+ * the job completes — whether the 3D body is rendered and dressed.
  */
 export function currentAvatarStage(input: {
   uploading: boolean;
   jobStatus: 'pending' | 'processing' | 'completed' | 'failed' | null;
   gpuStage: AvatarStageKey | null;
+  reveal?: AvatarRevealStage | null;
 }): AvatarStageKey {
   if (input.uploading) {
     return 'upload';
   }
   if (input.jobStatus === 'completed') {
-    return 'ready';
+    return input.reveal ?? 'ready';
   }
   if (input.gpuStage && GPU_REPORTED_STAGES.has(input.gpuStage)) {
     return input.gpuStage;

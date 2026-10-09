@@ -15,6 +15,7 @@ import type { OnDeviceFace } from '@/lib/widget/webp-encode';
 import {
   currentAvatarStage,
   isAvatarStageKey,
+  type AvatarRevealStage,
   type AvatarStageKey,
 } from '@/lib/widget/avatar-stages';
 import {
@@ -54,7 +55,18 @@ export interface GuidedCaptureResult {
 interface GuidedCaptureProps {
   tenantId: string;
   embedToken: string | null;
+  /** Fires after the loader has converged; the avatar is ready to show. */
   onComplete: (result: GuidedCaptureResult) => void;
+  /**
+   * Fires as soon as the GPU job completes, so the parent can build the 3D
+   * avatar behind the loader. When set, the loader holds until `reveal` is
+   * `'ready'`.
+   */
+  onAvatarReady?: (result: GuidedCaptureResult) => void;
+  /** Parent's progress building and dressing the avatar after the job completes. */
+  reveal?: AvatarRevealStage | null;
+  /** No garment landed on the avatar, so "Dressed" is never claimed. */
+  dressSkipped?: boolean;
   /** Merchant sandbox / preview only. Live storefront stays camera-only. */
   allowGallery?: boolean;
   /** Merchant enabled the on-device face on the avatar. */
@@ -65,6 +77,9 @@ export function GuidedCapture({
   tenantId,
   embedToken,
   onComplete,
+  onAvatarReady,
+  reveal = null,
+  dressSkipped = false,
   allowGallery = false,
   captureFace = false,
 }: GuidedCaptureProps): React.JSX.Element {
@@ -90,7 +105,10 @@ export function GuidedCapture({
   );
   const jobIdRef = useRef<string | null>(null);
   const completedRef = useRef(false);
+  const onAvatarReadyRef = useRef(onAvatarReady);
   jobIdRef.current = jobId;
+  onAvatarReadyRef.current = onAvatarReady;
+  const holdsReveal = onAvatarReady !== undefined;
 
   const stopGpu = useCallback((nextJobId?: string | null) => {
     if (completedRef.current) {
@@ -231,7 +249,9 @@ export function GuidedCapture({
             captureGatesPassed: frontGate === 'aligned' && sideGate === 'aligned',
           };
           // Let the particles converge before the avatar reveal takes over.
-          setFinishedResult({ session, parametric: job.parametric_result, face: frontFace });
+          const finished = { session, parametric: job.parametric_result, face: frontFace };
+          setFinishedResult(finished);
+          onAvatarReadyRef.current?.(finished);
           return;
         }
 
@@ -247,7 +267,9 @@ export function GuidedCapture({
   }, [embedToken, failCapture, frontFace, frontGate, intake, jobId, sideGate, step, tenantId]);
 
   useEffect(() => {
-    if (step !== 'inferring') {
+    // The GPU budget ends when the job completes; building and dressing the
+    // avatar behind the loader is not GPU wait.
+    if (step !== 'inferring' || finishedResult) {
       return;
     }
 
@@ -256,7 +278,7 @@ export function GuidedCapture({
     }
 
     failCapture(SHOPPER_GPU_TIMEOUT_MESSAGE);
-  }, [failCapture, step, waitSeconds]);
+  }, [failCapture, finishedResult, step, waitSeconds]);
 
   useEffect(() => {
     const onPageHide = (): void => {
@@ -373,6 +395,9 @@ export function GuidedCapture({
   }
 
   if (step === 'uploading' || step === 'inferring') {
+    const skippedStages = new Set<AvatarStageKey>(
+      !holdsReveal ? ['place', 'dress'] : dressSkipped ? ['dress'] : [],
+    );
     return (
       <AvatarLoading
         photo={frontBlob}
@@ -381,9 +406,11 @@ export function GuidedCapture({
           uploading: step === 'uploading',
           jobStatus: finishedResult ? 'completed' : jobStatus,
           gpuStage,
+          reveal: holdsReveal ? reveal ?? 'place' : null,
         })}
+        skippedStages={skippedStages}
         elapsedSeconds={waitSeconds}
-        finishing={finishedResult !== null}
+        finishing={finishedResult !== null && (!holdsReveal || reveal === 'ready')}
         onFinished={() => {
           if (finishedResult) {
             onComplete(finishedResult);
