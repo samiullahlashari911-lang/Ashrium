@@ -140,6 +140,19 @@ class GirthGeometryTests(unittest.TestCase):
             chest = measure_chest_waist_hip_cm(shouldered, moved)["chest_cm"]
             self.assertLess(abs(chest - torso_only["chest_cm"]), 2.0, f"spine1 at {spine1}: {chest:.1f}")
 
+    def test_chest_ignores_the_joints_entirely(self) -> None:
+        # Live GPU (2026-10-09, v14) still measured 109 cm while every local
+        # replay with guessed joints gave 96.6 cm: the joints were the only
+        # unknown. The chest is now mesh-only, so replays equal production.
+        shouldered = self._shouldered_torso()
+        _bare, joints = _standing_torso(include_arms=False)
+        reference = measure_chest_waist_hip_cm(shouldered, joints)["chest_cm"]
+        rng = np.random.default_rng(3)
+        for _ in range(6):
+            odd = joints + rng.normal(0.0, 15.0, joints.shape)
+            chest = measure_chest_waist_hip_cm(shouldered, odd)["chest_cm"]
+            self.assertAlmostEqual(chest, reference, places=6)
+
     @staticmethod
     def _shouldered_torso() -> np.ndarray:
         bare, _joints = _standing_torso(include_arms=False)

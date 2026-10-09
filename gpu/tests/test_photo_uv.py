@@ -118,6 +118,19 @@ class PhotoUvTests(unittest.TestCase):
         self.assertGreater(float(np.median(weight[face])), 128.0)
         self.assertEqual(int(weight[back_of_head].max()), 0)
 
+    def test_points_outside_the_person_outline_get_no_weight(self) -> None:
+        # The fitted body is a little wider than the person in the photo; its
+        # edge vertices sampled the wall (light patches on the back and legs).
+        # Weight is zeroed where a vertex lands outside the SAM 2 person mask.
+        height, width = IMAGE_HW
+        mask = np.zeros((height, width), dtype=bool)
+        mask[:, : width // 2] = True  # the person covers only the image's left half
+        uv, weight = project_view(self.rest, FOCAL, CAM_T, IMAGE_HW, person_mask=mask)
+        right_half = uv[:, 0] > 0.5 + 4.0 / width
+        self.assertEqual(int(weight[right_half].max()), 0)
+        well_inside = uv[:, 0] < 0.5 - 6.0 / width
+        self.assertGreater(int((weight[well_inside] > 0).sum()), 1000)
+
     def test_payload_is_flat_json_with_one_entry_per_vertex(self) -> None:
         payload = photo_uv_payload(
             self.rest,

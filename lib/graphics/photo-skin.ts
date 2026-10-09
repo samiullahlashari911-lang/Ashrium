@@ -31,8 +31,10 @@ const LANDMARK_VISIBLE = 0.5;
 /** Full head correction from just under the mouth up; none below the neck. */
 const HEAD_BLEND_FULL_BELOW_NOSE_M = 0.05;
 const HEAD_BLEND_ZERO_BELOW_NOSE_M = 0.11;
-/** Unseen vertices (back, under the arms) take the un-occluded projection of one view. */
+/** Vertices no photo can reach (disconnected bits) fall back to the front projection. */
 const UNSEEN_WEIGHT = 0.004;
+/** A head painted taller than this (to reach the hair top) means the hair detection misfired. */
+const MAX_HAIR_STRETCH = 1.8;
 
 /** MHR LOD 1 head anchors (vertex indices) matched to MediaPipe face landmarks. */
 export interface HeadAnchors {
@@ -199,7 +201,24 @@ export interface PhotoFrameMeta {
   width: number;
   height: number;
   landmarks: OnDevicePhoto['landmarks'];
+  /** Top of the hair in this frame (normalized y), found against the background. */
+  hairTopY?: number | null;
+  /**
+   * The frame above the head crop (rows 0 .. `height`, RGBA) and its wall
+   * colour. The server never sees the head, so it cannot mask it: head
+   * vertices whose pixel is the wall are treated as unseen here instead.
+   */
+  head?: { rgba: ArrayLike<number>; width: number; height: number; background: [number, number, number] } | null;
 }
+
+/** Colour distance (sRGB 0-255) under which a pixel counts as the background. */
+const BACKGROUND_DISTANCE = 45;
+/**
+ * The wall only leaks in at the head's outline, where the surface turns away
+ * from the camera (GPU weight = facing x 255). Face-on skin can be as pale as
+ * a beige wall, so it is never tested: that blotched the cheeks.
+ */
+const WALL_TEST_MAX_WEIGHT = 140;
 
 export interface HeadAlignment {
   /** Landmarks used for the fit. */
@@ -281,9 +300,151 @@ export function frameUvForView(
     out[i * 2] = (px + (x - px) * weight) / frame.width;
     out[i * 2 + 1] = (py + (y - py) * weight) / frame.height;
   }
+  if (frame.hairTopY !== null && frame.hairTopY !== undefined) {
+    stretchHeadToHairTop(out, positions, anchors, frame.hairTopY);
+  }
   return {
     used: source.length,
     residual: Math.sqrt(squared / source.length) / Math.max(faceHeightPx, 1),
+  };
+}
+
+/**
+ * MHR's head is a bare scalp; real hair stands above it. Above the eyes,
+ * stretch the head's photo coordinates so its crown reaches the hair top,
+ * growing towards the crown so the brows stay where they are.
+ */
+function stretchHeadToHairTop(
+  out: Float32Array,
+  positions: Float32Array,
+  anchors: HeadAnchors,
+  hairTopY: number,
+): void {
+  const count = positions.length / 3;
+  let crown = 0;
+  for (let i = 1; i < count; i += 1) {
+    if (positions[i * 3 + 1]! > positions[crown * 3 + 1]!) {
+      crown = i;
+    }
+  }
+  const eyeV = 0.5 * (out[anchors.leftEye * 2 + 1]! + out[anchors.rightEye * 2 + 1]!);
+  const eyeY = 0.5 * (positions[anchors.leftEye * 3 + 1]! + positions[anchors.rightEye * 3 + 1]!);
+  const span = eyeV - out[crown * 2 + 1]!;
+  const stretch = (eyeV - hairTopY) / span;
+  if (!(span > 0) || !(stretch > 1) || stretch > MAX_HAIR_STRETCH) {
+    return;
+  }
+  for (let i = 0; i < count; i += 1) {
+    const above = eyeV - out[i * 2 + 1]!;
+    if (positions[i * 3 + 1]! <= eyeY || above <= 0) {
+      continue;
+    }
+    const t = Math.min(1, above / span);
+    out[i * 2 + 1] = eyeV - above * (1 + (stretch - 1) * t * t);
+  }
+}
+
+/**
+ * The wall colour behind the head: the median of the top rows of an RGBA
+ * region (rows from y = 0), away from the head's central columns.
+ */
+export function wallColour(
+  rgba: ArrayLike<number>,
+  width: number,
+  height: number,
+  centreX: number,
+  halfWidth: number,
+): [number, number, number] | null {
+  const samples: Array<[number, number, number]> = [];
+  const rows = Math.min(height, Math.max(4, Math.round(height * 0.08)));
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < width; x += 3) {
+      if (x < centreX - halfWidth * 1.5 || x > centreX + halfWidth * 1.5) {
+        const i = (y * width + x) * 4;
+        samples.push([rgba[i]!, rgba[i + 1]!, rgba[i + 2]!]);
+      }
+    }
+  }
+  if (samples.length < 16) {
+    return null;
+  }
+  const median = (channel: 0 | 1 | 2): number => {
+    const values = samples.map((sample) => sample[channel]).sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)]!;
+  };
+  return [median(0), median(1), median(2)];
+}
+
+/**
+ * Hair top (pixel row) at or above `startY` in an RGBA region whose rows run
+ * from y = 0: the highest row whose central columns differ from the wall,
+ * scanning up until 6 wall rows in a row.
+ */
+export function hairTopFromPixels(
+  rgba: ArrayLike<number>,
+  width: number,
+  height: number,
+  centreX: number,
+  halfWidth: number,
+  startY: number,
+  background: [number, number, number] | null = wallColour(rgba, width, height, centreX, halfWidth),
+): number | null {
+  const left = Math.max(0, Math.round(centreX - halfWidth));
+  const right = Math.min(width - 1, Math.round(centreX + halfWidth));
+  if (!background || right <= left) {
+    return null;
+  }
+  let top: number | null = null;
+  let quiet = 0;
+  for (let y = Math.min(height - 1, Math.round(startY)); y >= 0; y -= 1) {
+    let differs = 0;
+    for (let x = left; x <= right; x += 1) {
+      const i = (y * width + x) * 4;
+      if (Math.hypot(rgba[i]! - background[0], rgba[i + 1]! - background[1], rgba[i + 2]! - background[2]) > BACKGROUND_DISTANCE) {
+        differs += 1;
+      }
+    }
+    if (differs / (right - left + 1) > 0.25) {
+      top = y;
+      quiet = 0;
+    } else if (top !== null) {
+      quiet += 1;
+      if (quiet >= 6) {
+        break;
+      }
+    }
+  }
+  return top;
+}
+
+/**
+ * Hair top and wall colour from the frame region above the head crop
+ * (`rows` rows of RGBA). Pure, so the same analysis runs in tests and tools.
+ */
+export function analyseHeadRegion(
+  rgba: ArrayLike<number>,
+  width: number,
+  rows: number,
+  frameHeight: number,
+  landmarks: OnDevicePhoto['landmarks'],
+): Pick<PhotoFrameMeta, 'hairTopY' | 'head'> {
+  const nose = landmarks[POSE_NOSE];
+  const leftEye = landmarks[POSE_LEFT_EYE];
+  const rightEye = landmarks[POSE_RIGHT_EYE];
+  if (!nose || !leftEye || !rightEye || nose.visibility < LANDMARK_VISIBLE || rows < 4) {
+    return { hairTopY: null, head: null };
+  }
+  const centreX = nose.x * width;
+  const halfWidth = 0.8 * Math.max(Math.abs(leftEye.x - rightEye.x) * width, width * 0.02);
+  const background = wallColour(rgba, width, rows, centreX, halfWidth);
+  if (!background) {
+    return { hairTopY: null, head: null };
+  }
+  const eyeRow = Math.min(rows - 1, Math.round(Math.min(leftEye.y, rightEye.y) * frameHeight));
+  const top = hairTopFromPixels(rgba, width, rows, centreX, halfWidth, eyeRow, background);
+  return {
+    hairTopY: top === null ? null : top / frameHeight,
+    head: { rgba, width, height: rows, background },
   };
 }
 
@@ -302,6 +463,7 @@ export function buildPhotoSkinAttributes(
   photoUv: MhrPhotoUv,
   front: PhotoFrameMeta,
   side: PhotoFrameMeta | null,
+  triangles: ArrayLike<number>,
 ): PhotoSkinAttributes {
   const count = positions.length / 3;
   const anchors = findHeadAnchors(positions);
@@ -319,42 +481,121 @@ export function buildPhotoSkinAttributes(
     ? frameUvForView(photoUv.side_uv, side, positions, anchors, uvSide, photoUv.side_weight)
     : null;
 
-  // Without a side photo the back of the head must not take the face (the
-  // front projection runs straight through it): use the hair at the crown.
-  let crown = 0;
-  for (let i = 1; i < count; i += 1) {
-    if (positions[i * 3 + 1]! > positions[crown * 3 + 1]!) {
-      crown = i;
-    }
-  }
-
   const weights = new Float32Array(count * 2);
   for (let i = 0; i < count; i += 1) {
-    let wf = photoUv.front_weight[i]! / 255;
-    let ws = side ? photoUv.side_weight[i]! / 255 : 0;
-    if (wf + ws <= 0) {
-      // Unseen: the back of the head and hair from the side photo, the rest
-      // carried around from the front photo (Q6).
-      const aboveCrop = photoUv.front_uv[i * 2 + 1]! < 0;
-      if (side && aboveCrop) {
-        ws = UNSEEN_WEIGHT;
-      } else {
-        wf = UNSEEN_WEIGHT;
-        if (aboveCrop) {
-          uvFront[i * 2] = uvFront[crown * 2]!;
-          uvFront[i * 2 + 1] = uvFront[crown * 2 + 1]!;
-        }
-      }
-    }
-    weights[i * 2] = wf;
-    weights[i * 2 + 1] = ws;
+    const wf = photoUv.front_weight[i]!;
+    const ws = side ? photoUv.side_weight[i]! : 0;
+    weights[i * 2] = wf < WALL_TEST_MAX_WEIGHT && onWall(front, uvFront, i) ? 0 : wf / 255;
+    weights[i * 2 + 1] = side && !(ws < WALL_TEST_MAX_WEIGHT && onWall(side, uvSide, i)) ? ws / 255 : 0;
   }
-  // three.js textures are flipY: v runs up. After the crown copy above.
+  fillUnseenFromNearestSeen(uvFront, uvSide, weights, triangles, count);
+
+  // three.js textures are flipY: v runs up.
   for (let i = 0; i < count; i += 1) {
     uvFront[i * 2 + 1] = 1 - uvFront[i * 2 + 1]!;
     uvSide[i * 2 + 1] = 1 - uvSide[i * 2 + 1]!;
   }
   return { uvFront, uvSide, weights, front: frontAlignment, side: sideAlignment };
+}
+
+/** A head vertex (above the crop) whose pixel in this frame is the wall behind the shopper. */
+function onWall(frame: PhotoFrameMeta, uv: Float32Array, vertex: number): boolean {
+  const head = frame.head;
+  if (!head) {
+    return false;
+  }
+  const x = Math.floor(uv[vertex * 2]! * frame.width);
+  const y = Math.floor(uv[vertex * 2 + 1]! * frame.height);
+  if (y < 0 || y >= head.height || x < 0 || x >= head.width) {
+    return false;
+  }
+  const i = (y * head.width + x) * 4;
+  return Math.hypot(
+    head.rgba[i]! - head.background[0],
+    head.rgba[i + 1]! - head.background[1],
+    head.rgba[i + 2]! - head.background[2],
+  ) < BACKGROUND_DISTANCE;
+}
+
+/**
+ * Q6 "nearest seen colour": a vertex neither photo sees (the back, the back of
+ * the head, edges outside the person's outline) takes the photo coordinates
+ * and weights of the nearest seen vertex across the body surface
+ * (multi-source breadth-first over the mesh). Projecting straight through the
+ * body instead put the shirt's buttons on the back and the face on the back
+ * of the head.
+ */
+export function fillUnseenFromNearestSeen(
+  uvFront: Float32Array,
+  uvSide: Float32Array,
+  weights: Float32Array,
+  triangles: ArrayLike<number>,
+  count: number,
+): void {
+  const offsets = new Uint32Array(count + 1);
+  for (let i = 0; i < triangles.length; i += 1) {
+    offsets[triangles[i]! + 1] += 2;
+  }
+  for (let i = 0; i < count; i += 1) {
+    offsets[i + 1] += offsets[i]!;
+  }
+  const neighbours = new Uint32Array(offsets[count]!);
+  const cursor = offsets.slice(0, count);
+  const link = (from: number, to: number): void => {
+    neighbours[cursor[from]!] = to;
+    cursor[from] += 1;
+  };
+  for (let f = 0; f + 2 < triangles.length; f += 3) {
+    const a = triangles[f]!;
+    const b = triangles[f + 1]!;
+    const c = triangles[f + 2]!;
+    link(a, b);
+    link(a, c);
+    link(b, a);
+    link(b, c);
+    link(c, a);
+    link(c, b);
+  }
+
+  const source = new Int32Array(count).fill(-1);
+  const queue = new Uint32Array(count);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < count; i += 1) {
+    if (weights[i * 2]! + weights[i * 2 + 1]! > 0) {
+      source[i] = i;
+      queue[tail] = i;
+      tail += 1;
+    }
+  }
+  while (head < tail) {
+    const vertex = queue[head]!;
+    head += 1;
+    for (let k = offsets[vertex]!; k < offsets[vertex + 1]!; k += 1) {
+      const next = neighbours[k]!;
+      if (source[next]! < 0) {
+        source[next] = source[vertex]!;
+        queue[tail] = next;
+        tail += 1;
+      }
+    }
+  }
+  for (let i = 0; i < count; i += 1) {
+    const from = source[i]!;
+    if (from === i) {
+      continue;
+    }
+    if (from < 0) {
+      weights[i * 2] = UNSEEN_WEIGHT;
+      continue;
+    }
+    uvFront[i * 2] = uvFront[from * 2]!;
+    uvFront[i * 2 + 1] = uvFront[from * 2 + 1]!;
+    uvSide[i * 2] = uvSide[from * 2]!;
+    uvSide[i * 2 + 1] = uvSide[from * 2 + 1]!;
+    weights[i * 2] = weights[from * 2]!;
+    weights[i * 2 + 1] = weights[from * 2 + 1]!;
+  }
 }
 
 /**
@@ -435,11 +676,18 @@ export function sampleSkinColor(photo: OnDevicePhoto): [number, number, number] 
 }
 
 export function photoFrameMeta(photo: OnDevicePhoto): PhotoFrameMeta {
+  const { frame } = photo;
+  const rows = Math.max(0, Math.min(frame.height, Math.floor(photo.keepBox.y)));
+  const context = rows >= 4 ? frame.getContext('2d', { willReadFrequently: true }) : null;
+  const head = context
+    ? analyseHeadRegion(context.getImageData(0, 0, frame.width, rows).data, frame.width, rows, frame.height, photo.landmarks)
+    : { hairTopY: null, head: null };
   return {
     keepBox: photo.keepBox,
-    width: photo.frame.width,
-    height: photo.frame.height,
+    width: frame.width,
+    height: frame.height,
     landmarks: photo.landmarks,
+    ...head,
   };
 }
 

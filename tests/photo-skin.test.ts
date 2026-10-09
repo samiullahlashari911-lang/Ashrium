@@ -11,6 +11,7 @@ import {
   POSE_RIGHT_EAR,
   POSE_RIGHT_EYE,
   buildPhotoSkinAttributes,
+  hairTopFromPixels,
   findHeadAnchors,
   fitSimilarity2D,
   frameUvForView,
@@ -19,6 +20,14 @@ import {
 import { MHR_VERTEX_COUNT, type MhrPhotoUv } from '@/types/hmr';
 
 /** MHR mean body, metres, from the shipped hull. */
+function restTriangles(): Uint32Array {
+  const glb = readFileSync('public/models/mhr-hull.glb');
+  const jsonLength = glb.readUInt32LE(12);
+  const start = 20 + jsonLength + 8 + MHR_VERTEX_COUNT * 12;
+  const bytes = glb.subarray(start, start + 110622 * 4);
+  return new Uint32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+}
+
 function restPositions(): Float32Array {
   const glb = readFileSync('public/models/mhr-hull.glb');
   const jsonLength = glb.readUInt32LE(12);
@@ -166,54 +175,99 @@ test('too few visible landmarks keep the GPU guess (no wild fit)', () => {
   assert.equal(frameUvForView(photoUv, frame, positions, anchors, out), null);
 });
 
-test('every vertex gets a colour source; the unseen back of the head uses the side photo', () => {
-  const { positions, frame, photoUv } = scene();
-  const weightsFront = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => (positions[i * 3 + 2]! > 0 ? 200 : 0));
-  // The side photo sees the shopper's left side.
-  const weightsSide = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => (positions[i * 3]! > 0.01 ? 200 : 0));
-  const uv: MhrPhotoUv = {
-    front_uv: photoUv,
-    front_weight: weightsFront,
-    side_uv: photoUv,
-    side_weight: weightsSide,
-  };
-  const attributes = buildPhotoSkinAttributes(positions, uv, frame, frame);
-  let headBack = 0;
+test('unseen vertices take their nearest seen neighbour: no buttons on the back, no face on the back of the head', () => {
+  const { positions, frame, photoUv, anchors } = scene();
+  // The front photo sees the front half, the side photo the shopper's left side.
+  const front = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => (positions[i * 3 + 2]! > 0.02 ? 200 : 0));
+  const side = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => (positions[i * 3]! > 0.05 ? 200 : 0));
+  const uv: MhrPhotoUv = { front_uv: photoUv, front_weight: front, side_uv: photoUv, side_weight: side };
+  const attributes = buildPhotoSkinAttributes(positions, uv, frame, frame, restTriangles());
+
+  const seenUv = new Map<string, number>();
   for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
-    const wf = attributes.weights[i * 2]!;
-    const ws = attributes.weights[i * 2 + 1]!;
-    assert.ok(wf + ws > 0, `vertex ${i} has a source`);
-    if (weightsFront[i] === 0 && weightsSide[i] === 0 && photoUv[i * 2 + 1]! < 0) {
-      assert.ok(ws > 0 && wf === 0, 'back of head from the side photo');
-      headBack += 1;
+    if (front[i]! + side[i]! > 0) seenUv.set(`${attributes.uvFront[i * 2]},${attributes.uvFront[i * 2 + 1]}`, i);
+  }
+  let backOfHead = 0;
+  for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
+    assert.ok(attributes.weights[i * 2]! + attributes.weights[i * 2 + 1]! > 0, `vertex ${i} has a source`);
+    if (front[i]! + side[i]! > 0) continue;
+    const from = seenUv.get(`${attributes.uvFront[i * 2]},${attributes.uvFront[i * 2 + 1]}`);
+    assert.ok(from !== undefined, 'copied from a seen vertex');
+    const isBackOfHead = positions[i * 3 + 1]! > anchors.noseY && positions[i * 3 + 2]! < -0.03;
+    if (isBackOfHead) {
+      backOfHead += 1;
+      // The source is head/hair at the side or top, never the face at the front.
+      assert.ok(positions[from! * 3 + 2]! < 0.06, 'back of head never takes the face');
     }
   }
-  assert.ok(headBack > 100);
-  assert.ok(attributes.front && attributes.side);
-  assert.ok(attributes.side.used < attributes.front.used, 'profile uses only the near-side points');
+  assert.ok(backOfHead > 20);
 });
 
-test('without a side photo the back of the head takes the crown hair, never the face', () => {
-  const { positions, frame, photoUv } = scene();
-  const frontSeen = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => (positions[i * 3 + 2]! > 0 ? 200 : 0));
-  const uv: MhrPhotoUv = {
-    front_uv: photoUv,
-    front_weight: frontSeen,
-    side_uv: photoUv,
-    side_weight: Array.from({ length: MHR_VERTEX_COUNT }, () => 0),
-  };
-  const attributes = buildPhotoSkinAttributes(positions, uv, frame, null);
+test('hair top is found against a plain wall, and the head is stretched to reach it', () => {
+  const width = 200;
+  const height = 120;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      const hair = y >= 30 && x >= 80 && x <= 120;
+      rgba.set(hair ? [40, 30, 25, 255] : [235, 228, 220, 255], i);
+    }
+  }
+  assert.equal(hairTopFromPixels(rgba, width, height, 100, 20, 110), 30);
+  const blank = new Uint8ClampedArray(width * height * 4).fill(230);
+  assert.equal(hairTopFromPixels(blank, width, height, 100, 20, 110), null);
+
+  const { positions, frame, photoUv, anchors } = scene();
+  const plain = new Float32Array(MHR_VERTEX_COUNT * 2);
+  frameUvForView(photoUv, frame, positions, anchors, plain);
   let crown = 0;
   for (let i = 1; i < MHR_VERTEX_COUNT; i += 1) {
     if (positions[i * 3 + 1]! > positions[crown * 3 + 1]!) crown = i;
   }
-  let checked = 0;
-  for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
-    if (frontSeen[i] === 0 && photoUv[i * 2 + 1]! < 0) {
-      assert.equal(attributes.uvFront[i * 2], attributes.uvFront[crown * 2]);
-      assert.equal(attributes.uvFront[i * 2 + 1], attributes.uvFront[crown * 2 + 1]);
-      checked += 1;
+  const hairTopY = plain[crown * 2 + 1]! - 0.012;
+  const stretched = new Float32Array(MHR_VERTEX_COUNT * 2);
+  frameUvForView(photoUv, { ...frame, hairTopY }, positions, anchors, stretched);
+  assert.ok(Math.abs(stretched[crown * 2 + 1]! - hairTopY) < 1e-6, 'crown reaches the hair top');
+  assert.ok(Math.abs(stretched[anchors.leftEye * 2 + 1]! - plain[anchors.leftEye * 2 + 1]!) < 1e-9, 'eyes stay put');
+  const wild = new Float32Array(MHR_VERTEX_COUNT * 2);
+  frameUvForView(photoUv, { ...frame, hairTopY: 0 }, positions, anchors, wild);
+  assert.equal(wild[crown * 2 + 1], plain[crown * 2 + 1], 'an absurd hair top is ignored');
+});
+
+test('head edges that land on the wall are refilled from the head, never painted wall-coloured', () => {
+  const { positions, frame, photoUv, anchors } = scene();
+  const rows = Math.floor(frame.keepBox.y);
+  const rgba = new Uint8ClampedArray(WIDTH * rows * 4);
+  const [noseX, noseY] = truePx(positions, anchors.nose);
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < WIDTH; x += 1) {
+      // The real head is a little narrower than the fitted one: its outer ring is wall.
+      const onHead = Math.hypot((x - noseX) / 82, (y - (noseY - 20)) / 150) < 1;
+      rgba.set(onHead ? [70, 50, 40, 255] : [236, 230, 222, 255], (y * WIDTH + x) * 4);
     }
   }
-  assert.ok(checked > 100);
+  const head = { rgba, width: WIDTH, height: rows, background: [236, 230, 222] as [number, number, number] };
+  // Facing weight like the GPU's: face-on high, the outline low.
+  const seen = Array.from({ length: MHR_VERTEX_COUNT }, (_, i) => {
+    const z = positions[i * 3 + 2]!;
+    return z > 0 ? Math.max(1, Math.min(255, Math.round(z * 2000))) : 0;
+  });
+  const uv: MhrPhotoUv = { front_uv: photoUv, front_weight: seen, side_uv: photoUv, side_weight: seen.map(() => 0) };
+  const attributes = buildPhotoSkinAttributes(positions, uv, { ...frame, head }, null, restTriangles());
+  // Face-on vertices are never tested against the wall, even if skin is wall-pale.
+  const pale = new Uint8ClampedArray(rgba).fill(0);
+  for (let k = 0; k < pale.length; k += 4) pale.set([236, 230, 222, 255], k);
+  const paleFace = buildPhotoSkinAttributes(positions, uv, { ...frame, head: { ...head, rgba: pale } }, null, restTriangles());
+  assert.ok(paleFace.weights[anchors.nose * 2]! > 0.5, 'the nose keeps its own photo even on a pale wall');
+  let checked = 0;
+  for (let i = 0; i < MHR_VERTEX_COUNT; i += 1) {
+    const x = Math.floor(attributes.uvFront[i * 2]! * WIDTH);
+    const y = Math.floor((1 - attributes.uvFront[i * 2 + 1]!) * HEIGHT);
+    if (y < 0 || y >= rows || x < 0 || x >= WIDTH) continue;
+    const k = (y * WIDTH + x) * 4;
+    assert.notDeepEqual([rgba[k], rgba[k + 1], rgba[k + 2]], [236, 230, 222], `head vertex ${i} shows the wall`);
+    checked += 1;
+  }
+  assert.ok(checked > 1000);
 });

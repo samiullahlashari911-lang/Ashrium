@@ -531,6 +531,8 @@ def fit_two_view_mhr(
             verts[1].detach().cpu().numpy().astype(np.float64),
             (float(front_focal.cpu()), front_cam.detach().cpu().numpy(), front_hw),
             (float(side_focal.cpu()), side_cam.detach().cpu().numpy(), side_hw),
+            front_mask=np.asarray(front_mask, dtype=bool),
+            side_mask=np.asarray(side_mask, dtype=bool),
         )
         photo_uv_ms = elapsed_ms(photo_uv_started)
 

@@ -28,6 +28,11 @@ UV_DECIMALS = 4
 # reaches this many image heights above row 0 so head vertices get real
 # visibility (the phone paints them from its full frame).
 ABOVE_IMAGE_HEIGHTS = 1.0
+# The fitted body is a little wider than the person in the photo; a vertex
+# whose projection is not this many pixels inside the SAM 2 person mask would
+# sample the wall, so it gets no weight (the phone fills it from its nearest
+# seen neighbour). Only a yes/no per vertex leaves the GPU, never the mask.
+MASK_ERODE_PX = 2
 
 _faces_cache: np.ndarray | None = None
 
@@ -59,12 +64,25 @@ def vertex_normals(points: np.ndarray, faces: np.ndarray) -> np.ndarray:
     return normals / np.maximum(length, 1e-12)
 
 
+def erode_mask(mask: np.ndarray, pixels: int) -> np.ndarray:
+    eroded = np.asarray(mask, dtype=bool).copy()
+    for _ in range(pixels):
+        shrunk = eroded.copy()
+        shrunk[1:, :] &= eroded[:-1, :]
+        shrunk[:-1, :] &= eroded[1:, :]
+        shrunk[:, 1:] &= eroded[:, :-1]
+        shrunk[:, :-1] &= eroded[:, 1:]
+        eroded = shrunk
+    return eroded
+
+
 def project_view(
     vertices_cm: np.ndarray,
     focal: float,
     cam_t_m: np.ndarray,
     image_hw: tuple[int, int],
     faces: np.ndarray | None = None,
+    person_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (uv (V, 2) normalized to the image, weight (V,) uint8)."""
     faces = mhr_lod1_faces() if faces is None else faces
@@ -89,6 +107,14 @@ def project_view(
     py = np.clip(np.floor(pixels[:, 1]).astype(np.int64) + above, 0, above + height - 1)
     inside = (pixels[:, 0] >= 0) & (pixels[:, 0] < width) & (pixels[:, 1] >= -above) & (pixels[:, 1] < height)
     visible = inside & (facing > 0.0) & (depth <= zbuffer[py, px] + OCCLUSION_TOLERANCE_M)
+    if person_mask is not None:
+        if person_mask.shape != (height, width):
+            raise RuntimeError("Person mask must match the image size.")
+        core = erode_mask(person_mask, MASK_ERODE_PX)
+        in_image = pixels[:, 1] >= 0  # the head (above the crop) has no mask
+        mx = np.clip(np.floor(pixels[:, 0]).astype(np.int64), 0, width - 1)
+        my = np.clip(np.floor(pixels[:, 1]).astype(np.int64), 0, height - 1)
+        visible &= ~in_image | core[my, mx]
     weight = np.where(visible, np.round(facing * 255.0), 0.0).astype(np.uint8)
     return uv, weight
 
@@ -138,10 +164,12 @@ def photo_uv_payload(
     side_vertices_cm: np.ndarray,
     front_camera: tuple[float, np.ndarray, tuple[int, int]],
     side_camera: tuple[float, np.ndarray, tuple[int, int]],
+    front_mask: np.ndarray | None = None,
+    side_mask: np.ndarray | None = None,
 ) -> dict[str, list[float] | list[int]]:
     faces = mhr_lod1_faces()
-    front_uv, front_weight = project_view(front_vertices_cm, *front_camera, faces=faces)
-    side_uv, side_weight = project_view(side_vertices_cm, *side_camera, faces=faces)
+    front_uv, front_weight = project_view(front_vertices_cm, *front_camera, faces=faces, person_mask=front_mask)
+    side_uv, side_weight = project_view(side_vertices_cm, *side_camera, faces=faces, person_mask=side_mask)
     return {
         "front_uv": np.round(front_uv, UV_DECIMALS).reshape(-1).tolist(),
         "front_weight": front_weight.astype(int).tolist(),

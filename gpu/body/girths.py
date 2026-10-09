@@ -43,8 +43,11 @@ ARM_GAP_CM = 3.5
 # are (a 5 cm "gap" 8 cm off-centre fooled the scan).
 TORSO_MIN_HALF_CM = 11.0
 ARMPIT_SCAN_STEP_CM = 0.5
-# The armpit is searched from the clavicle down this far (fraction of stature).
-ARMPIT_SCAN_DEPTH_FRAC = 0.25
+# The armpit is searched from the shoulders down, in fractions of stature
+# above the floor (MHR mean: armpit ~0.75). Mesh-only: production joints sent
+# a joint-anchored scan somewhere replays could not reproduce (109 cm).
+ARMPIT_SCAN_TOP_FRAC = 0.85
+ARMPIT_SCAN_BOTTOM_FRAC = 0.55
 # ISO 8559-1 chest passes under the armpit; stay clear of the axillary fold,
 # and measure over a band just below it (bust and pectorals live there).
 ARMPIT_CLEARANCE_CM = 2.5
@@ -297,30 +300,43 @@ def _torso_edges(
     return edges[0], edges[1]
 
 
+def body_midline(vertices: np.ndarray, up_axis: int, y_min: float, stature: float) -> float:
+    """Lateral centre of the torso band (the A-pose body is left/right symmetric)."""
+    horiz, _ = _horizontal_axes(up_axis)
+    up = vertices[:, up_axis]
+    band = (up >= y_min + 0.3 * stature) & (up <= y_min + 0.85 * stature)
+    lateral = vertices[band, horiz]
+    return 0.5 * (float(lateral.min()) + float(lateral.max()))
+
+
+def find_armpit(vertices: np.ndarray, up_axis: int, y_min: float, stature: float, midline: float) -> float | None:
+    """Highest slice, scanning down from the shoulders, where both arms stand clear."""
+    top = y_min + ARMPIT_SCAN_TOP_FRAC * stature
+    bottom = y_min + ARMPIT_SCAN_BOTTOM_FRAC * stature
+    for plane in np.arange(top, bottom, -ARMPIT_SCAN_STEP_CM):
+        if _torso_edges(vertices, up_axis, float(plane), midline) is not None:
+            return float(plane)
+    return None
+
+
 def _chest_girth_cm(
     vertices: np.ndarray,
     up_axis: int,
-    window: dict[str, float],
-    midline: float,
-    limit: float,
+    y_min: float,
     stature: float,
-) -> float:
+) -> float | None:
     """Max chest girth in a band just under the armpit, each slice cut at the torso/arm gap.
 
-    The armpit is found from the clavicle down: the first slice where both
-    A-pose arms stand clear of the torso. The band below it does not depend on
-    where MHR puts c_spine1 (production: above the armpit, so a [spine1,
-    clavicle] window never saw the gap and measured the shoulders, 109 cm).
-    If the arms touch the torso all the way down, keep the plain search.
+    Mesh only, no joints: the armpit is the first slice from the shoulders
+    down where both A-pose arms stand clear of the torso. Joint-anchored
+    windows measured the shoulders in production (109 cm) whenever MHR's
+    c_spine1/clavicles sat where replays could not see. None when the arms
+    touch the torso all the way down.
     """
-    hi = float(window["hi"])
-    armpit: float | None = None
-    for plane in np.arange(hi, hi - ARMPIT_SCAN_DEPTH_FRAC * stature, -ARMPIT_SCAN_STEP_CM):
-        if _torso_edges(vertices, up_axis, float(plane), midline) is not None:
-            armpit = float(plane)
-            break
+    midline = body_midline(vertices, up_axis, y_min, stature)
+    armpit = find_armpit(vertices, up_axis, y_min, stature, midline)
     if armpit is None:
-        return _search_girth_cm(vertices, up_axis, window, 0.42, "max", midline, limit)
+        return None
 
     top = armpit - ARMPIT_CLEARANCE_CM
     bottom = top - CHEST_BAND_STATURE_FRAC * stature
@@ -345,9 +361,7 @@ def _chest_girth_cm(
             )
         except RuntimeError:
             continue
-    if not values:
-        return _search_girth_cm(vertices, up_axis, window, 0.42, "max", midline, limit)
-    return float(max(values))
+    return float(max(values)) if values else None
 
 
 def measure_chest_waist_hip_cm(
@@ -391,14 +405,17 @@ def measure_chest_waist_hip_cm(
     windows["waist"] = _clamp_window(windows["waist"], y_min, y_min + stature)
     windows["hip"] = _clamp_window(windows["hip"], y_min, y_min + stature)
     lateral = windows["lateral"]
-    chest = _chest_girth_cm(
-        vertices,
-        up_axis,
-        windows["chest"],
-        lateral["chest_mid"],
-        lateral["chest_half"],
-        stature,
-    )
+    chest = _chest_girth_cm(vertices, up_axis, y_min, stature)
+    if chest is None:
+        chest = _search_girth_cm(
+            vertices,
+            up_axis,
+            windows["chest"],
+            0.42,
+            "max",
+            lateral["chest_mid"],
+            lateral["chest_half"],
+        )
     waist = _search_girth_cm(
         vertices,
         up_axis,

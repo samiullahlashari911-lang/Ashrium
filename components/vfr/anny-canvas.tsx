@@ -416,6 +416,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
           photoUv,
           photoFrameMeta(frontPhoto),
           sidePhoto ? photoFrameMeta(sidePhoto) : null,
+          bodyMesh.geometry.getIndex()?.array ?? [],
         );
         const previous = bodyMesh.material;
         bodyMesh.material = createPhotoSkinMaterial(bodyMesh.geometry, attributes, frontPhoto, sidePhoto);
