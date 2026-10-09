@@ -27,7 +27,9 @@ function scheduleFollowUp(work: () => Promise<void>): void {
     // Return the promise so Vercel keeps the function alive until grading ends.
     after(() => work());
   } catch {
-    // Charts are already saved; GarmentCode can retry on the next sync.
+    // Outside a request (an operator script) there is no after(): grade now
+    // instead of skipping it. A failure leaves the charts saved for the next sync.
+    void work().catch(() => undefined);
   }
 }
 
