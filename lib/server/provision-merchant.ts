@@ -1,3 +1,5 @@
+import { buildAuthConfirmUrl, inviteEmail } from '@/lib/server/auth-links';
+import { sendAccountEmail } from '@/lib/server/email';
 import { createServiceClient } from '@/lib/supabase/service';
 
 const OPERATOR_INVITE_MARK = 'ashrium_operator';
@@ -6,13 +8,17 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export interface ProvisionMerchantInput {
   email: string;
   companyName: string;
-  redirectTo: string;
+  /** e.g. https://www.ashrium.org — the invite opens /auth/confirm there. */
+  appBaseUrl: string;
 }
 
 export interface ProvisionMerchantResult {
   tenantId: string;
   userId: string;
   inviteLink: string | null;
+  /** True when the invite email went out; otherwise send `inviteLink` yourself. */
+  inviteEmailSent: boolean;
+  inviteEmailError: string | null;
 }
 
 export const MISSING_INVITE_LINK_MESSAGE =
@@ -129,25 +135,32 @@ export async function provisionContractedMerchant(
   const { data: linkData, error: linkError } = await service.auth.admin.generateLink({
     type: 'invite',
     email,
-    options: { redirectTo: input.redirectTo },
   });
 
-  if (linkError) {
+  const hashedToken = !linkError && typeof linkData.properties?.hashed_token === 'string'
+    ? linkData.properties.hashed_token
+    : null;
+  if (!hashedToken) {
     return {
       tenantId: userId,
       userId,
       inviteLink: null,
+      inviteEmailSent: false,
+      inviteEmailError: null,
     };
   }
 
-  const actionLink =
-    linkData.properties && typeof linkData.properties.action_link === 'string'
-      ? linkData.properties.action_link
-      : null;
-
-  return {
-    tenantId: userId,
-    userId,
-    inviteLink: actionLink,
-  };
+  const inviteLink = buildAuthConfirmUrl(input.appBaseUrl, 'invite', hashedToken);
+  try {
+    await sendAccountEmail(email, inviteEmail(companyName, inviteLink));
+    return { tenantId: userId, userId, inviteLink, inviteEmailSent: true, inviteEmailError: null };
+  } catch (error) {
+    return {
+      tenantId: userId,
+      userId,
+      inviteLink,
+      inviteEmailSent: false,
+      inviteEmailError: error instanceof Error ? error.message : 'Invite email failed.',
+    };
+  }
 }

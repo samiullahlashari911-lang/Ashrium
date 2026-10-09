@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { isSafeAppPath } from '@/lib/safe-path';
+import { DEFAULT_DAILY_TRYON_CAP, dailyTryOnCap } from '@/lib/server/daily-tryon-cap';
 import { sheetSafeText } from '@/lib/server/google-sheet-lead';
 import { buildShopifyOAuthRedirectUrl } from '@/lib/server/shopify-oauth';
 
@@ -20,6 +21,13 @@ test('safe app paths stay on this origin', () => {
 test('Shopify OAuth return paths cannot leave the app', () => {
   const redirect = buildShopifyOAuthRedirectUrl(`/${BACKSLASH}evil.example`, 'error');
   assert.equal(new URL(redirect, 'https://www.ashrium.org').host, 'www.ashrium.org');
+});
+
+test('daily Try On cap defaults to 1000 and accepts a positive override', () => {
+  assert.equal(dailyTryOnCap(undefined), DEFAULT_DAILY_TRYON_CAP);
+  assert.equal(dailyTryOnCap('2500'), 2500);
+  assert.equal(dailyTryOnCap('0'), DEFAULT_DAILY_TRYON_CAP);
+  assert.equal(dailyTryOnCap('lots'), DEFAULT_DAILY_TRYON_CAP);
 });
 
 test('lead fields cannot run as spreadsheet formulas', () => {

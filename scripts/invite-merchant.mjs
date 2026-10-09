@@ -98,3 +98,11 @@ if (!/^https?:\/\//i.test(inviteLink)) {
 }
 
 console.log(body);
+if (payload?.inviteEmailSent === true) {
+  console.log(`Invite email sent to ${email}. The link opens a set-password page.`);
+} else {
+  console.warn(
+    `Invite email was NOT sent${payload?.inviteEmailError ? ` (${payload.inviteEmailError})` : ''}. `
+      + 'Send the inviteLink above to the merchant yourself; it opens a set-password page and works once.',
+  );
+}

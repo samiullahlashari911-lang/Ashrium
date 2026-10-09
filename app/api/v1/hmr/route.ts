@@ -10,6 +10,7 @@ import {
   parseBiometricJobImagePath,
   purgeBiometricJobImages,
 } from '@/lib/server/biometrics-wipe';
+import { DAILY_TRYON_CAP_MESSAGE, dailyTryOnCapReached } from '@/lib/server/daily-tryon-cap';
 import { consumeClientIpRateLimit, consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/server/hmr-request';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
@@ -81,6 +82,13 @@ export async function POST(request: Request): Promise<Response> {
     || !(await consumeClientIpRateLimit(request, 'hmr', RATE_LIMITS.hmrDispatchIp))
   ) {
     return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
+  }
+
+  if (await dailyTryOnCapReached(tenantId)) {
+    return Response.json(
+      { code: 'DAILY_TRYON_CAP', message: DAILY_TRYON_CAP_MESSAGE },
+      { status: 429 },
+    );
   }
 
   const convertedLease = await convertWarmupLeaseToJob(tenantId, body.gpuSessionKey);

@@ -1,6 +1,7 @@
 import { after } from 'next/server';
 
 import { watchWarmGpuIdleTimeout } from '@/lib/server/abort-shopper-gpu';
+import { DAILY_TRYON_CAP_MESSAGE, dailyTryOnCapReached } from '@/lib/server/daily-tryon-cap';
 import { consumeClientIpRateLimit, consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { FITTING_ROOM_AT_CAPACITY_MESSAGE } from '@/lib/ml/session-gpu';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
@@ -40,6 +41,13 @@ export async function POST(request: Request): Promise<Response> {
     || !(await consumeClientIpRateLimit(request, 'hmr-warmup', RATE_LIMITS.hmrWarmupIp))
   ) {
     return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
+  }
+
+  if (await dailyTryOnCapReached(tenantId)) {
+    return Response.json(
+      { code: 'DAILY_TRYON_CAP', message: DAILY_TRYON_CAP_MESSAGE },
+      { status: 429 },
+    );
   }
 
   let payload: unknown = {};

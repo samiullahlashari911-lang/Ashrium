@@ -60,7 +60,7 @@ export async function POST(request: Request): Promise<Response> {
     const result = await provisionContractedMerchant({
       email: payload.email,
       companyName: payload.companyName,
-      redirectTo: `${appBaseUrl.replace(/\/$/, '')}/auth/callback?next=/merchant/dashboard`,
+      appBaseUrl: appBaseUrl.replace(/\/$/, ''),
     });
 
     return Response.json(result, { status: 201 });
