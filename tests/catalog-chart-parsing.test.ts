@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { chartLooksImplausible } from '@/lib/catalog/parse-product';
 import {
   parseCompositionText,
   scanMaterialFromPage,
@@ -39,6 +40,15 @@ test('a table wins over the model measurements in the text', () => {
     [['S', '39.4', '23.2']],
   )}`;
   assert.equal(scanSizeChartFromPage(html).get('S')?.chestCm, 100.1);
+});
+
+test('a pant waist under 60% of its hip needs review', () => {
+  const size = (waistCm: number, hipCm: number) => ({
+    sizeCode: 'L', chestCm: null, waistCm, hipCm, lengthCm: 88, externalSku: null, measurementsFromSource: true,
+  });
+  assert.equal(chartLooksImplausible('pant', [size(59.9, 104.9)]), true);
+  assert.equal(chartLooksImplausible('pant', [size(66, 100.1)]), false);
+  assert.equal(chartLooksImplausible('tee', [size(59.9, 104.9)]), false);
 });
 
 test('fabric: one word per fibre, labels and lining cut off, ranged wording', () => {

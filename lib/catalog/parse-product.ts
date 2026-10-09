@@ -513,6 +513,7 @@ function draftForVariants(
     description: corpus,
     composition,
   });
+  const chartNeedsReview = chartLooksImplausible(category, sizes);
 
   return {
     sku,
@@ -525,8 +526,23 @@ function draftForVariants(
     ingestCorpus: corpus.slice(0, 16_000),
     ...(product.id ? { shopifyProductId: product.id } : {}),
     ...classified,
-    approximateFit: classified.approximateFit || unsupportedReason !== null,
+    approximateFit: classified.approximateFit || unsupportedReason !== null || chartNeedsReview,
   };
+}
+
+/**
+ * A pant waist under 60% of its hip is almost always measured flat or
+ * unstretched (e.g. 23.6 in waist on a 41.3 in hip). Such a chart can grade
+ * a pattern yet give the wrong size, so it stays "Best match" until checked.
+ */
+export function chartLooksImplausible(
+  category: GarmentCategory,
+  sizes: readonly CatalogSizeVariantInput[],
+): boolean {
+  return category === 'pant' && sizes.some((size) =>
+    typeof size.waistCm === 'number'
+    && typeof size.hipCm === 'number'
+    && size.waistCm < size.hipCm * 0.6);
 }
 
 export function draftsFromShopifyProduct(
