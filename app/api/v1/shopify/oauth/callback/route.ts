@@ -6,6 +6,7 @@ import {
   resolveShopifyOAuthAppRedirect,
   verifyShopifyCallbackHmac,
 } from '@/lib/server/shopify-oauth';
+import { requireCurrentTenantId } from '@/lib/supabase/tenant';
 
 export const runtime = 'nodejs';
 
@@ -51,6 +52,23 @@ export async function GET(request: Request): Promise<Response> {
       fallbackReturnTo,
       'error',
       'Shopify OAuth state was invalid or expired.',
+    );
+  }
+
+  // The state is signed but not tied to a browser, so a link started by one
+  // merchant must not attach a shop to their tenant from someone else's session.
+  let sessionTenantId: string | null = null;
+  try {
+    sessionTenantId = await requireCurrentTenantId();
+  } catch {
+    sessionTenantId = null;
+  }
+  if (sessionTenantId !== state.tenantId) {
+    return redirectToApp(
+      request,
+      state.returnTo,
+      'error',
+      'Sign in to the Ashrium account that started this connection, then try again.',
     );
   }
 

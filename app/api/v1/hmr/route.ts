@@ -10,7 +10,7 @@ import {
   parseBiometricJobImagePath,
   purgeBiometricJobImages,
 } from '@/lib/server/biometrics-wipe';
-import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
+import { consumeClientIpRateLimit, consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { parseAnnyFitDispatchRequest, isValidAnnyFitDispatch } from '@/lib/server/hmr-request';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
@@ -76,7 +76,10 @@ export async function POST(request: Request): Promise<Response> {
     RATE_LIMITS.hmrDispatch,
     RATE_LIMIT_WINDOW_MS,
   );
-  if (!rateLimit.allowed) {
+  if (
+    !rateLimit.allowed
+    || !(await consumeClientIpRateLimit(request, 'hmr', RATE_LIMITS.hmrDispatchIp))
+  ) {
     return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
   }
 

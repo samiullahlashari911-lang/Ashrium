@@ -3,6 +3,7 @@ import {
   RATE_LIMIT_WINDOW_MS,
   type RateLimitResult,
 } from '@/lib/server/rate-limit';
+import { readClientIp } from '@/lib/server/request-origin';
 import { createServiceClient } from '@/lib/supabase/service';
 
 function isConsumeRow(
@@ -59,6 +60,20 @@ export async function consumeRateLimit(
   }
 
   return checkRateLimit(identifier, limit, windowMs);
+}
+
+/**
+ * Per-client-IP window for the shopper GPU routes (Vercel overwrites
+ * x-forwarded-for, so the address is not client-controlled there).
+ */
+export async function consumeClientIpRateLimit(
+  request: Request,
+  scope: string,
+  limit: number,
+): Promise<boolean> {
+  const ip = readClientIp(request) ?? 'unknown';
+  const result = await consumeRateLimit(`${scope}-ip:${ip}`, limit);
+  return result.allowed;
 }
 
 export async function rateLimitedJsonResponse(

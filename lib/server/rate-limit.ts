@@ -24,6 +24,12 @@ export const RATE_LIMITS = {
   uploadUrl: 20,
   hmrDispatch: 20,
   hmrWarmup: 12,
+  // Per shopper IP on the GPU-spending routes. Embed tokens are mintable by
+  // anyone who sends an allowlisted Origin, so the tenant limits alone let one
+  // client burn the whole tenant budget. A real shopper pings warmup every 45s.
+  uploadIp: 6,
+  hmrDispatchIp: 4,
+  hmrWarmupIp: 6,
   hmrStatus: 60,
   hmrAbort: 30,
   fitRecommend: 60,

@@ -1,3 +1,4 @@
+import { isSafeAppPath } from '@/lib/safe-path';
 import {
   buildShopifyAuthorizeUrl,
   createShopifyOAuthState,
@@ -11,7 +12,7 @@ export const runtime = 'nodejs';
 
 function readSafeReturnTo(value: string | null): string {
   const trimmed = (value ?? '/settings/integrations').trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
+  if (!isSafeAppPath(trimmed)) {
     return '/settings/integrations';
   }
 

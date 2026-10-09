@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { consumeRateLimit } from '@/lib/server/durable-rate-limit';
+import { consumeClientIpRateLimit, consumeRateLimit } from '@/lib/server/durable-rate-limit';
 import { configureBiometricsBucketCors } from '@/lib/server/biometrics-cors';
 import { RATE_LIMITS, RATE_LIMIT_WINDOW_MS } from '@/lib/server/rate-limit';
 import { resolveRequestTenantId } from '@/lib/server/request-tenant';
@@ -24,7 +24,10 @@ export async function POST(request: Request): Promise<Response> {
     RATE_LIMITS.uploadUrl,
     RATE_LIMIT_WINDOW_MS,
   );
-  if (!rateLimit.allowed) {
+  if (
+    !rateLimit.allowed
+    || !(await consumeClientIpRateLimit(request, 'upload', RATE_LIMITS.uploadIp))
+  ) {
     return Response.json({ code: 'RATE_LIMIT_EXCEEDED' }, { status: 429 });
   }
 

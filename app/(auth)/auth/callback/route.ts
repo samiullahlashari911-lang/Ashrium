@@ -5,6 +5,7 @@ import {
   merchantPostAuthPath,
   tenantNeedsOnboarding,
 } from '@/lib/onboarding';
+import { isSafeAppPath } from '@/lib/safe-path';
 import { createClient } from '@/lib/supabase/server';
 import {
   merchantPortalSignInPath,
@@ -14,7 +15,7 @@ import {
 const DEFAULT_NEXT_PATH = MERCHANT_HOME_PATH;
 
 function getSafeNextPath(value: string | null): string {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) {
+  if (!value || !isSafeAppPath(value)) {
     return DEFAULT_NEXT_PATH;
   }
 

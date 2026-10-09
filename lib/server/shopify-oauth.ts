@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
+import { isSafeAppPath } from '@/lib/safe-path';
 import { encryptTenantSecret } from '@/lib/server/secret-crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 
@@ -60,7 +61,7 @@ function readString(value: unknown): string {
 
 function readSafeReturnTo(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
+  if (!isSafeAppPath(trimmed)) {
     return '/settings/integrations';
   }
 

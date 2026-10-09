@@ -123,6 +123,14 @@ async function fetchAccessToken(account: ServiceAccount): Promise<string> {
   return payload.access_token;
 }
 
+/**
+ * USER_ENTERED evaluates formulas, so a lead named `=IMPORTXML(...)` would run
+ * in the owner's sheet. A leading apostrophe makes Sheets store it as text.
+ */
+export function sheetSafeText(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 export async function appendMarketingLead(lead: MarketingLead): Promise<void> {
   const config = readSheetConfig();
   if (!config) {
@@ -141,8 +149,8 @@ export async function appendMarketingLead(lead: MarketingLead): Promise<void> {
     body: JSON.stringify({
       values: [[
         new Date().toISOString(),
-        lead.companyName,
-        lead.shopifyStoreUrl,
+        sheetSafeText(lead.companyName),
+        sheetSafeText(lead.shopifyStoreUrl),
         lead.annualRecurringRevenueUsd,
       ]],
     }),
