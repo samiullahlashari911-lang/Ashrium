@@ -27,6 +27,7 @@ import {
   MHR_SKELETON_STATE_DIM,
   MHR_TOPOLOGY_VERSION,
   MHR_VERTEX_COUNT,
+  readMhrParametricVector,
 } from '@/types/hmr';
 
 test('session GPU stays warm through body and drape, then sleeps', () => {
@@ -212,4 +213,32 @@ test('parseMhrParametricVector accepts live Cog body output and rejects ANNY top
     pose: Array.from({ length: MHR_MODEL_PARAM_DIM }, () => 0),
     derived_measurements: { chest_cm: 90, waist_cm: 70, hip_cm: 95 },
   }));
+});
+
+test('MHR photo_uv: geometry for on-device painting passes through, malformed fails', () => {
+  const body = {
+    topology_version: MHR_TOPOLOGY_VERSION,
+    shape: Array.from({ length: MHR_BODY_IDENTITY_DIM }, () => 0),
+    skeleton: Array.from({ length: MHR_SKELETON_DIM }, () => 1),
+    pose: Array.from({ length: MHR_MODEL_PARAM_DIM }, () => 0),
+    derived_measurements: { chest_cm: 96, waist_cm: 77, hip_cm: 89 },
+    vertex_positions: Array.from({ length: MHR_VERTEX_COUNT * 3 }, () => 0),
+  };
+  const photoUv = {
+    front_uv: Array.from({ length: MHR_VERTEX_COUNT * 2 }, (_, index) => (index % 2 ? -0.1 : 0.5)),
+    front_weight: Array.from({ length: MHR_VERTEX_COUNT }, (_, index) => index % 256),
+    side_uv: Array.from({ length: MHR_VERTEX_COUNT * 2 }, () => 0.4),
+    side_weight: Array.from({ length: MHR_VERTEX_COUNT }, () => 0),
+  };
+
+  const parsed = parseMhrParametricVector({ ...body, photo_uv: photoUv });
+  assert.equal(parsed.photo_uv?.front_uv.length, MHR_VERTEX_COUNT * 2);
+  assert.equal(parsed.photo_uv?.front_uv[1], -0.1, 'head vertices sit above the crop (v < 0)');
+  assert.equal(parsed.photo_uv?.front_weight[255], 255);
+  assert.equal(readMhrParametricVector(parsed)?.photo_uv?.side_uv.length, MHR_VERTEX_COUNT * 2);
+
+  assert.equal(parseMhrParametricVector(body).photo_uv, undefined, 'older GPU deploys still parse');
+  const tooBright = { ...photoUv, side_weight: photoUv.side_weight.map(() => 300) };
+  assert.throws(() => parseMhrParametricVector({ ...body, photo_uv: tooBright }), /photo_uv/);
+  assert.equal(readMhrParametricVector({ ...body, photo_uv: { front_uv: [] } }), null);
 });

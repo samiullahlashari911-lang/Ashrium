@@ -62,6 +62,7 @@ export const MHR_STAGE_TIMING_KEYS = [
   'sam3d_front',
   'sam3d_side',
   'mhr_fit',
+  'photo_uv',
   'serialization',
 ] as const;
 
@@ -72,6 +73,7 @@ export interface MhrFitStageTimingsMs {
   sam3d_front?: number;
   sam3d_side?: number;
   mhr_fit?: number;
+  photo_uv?: number;
   serialization?: number;
 }
 
@@ -121,6 +123,20 @@ export interface MhrParametricVector {
   height_residual_cm?: number;
   clothing_residual?: number;
   fit_diagnostics?: MhrFitDiagnostics;
+  photo_uv?: MhrPhotoUv;
+}
+
+/**
+ * Where each LOD 1 vertex lands in each uploaded headless photo, as (u, v)
+ * normalized to that photo (v < 0 is above the head crop), and how well the
+ * view sees it (0 hidden or facing away … 255 facing the camera). Geometry
+ * only: the browser paints its in-memory photos onto the avatar with it.
+ */
+export interface MhrPhotoUv {
+  front_uv: number[];
+  front_weight: number[];
+  side_uv: number[];
+  side_weight: number[];
 }
 
 export type FitParametricVector = MhrParametricVector | AnnyParametricVector;
@@ -311,6 +327,34 @@ function readGirths(value: unknown): MhrDerivedMeasurements | null {
   };
 }
 
+function isPhotoWeight(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 255;
+}
+
+/** `undefined` when absent (older GPU deploys); `null` when present but malformed. */
+export function readMhrPhotoUv(value: unknown): MhrPhotoUv | null | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { front_uv, front_weight, side_uv, side_weight } = value;
+  const uvOk = (uv: unknown): uv is number[] =>
+    Array.isArray(uv) && uv.length === MHR_VERTEX_COUNT * 2 && uv.every(isFiniteNumber);
+  const weightOk = (weight: unknown): weight is number[] =>
+    Array.isArray(weight) && weight.length === MHR_VERTEX_COUNT && weight.every(isPhotoWeight);
+  if (!uvOk(front_uv) || !uvOk(side_uv) || !weightOk(front_weight) || !weightOk(side_weight)) {
+    return null;
+  }
+  return {
+    front_uv: front_uv.slice(),
+    front_weight: front_weight.slice(),
+    side_uv: side_uv.slice(),
+    side_weight: side_weight.slice(),
+  };
+}
+
 export function readMhrParametricVector(value: unknown): MhrParametricVector | null {
   if (!isRecord(value) || value.topology_version !== MHR_TOPOLOGY_VERSION) {
     return null;
@@ -370,6 +414,14 @@ export function readMhrParametricVector(value: unknown): MhrParametricVector | n
   const diagnostics = readMhrFitDiagnostics(value.fit_diagnostics);
   if (diagnostics) {
     result.fit_diagnostics = diagnostics;
+  }
+
+  const photoUv = readMhrPhotoUv(value.photo_uv);
+  if (photoUv === null) {
+    return null;
+  }
+  if (photoUv) {
+    result.photo_uv = photoUv;
   }
 
   return result;

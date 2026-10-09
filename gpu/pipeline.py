@@ -131,14 +131,13 @@ class AshriumPipeline:
             )
 
         diagnostics = result.get("fit_diagnostics")
-        serialization_ms = 0.0
-        if isinstance(diagnostics, dict):
-            timings = diagnostics.get("stage_timings_ms")
-            if isinstance(timings, dict) and isinstance(timings.get("serialization"), (int, float)):
-                serialization_ms = float(timings["serialization"])
-        if serialization_ms > 0:
-            clock.subtract("mhr_fit", serialization_ms)
-            clock.set("serialization", serialization_ms)
+        timings = diagnostics.get("stage_timings_ms") if isinstance(diagnostics, dict) else None
+        # Stages timed inside mhr_fit are reported on their own, not twice.
+        for stage in ("photo_uv", "serialization"):
+            stage_ms = timings.get(stage) if isinstance(timings, dict) else None
+            if isinstance(stage_ms, (int, float)) and stage_ms > 0:
+                clock.subtract("mhr_fit", float(stage_ms))
+                clock.set(stage, float(stage_ms))
 
         merge_fit_diagnostics(result, stage_timings_ms=clock.as_dict())
         result["task"] = "body"

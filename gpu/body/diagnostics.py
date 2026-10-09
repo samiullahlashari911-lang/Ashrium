@@ -13,6 +13,7 @@ STAGE_TIMING_KEYS: tuple[str, ...] = (
     "sam3d_front",
     "sam3d_side",
     "mhr_fit",
+    "photo_uv",
     "serialization",
 )
 DIAGNOSTIC_METRIC_KEYS: tuple[str, ...] = (

@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from .coords import SAM3D_METRES_TO_CM, sam3d_camera_metres_to_mhr_cm
 from .diagnostics import elapsed_ms, merge_fit_diagnostics
 from .girths import measure_chest_waist_hip_cm
+from .photo_uv import photo_uv_payload
 from .topology import (
     MHR_BODY_IDENTITY_DIM,
     MHR_IDENTITY_DIM,
@@ -524,6 +525,15 @@ def fit_two_view_mhr(
             silhouette_residual = last_silhouette
             clothing = last_clothing
 
+        photo_uv_started = time.perf_counter()
+        photo_uv = photo_uv_payload(
+            verts[0].detach().cpu().numpy().astype(np.float64),
+            verts[1].detach().cpu().numpy().astype(np.float64),
+            (float(front_focal.cpu()), front_cam.detach().cpu().numpy(), front_hw),
+            (float(side_focal.cpu()), side_cam.detach().cpu().numpy(), side_hw),
+        )
+        photo_uv_ms = elapsed_ms(photo_uv_started)
+
         serialize_started = time.perf_counter()
         identity_np = identity_row[0].detach().cpu().numpy().tolist()
         scale_np = scale.detach().cpu().numpy().tolist()
@@ -539,6 +549,7 @@ def fit_two_view_mhr(
             "vertex_positions": vertices_cm.detach().cpu().numpy().astype(np.float32).reshape(-1).tolist(),
             "height_residual_cm": height_residual,
             "clothing_residual": float(clothing.detach().cpu()),
+            "photo_uv": photo_uv,
             "joint_count": int(MHR_JOINT_COUNT),
             "vertex_count": int(MHR_VERTEX_COUNT),
         }
@@ -550,6 +561,9 @@ def fit_two_view_mhr(
             native_joint_rmse_cm=float(joint_rmse.detach().cpu()),
             height_residual_cm=height_residual,
             silhouette_residual=float(silhouette_residual.detach().cpu()),
-            stage_timings_ms={"serialization": elapsed_ms(serialize_started)},
+            stage_timings_ms={
+                "photo_uv": photo_uv_ms,
+                "serialization": elapsed_ms(serialize_started),
+            },
         )
         return result

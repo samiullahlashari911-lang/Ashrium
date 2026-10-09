@@ -12,6 +12,7 @@ import {
   MHR_TOPOLOGY_VERSION,
   MHR_VERTEX_COUNT,
   readMhrFitDiagnostics,
+  readMhrPhotoUv,
   type AnnyDerivedMeasurements,
   type AnnyParametricVector,
   type AnnyPhenotype,
@@ -443,6 +444,16 @@ export function parseMhrParametricVector(
   const diagnostics = readMhrFitDiagnostics(unwrapped.fit_diagnostics);
   if (diagnostics) {
     result.fit_diagnostics = diagnostics;
+  }
+
+  const photoUv = readMhrPhotoUv(unwrapped.photo_uv);
+  if (photoUv === null) {
+    throw new Error(
+      `MHR photo_uv must hold ${MHR_VERTEX_COUNT} front/side (u, v) pairs and 0-255 weights`,
+    );
+  }
+  if (photoUv) {
+    result.photo_uv = photoUv;
   }
 
   return result;
