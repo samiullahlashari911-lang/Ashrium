@@ -104,6 +104,27 @@ class GirthGeometryTests(unittest.TestCase):
             4.0,
         )
 
+    def test_chest_stops_below_the_armpit_where_a_pose_arms_join_the_shoulder(self) -> None:
+        # Real fit (173 cm male): A-pose arms hang off the torso up to the
+        # armpit, then fuse into the shoulder below the clavicle. The chest
+        # slice took that shoulder (+16 cm) and recommended tops 1-2 sizes up.
+        bare, joints = _standing_torso(include_arms=False)
+        rings = [bare]
+        for y in np.arange(100.0, 132.0, 1.0):
+            gap = 0.5 * (132.0 - y)
+            for side in (-1.0, 1.0):
+                arm = _ellipse_ring(float(y), 4.0, 4.0, count=24)
+                arm[:, 0] += side * (16.0 + 4.0 + gap)
+                rings.append(arm)
+        for y in np.arange(132.0, 140.0, 1.0):
+            rings.append(_ellipse_ring(float(y), 24.0, 12.0))
+        shouldered = np.vstack(rings)
+        torso_only = measure_chest_waist_hip_cm(bare, joints)
+        girths = measure_chest_waist_hip_cm(shouldered, joints)
+        self.assertLess(abs(girths["chest_cm"] - torso_only["chest_cm"]), 2.0)
+        self.assertAlmostEqual(girths["waist_cm"], torso_only["waist_cm"], places=3)
+        self.assertAlmostEqual(girths["hip_cm"], torso_only["hip_cm"], places=3)
+
     def test_rejects_non_native_joint_count(self) -> None:
         vertices, _joints = _standing_torso(include_arms=False)
         with self.assertRaises(RuntimeError):

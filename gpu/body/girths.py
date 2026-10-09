@@ -36,6 +36,13 @@ WAIST_SPAN_BLEND = 0.9
 HIP_JOINT_SPAN_PAD = 1.35
 # ISO seat is below the hip joints; scale the drop from lumbar-to-hip span.
 HIP_BELOW_JOINT_FRAC = 0.45
+# A-pose arm filter: below the armpit each chest slice shows a clear lateral
+# gap between torso and arm. LOD 1 torso vertex spacing stays under ~3 cm.
+ARM_GAP_CM = 3.5
+TORSO_MIN_HALF_CM = 6.0
+ARMPIT_SCAN_STEP_CM = 0.5
+# ISO 8559-1 chest passes under the armpit; stay clear of the axillary fold.
+ARMPIT_CLEARANCE_CM = 2.5
 
 
 def _cross2(origin: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
@@ -261,6 +268,82 @@ def _search_girth_cm(
     return float(max(values))
 
 
+def _torso_edges(
+    vertices: np.ndarray,
+    up_axis: int,
+    plane_up: float,
+    midline: float,
+) -> tuple[float, float] | None:
+    """Torso edge left/right of `midline` in a slice, or None once an arm touches it."""
+    horiz, _ = _horizontal_axes(up_axis)
+    near = np.abs(vertices[:, up_axis] - plane_up) <= SLICE_HALF_THICKNESS_CM
+    lateral = vertices[near, horiz] - midline
+    edges: list[float] = []
+    for offsets in (-lateral[lateral < 0], lateral[lateral > 0]):
+        ordered = np.sort(offsets[offsets >= TORSO_MIN_HALF_CM])
+        if ordered.shape[0] < 2:
+            return None
+        gaps = np.diff(ordered)
+        widest = int(np.argmax(gaps))
+        if float(gaps[widest]) < ARM_GAP_CM:
+            return None
+        edges.append(float(ordered[widest]) + 0.5 * float(gaps[widest]))
+    return edges[0], edges[1]
+
+
+def _chest_girth_cm(
+    vertices: np.ndarray,
+    up_axis: int,
+    window: dict[str, float],
+    midline: float,
+    limit: float,
+) -> float:
+    """Max chest girth below the armpit, with each slice cut at the torso/arm gap.
+
+    The clavicle-topped window reaches the shoulder, where A-pose arms join the
+    torso; a slice there measures the deltoids. Scan up from the window floor
+    while the arm gap is visible, stop short of the armpit, and only measure
+    there. If the arms touch the torso from the floor up, keep the plain search.
+    """
+    lo = float(window["lo"])
+    hi = float(window["hi"])
+    clear: list[tuple[float, tuple[float, float]]] = []
+    for plane in np.arange(lo, hi + 1e-6, ARMPIT_SCAN_STEP_CM):
+        edges = _torso_edges(vertices, up_axis, float(plane), midline)
+        if edges is None:
+            if clear:
+                break
+            continue
+        clear.append((float(plane), edges))
+    if not clear:
+        return _search_girth_cm(vertices, up_axis, window, 0.42, "max", midline, limit)
+
+    armpit = clear[-1][0]
+    below = [item for item in clear if item[0] <= armpit - ARMPIT_CLEARANCE_CM] or clear[:1]
+    values: list[float] = []
+    for plane, (left, right) in below:
+        side_limit_l = min(left, limit)
+        side_limit_r = min(right, limit)
+        try:
+            values.append(
+                _slice_girth_cm(
+                    vertices,
+                    up_axis,
+                    plane,
+                    0.42,
+                    plane - SLICE_HALF_THICKNESS_CM,
+                    plane + SLICE_HALF_THICKNESS_CM,
+                    midline + 0.5 * (side_limit_r - side_limit_l),
+                    0.5 * (side_limit_l + side_limit_r),
+                )
+            )
+        except RuntimeError:
+            continue
+    if not values:
+        return _search_girth_cm(vertices, up_axis, window, 0.42, "max", midline, limit)
+    return float(max(values))
+
+
 def measure_chest_waist_hip_cm(
     vertices: np.ndarray,
     joints_cm: np.ndarray | None = None,
@@ -302,12 +385,10 @@ def measure_chest_waist_hip_cm(
     windows["waist"] = _clamp_window(windows["waist"], y_min, y_min + stature)
     windows["hip"] = _clamp_window(windows["hip"], y_min, y_min + stature)
     lateral = windows["lateral"]
-    chest = _search_girth_cm(
+    chest = _chest_girth_cm(
         vertices,
         up_axis,
         windows["chest"],
-        0.42,
-        "max",
         lateral["chest_mid"],
         lateral["chest_half"],
     )
