@@ -120,7 +120,8 @@ ok(`${companyName} · ${shopDomain} · ${email}`);
 
 const configName = slug;
 const tomlPath = path.join(ROOT, `shopify.app.${configName}.toml`);
-const appName = `Ashrium – ${companyName}`.slice(0, 30);
+// Merchants see this on Shopify's approval screen and in their Apps list.
+const appName = 'Ashrium Fitting Room';
 
 step('Creating or linking the client\'s Shopify app');
 if (!existsSync(tomlPath)) {
@@ -134,7 +135,7 @@ const clientId = linked.match(/^client_id\s*=\s*"([a-f0-9]{32})"/m)?.[1];
 if (!clientId) {
   fail(`shopify.app.${configName}.toml has no client_id.`, `Delete shopify.app.${configName}.toml and run the command again.`);
 }
-writeFileSync(tomlPath, appToml({ clientId, name: linked.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? appName, appBaseUrl }));
+writeFileSync(tomlPath, appToml({ clientId, name: appName, appBaseUrl }));
 ok(`App ${clientId} configured: install → ${appBaseUrl}/api/v1/shopify/install, scopes ${SCOPES}, webhooks on.`);
 
 step('Deploying the app settings and the Try On theme block');
@@ -157,8 +158,8 @@ if (clientSecret.length < 20) {
 ok('Secret read (it is stored encrypted in Ashrium and never printed).');
 
 step('The one step Shopify only allows in the browser');
-console.log('  1. Open https://dev.shopify.com/dashboard and open the app named');
-console.log(`     "${appName}".`);
+console.log('  1. Open https://dev.shopify.com/dashboard and open the "Ashrium Fitting Room" app');
+console.log(`     whose Client ID is ${clientId}.`);
 console.log('  2. Go to Distribution → Custom distribution.');
 console.log(`  3. Enter ${shopDomain} and press Generate link.`);
 console.log('  4. Copy the install link and paste it here.');
