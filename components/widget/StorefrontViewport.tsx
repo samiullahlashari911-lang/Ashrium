@@ -401,6 +401,7 @@ export function StorefrontViewport({
               drapePayloadBase64={drapePayloadBase64}
               showClearanceHeatmap={showHeatmap && heatmapAvailable}
               faceImage={result.face}
+              photos={result.photos}
               revealed={revealed}
               onBodyReady={() => setBodySettled(true)}
               onBodyError={() => setBodySettled(true)}

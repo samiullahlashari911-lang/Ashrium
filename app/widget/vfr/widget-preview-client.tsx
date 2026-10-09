@@ -74,6 +74,7 @@ export const WidgetPreviewClient: FC<WidgetPreviewClientProps> = ({
               easeCm: recommendation.ease.chestCm,
             }}
             faceImage={result.face}
+            photos={result.photos}
             revealed={revealed}
             onBodyReady={() => setBodySettled(true)}
             onBodyError={() => setBodySettled(true)}

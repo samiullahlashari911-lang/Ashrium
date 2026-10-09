@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { RadialHeatmapLegend } from '@/components/vfr/radial-heatmap-legend';
-import type { OnDeviceFace } from '@/lib/widget/webp-encode';
+import type { OnDeviceFace, OnDevicePhoto } from '@/lib/widget/webp-encode';
 import {
   applyFacelessMannequin,
   applyMannequinMaterial,
@@ -22,6 +22,11 @@ import {
   findMhrHullMesh,
 } from '@/lib/graphics/anny-hull';
 import { disposeObject3D, disposeRendererSession } from '@/lib/graphics/dispose-session';
+import {
+  buildPhotoSkinAttributes,
+  createPhotoSkinMaterial,
+  photoFrameMeta,
+} from '@/lib/graphics/photo-skin';
 import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import {
   compositeSimPositions,
@@ -71,8 +76,13 @@ export interface AnnyCanvasProps {
   onBodyError?: () => void;
   /** Hold the body invisible until true, then fade it in; the garment dresses after. */
   revealed?: boolean;
-  /** On-device face (merchant opt-in). Drawn here only; never uploaded. */
+  /** On-device face crop, used only when the full photos cannot paint the body. */
   faceImage?: OnDeviceFace | null;
+  /**
+   * The shopper's own front/side camera frames. With the GPU's `photo_uv`
+   * they paint the whole avatar (face, hair, skin, clothes) on this device.
+   */
+  photos?: { front: OnDevicePhoto | null; side: OnDevicePhoto | null } | null;
   className?: string;
 }
 
@@ -194,6 +204,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   onBodyError,
   revealed = true,
   faceImage = null,
+  photos = null,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -345,8 +356,25 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       const bodyMesh = isMhrParametricVector(parametric)
         ? findMhrHullMesh(hull)
         : findAnnyHullMesh(hull);
-      const headFrame = bodyMesh ? applyFacelessMannequin(bodyMesh) : null;
-      if (bodyMesh) {
+      // The shopper's own look, painted from their photos on this device.
+      const photoUv = isMhrParametricVector(parametric) ? parametric.photo_uv : undefined;
+      const frontPhoto = photos?.front ?? null;
+      const painted = Boolean(bodyMesh && photoUv && frontPhoto && frontPhoto.frame.width > 0);
+      if (bodyMesh && photoUv && frontPhoto && painted) {
+        const sidePhoto = photos?.side && photos.side.frame.width > 0 ? photos.side : null;
+        bodyMesh.geometry.computeVertexNormals();
+        const attributes = buildPhotoSkinAttributes(
+          bodyMesh.geometry.getAttribute('position').array as Float32Array,
+          photoUv,
+          photoFrameMeta(frontPhoto),
+          sidePhoto ? photoFrameMeta(sidePhoto) : null,
+        );
+        const previous = bodyMesh.material;
+        bodyMesh.material = createPhotoSkinMaterial(bodyMesh.geometry, attributes, frontPhoto, sidePhoto);
+        (Array.isArray(previous) ? previous : [previous]).forEach((material) => material.dispose());
+      }
+      const headFrame = bodyMesh && !painted ? applyFacelessMannequin(bodyMesh) : null;
+      if (bodyMesh && !painted) {
         paintMannequinUndergarment(bodyMesh);
       }
 
@@ -520,7 +548,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         mountElement,
       });
     };
-  }, [faceImage, heightCm, parametric]);
+  }, [faceImage, heightCm, parametric, photos]);
 
   useEffect(() => {
     if (revealed && startRevealRef.current) {

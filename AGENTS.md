@@ -229,7 +229,7 @@ Shopify Admin directly.
 | Types | `types/hmr.ts` (`MhrParametricVector`; stop writing new ANNY rows), `types/graphics.ts`, `types/garment.ts`, `types/database.ts` |
 | Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop), `lib/widget/pose-gates.ts`, `lib/widget/height-units.ts`, `lib/widget/weight-units.ts`, `lib/widget/capture-progress.ts`, `lib/widget/capture-outlines.ts` (generated), `components/widget/ui/*` (wheel picker, segmented toggle), `lib/widget/avatar-stages.ts` + `components/widget/loading/avatar-loading.tsx` (particle loader; real stages only), `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
 | Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
-| Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (faceless mannequin, undergarment, GarmentCode UVs), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
+| Avatar / drape (app) | `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (fallback mannequin, undergarment, GarmentCode UVs), `lib/graphics/photo-skin.ts` (on-device photo painting + head alignment), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
 | GPU (Python) | `gpu/pipeline.py`, `gpu/modal_app.py` + `gpu/body/pins.py` (git sources pinned to reviewed SHAs), `gpu/requirements.txt`, `gpu/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, joint-informed ISO girths, stage timings / fit diagnostics), `gpu/drape/*` (Newton XPBD on MHR LOD 3, `task=drape`), `gpu/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate, self-intersection reject), `gpu/tools/build_outlines.py` (offline: capture outlines from the MHR mesh), `gpu/body/photo_uv.py` (per-vertex photo coordinates + 0-255 visibility per view for on-device painting; geometry only), `gpu/tools/build_mhr_faces.py` → `gpu/body/mhr_lod1_faces.npy` (offline: LOD 1 triangles from `mhr-hull.glb`), `gpu/progress.py` (signed stage callbacks; never blocks inference). Never `NvidiaWarp-GarmentCode`. |
 | ML | `lib/ml/gpu.ts` (Modal HMAC fetch; parse MHR output; warm/sleep `min_containers`), `lib/ml/session-gpu.ts` (5-minute shopper wait; 2-minute inference after `started_at`) |
 | API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/warmup/route.ts` (embed-token capture warm), `app/api/v1/hmr/status/route.ts` (job poll + 5-minute session abort), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper capture/submit warms), `app/api/v1/hmr/progress/route.ts` (Modal → app HMAC stage callback), `lib/server/gpu-callback-auth.ts`, `lib/server/fit-job-timing.ts` (best-effort latency timestamps), `app/api/v1/cron/ttl-sweep/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/abort-shopper-gpu.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/server/widget-cors.ts` (widget `/api/v1/widget/*` HTTPS preflight; tenant allowlist remains the authz gate), `lib/safe-path.ts` (same-origin redirect paths), `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `lib/server/shopify-app.ts` (per-client custom-distribution app, shared env app as fallback), `app/api/v1/shopify/install/route.ts` (client app `application_url`), `app/api/v1/shopify/webhooks/route.ts` + `lib/server/shopify-webhook.ts` (products, uninstall, privacy webhooks), `scripts/client-new.mjs` (`npm run client:new`; writes `shopify.app.<client>.toml`), `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Modal `task=drape`), `app/api/v1/operator/invite-merchant/route.ts` |
@@ -267,17 +267,22 @@ patterns to replicate, not copy pixel-for-pixel:
   badge for high-confidence size claims, an outlined/muted badge with
   "Approximate fit" copy when the confidence AND-gate fails. Never render an
   approximate result to look identical to a confident one.
-- **3D drape viewport:** faceless, **non-skin-toned** mannequin (do not
-  infer skin; GDPR Art. 9) — porcelain finish, sculpted ellipsoid head — with
-  a painted neutral undergarment. **Owner decision (2026-10-08, replaces the
-  2026-10-07 merchant opt-in):** every storefront fitting shows the shopper
-  their own face, automatically — no merchant or shopper switch
-  (`tenants.on_device_face_enabled` is unused). The face crop is kept in
-  browser memory as a canvas (`OnDeviceFace`, never a Blob), drawn on the
-  avatar head on their device only, and dropped when Try On closes. Servers
-  still receive only headless photos. The consent bullet and `/privacy`
-  section always say so. Counsel should still review (BIPA / GDPR). Avatar and
-  garment centered with generous negative space; rotate/zoom only in v1.
+- **3D drape viewport:** **Owner decision (2026-10-09, replaces the faceless
+  non-skin-toned mannequin and the face decal; spec
+  `docs/specs/realistic-avatar.md`):** the avatar shows the shopper as they
+  are — face, hair, skin and their own clothes — painted from their front and
+  side photos **on their device only**, always on, no merchant or shopper
+  switch. The full camera frames are kept in browser memory as canvases
+  (`OnDevicePhoto`, never a Blob), sampled by `lib/graphics/photo-skin.ts`
+  with the GPU's per-vertex `photo_uv` (geometry only), the head snapped onto
+  the frame's MediaPipe face landmarks, and wiped when Try On closes.
+  Servers still receive only headless photos, never return images, and never
+  store appearance; no server or stored artifact ever carries a face or skin
+  colour. The selected garment (Newton drape) covers what it replaces. The
+  consent bullet and `/privacy` section always say so. Counsel review (BIPA /
+  GDPR) before a paying store goes live. Jobs without `photo_uv` (older GPU
+  deploys) fall back to the porcelain mannequin. Avatar and garment centered
+  with generous negative space; rotate/zoom only in v1.
   **Clearance heatmap** (loose = blue) is a **toggle**, not always-on over
   the product texture. Legend sits at the edge, not overlapping the model.
   Strain is not a verdict.
@@ -441,10 +446,11 @@ This is the most failure-prone area of the codebase. Follow these exactly.
 - **Catalog honesty:** do not invent girths. `completeMeasurements` (or
   equivalent) must not set `measurementsFromSource` on filled-in values.
   Per-SKU ingest is the primary path; bulk sync is secondary.
-- **Mannequin:** faceless and non-skin-toned on every server and in every
-  stored artifact. Do not infer skin color. The only face ever shown is the
-  shopper's own on-device face above (always on, never uploaded, consent
-  bullet and `/privacy` section always shown).
+- **Appearance:** faceless and non-skin-toned on every server and in every
+  stored artifact; servers never infer or store skin colour. The only
+  appearance ever shown is the shopper's own, painted on their device from
+  their own photos (always on, never uploaded, consent bullet and `/privacy`
+  section always shown).
 
 ---
 

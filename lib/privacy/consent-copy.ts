@@ -33,12 +33,13 @@ export const CONSENT_BULLETS: ReadonlyArray<{ title: string; body: string }> = [
 ];
 
 /**
- * Every storefront fitting shows the shopper their own face on their avatar.
- * The face crop is drawn on the avatar in this browser and is never uploaded.
+ * Every storefront fitting shows the shopper as they are: face, hair, skin and
+ * own clothes, painted on the avatar from their photos in this browser. The
+ * full photos are never uploaded; servers get only the headless pair.
  */
 export const FACE_ON_DEVICE_BULLET = {
-  title: 'Your face stays on your phone',
-  body: 'You will see your own face on your avatar. It is drawn on this phone only, never uploaded, and gone when you close Try On.',
+  title: 'Your look stays on your phone',
+  body: 'Your avatar shows your face, hair and clothes, painted from your photos on this phone only. The full photos are never uploaded and are gone when you close Try On.',
 } as const;
 
 /**
@@ -90,8 +91,8 @@ export const PRIVACY_SECTIONS: ReadonlyArray<{ title: string; body: string }> = 
     body: 'Ashrium does not sell biometric data, does not use fitting photos to train models, and does not keep a durable shopper identity. We refuse the under-16 / COPPA path: if you are under 16, the camera never starts. The storefront widget receives only a short-lived embed token. Merchant Shopify credentials never enter the iframe.',
   },
   {
-    title: 'Your face on your avatar',
-    body: 'You see your own face on your avatar. The face is cut from your front photo and drawn on the avatar on your device only. It is never uploaded to Ashrium or the store, and it disappears when you close Try On. Servers still receive only photos with the head removed.',
+    title: 'Your look on your avatar',
+    body: 'Your avatar shows you as you are: your face, hair, skin and the clothes you wore, painted from your front and side photos on your device only. The full photos stay in your browser memory, are never uploaded to Ashrium or the store, and are wiped when you close Try On. Ashrium servers receive only the two photos with the head removed, to measure your body, and send back body shape and geometry, never images. Where the garment you try replaces what you wore, any uncovered skin is filled with a colour taken from your own photo, also on your device.',
   },
   {
     title: 'Size recommendations',
