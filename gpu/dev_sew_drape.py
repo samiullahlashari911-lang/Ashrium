@@ -58,24 +58,37 @@ def sew_and_drape(
     body_faces: list[int],
     mechanical: dict[str, float],
     record_every: int,
-    solver: dict | None = None,
+    runs: list[dict],
 ) -> dict:
+    """`runs`: [{"label", "size", "solver": {...drape_style3d overrides}}], one drape each."""
     import numpy as np
 
     if "/opt/ashrium" not in sys.path:
         sys.path.insert(0, "/opt/ashrium")
     os.environ.setdefault("ASHRIUM_WARP_CACHE", f"{WEIGHTS_MOUNT}/warp-cache")
     from drape.arrange import arrange_on_body
-    from drape.border import enforce_border, inflate_collider, signed_distance_to_mesh
+    from drape.border import enforce_border, inflate_collider, nearest_vertices, signed_distance_to_mesh
+    from drape.arrange import body_normals
     from drape.collider import downsample_to_lod3
     from drape.newton_style3d import drape_style3d
     from pattern.instantiate import instantiate_patterns
 
     started = time.perf_counter()
-    pattern = instantiate_patterns(category, product_text, size_chart, sew=True)
+    chart = {entry["sizeCode"]: entry for entry in json.loads(size_chart)}
+    patterns: dict[str, dict] = {}
+    for run in runs:
+        key = json.dumps(run.get("pattern", {}), sort_keys=True)
+        if key in patterns:
+            continue
+        codes = sorted({r["size"] for r in runs if json.dumps(r.get("pattern", {}), sort_keys=True) == key})
+        result = instantiate_patterns(
+            category, product_text, json.dumps([chart[code] for code in codes]),
+            sew=True, style_overrides=run.get("pattern") or None,
+        )
+        if result["status"] != "ok":
+            return {"status": result["status"], "reason": result["unsupported_reason"]}
+        patterns[key] = {rest["sizeCode"]: rest for rest in result["meshes"]}
     pattern_ms = _ms(started)
-    if pattern["status"] != "ok":
-        return {"status": pattern["status"], "reason": pattern["unsupported_reason"]}
 
     body = np.asarray(body_positions, dtype=np.float64).reshape(-1, 3)
     faces = np.asarray(body_faces, dtype=np.int64).reshape(-1, 3)
@@ -87,15 +100,20 @@ def sew_and_drape(
     collider_ms = _ms(step)
 
     sizes = []
-    chart = {entry["sizeCode"]: entry for entry in json.loads(size_chart)}
-    for rest in pattern["meshes"]:
-        code = rest["sizeCode"]
-        garment = rest.pop("garment_mesh")
+    normals = body_normals(body, faces)
+    arranged_cache: dict[str, tuple[dict, float]] = {}
+    for run in runs:
+        code = run["size"]
+        key = json.dumps(run.get("pattern", {}), sort_keys=True)
+        rest = patterns[key][code]
+        garment = rest["garment_mesh"]
         timings: dict[str, float] = {}
-        step = time.perf_counter()
-        arranged = arrange_on_body(garment, body, faces)
-        timings["arrange_ms"] = _ms(step)
+        if (key, code) not in arranged_cache:
+            step = time.perf_counter()
+            arranged_cache[(key, code)] = (arrange_on_body(garment, body, faces), _ms(step))
+        arranged, timings["arrange_ms"] = arranged_cache[(key, code)]
         entry = {
+            "label": run.get("label", code),
             "size": code,
             "chart": chart[code],
             "pattern_girths": rest["pattern_girths"],
@@ -117,7 +135,7 @@ def sew_and_drape(
                 collider_indices=lod3_faces.astype(np.int32),
                 mechanical=mechanical,
                 record_every=record_every,
-                **(solver or {}),
+                **run.get("solver", {}),
             )
         except Exception as error:  # dev harness: keep the sewn mesh for diagnosis
             import traceback
@@ -133,6 +151,18 @@ def sew_and_drape(
         bordered, moved = enforce_border(draped, body, faces)
         after, _ = signed_distance_to_mesh(bordered, body, faces)
         timings["border_ms"] = _ms(step)
+        # Sleeve sag: gap below the arm vs on top of it (cloth hanging = small on top, large below).
+        welded_panel = np.zeros(int(arranged["welded_id"].max()) + 1, dtype=np.int64)
+        welded_panel[arranged["welded_id"]] = np.asarray(garment["panel_of_vertex"])
+        sleeve = np.isin(welded_panel, [i for i, n in enumerate(garment["panels"]) if "sleeve" in n])
+        _gap, surface = signed_distance_to_mesh(bordered[sleeve], body, faces)
+        up = normals[nearest_vertices(surface, body, 1)[:, 0]][:, 1]
+        gaps = after[sleeve] * 100.0
+        sag = {
+            "top_gap_cm": round(float(np.median(gaps[up > 0.4])), 2) if (up > 0.4).any() else None,
+            "under_gap_cm": round(float(np.median(gaps[up < -0.4])), 2) if (up < -0.4).any() else None,
+            "sleeve_mean_y_m": round(float(bordered[sleeve][:, 1].mean()), 4),
+        }
         timings["per_shopper_ms"] = round(
             timings["arrange_ms"] + drape["timings_ms"]["total_ms"] + timings["border_ms"], 1
         )
@@ -156,6 +186,7 @@ def sew_and_drape(
                 "closest_after_mm": round(float(after.min()) * 1000.0, 2),
             },
             "timings_ms": timings,
+            "sleeve_sag": sag,
         })
 
     weights.commit()  # keep the compiled-kernel cache for the next container
@@ -179,7 +210,9 @@ def main(
     substeps: int = 4,
     sew_frames: int = 20,
     graph: bool = True,
+    runs: str = "",
 ) -> None:
+    """`runs`: JSON list for experiments; default drapes every chart size."""
     import numpy as np
 
     from body.topology import MHR_TOPOLOGY_VERSION
@@ -200,7 +233,11 @@ def main(
         faces.astype(np.int64).reshape(-1).tolist(),
         CREWNECK_MECHANICAL,
         record_every,
-        {"substeps": substeps, "sew_frames": sew_frames, "use_graph": graph},
+        json.loads(runs) if runs else [
+            {"label": entry["sizeCode"], "size": entry["sizeCode"],
+             "solver": {"substeps": substeps, "sew_frames": sew_frames, "use_graph": graph}}
+            for entry in CREWNECK_CHART
+        ],
     )
     result["wall_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
     result["body_chest_cm"] = body_result["derived_measurements"]["chest_cm"]
@@ -211,6 +248,5 @@ def main(
     )}, indent=2))
     for size in result.get("sizes", []):
         print(json.dumps({key: size.get(key) for key in (
-            "size", "status", "reason", "chart", "pattern_girths", "calibration_iterations", "frames_run",
-            "converged", "border", "timings_ms",
+            "label", "status", "reason", "frames_run", "converged", "border", "sleeve_sag", "timings_ms",
         )}))

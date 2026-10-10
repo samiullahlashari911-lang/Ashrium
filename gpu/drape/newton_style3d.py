@@ -81,6 +81,13 @@ def drape_style3d(
     substeps: int = SUBSTEPS,
     sew_frames: int = SEW_FRAMES,
     use_graph: bool = True,
+    min_settle_frames: int = MIN_SETTLE_FRAMES,
+    max_settle_frames: int = MAX_SETTLE_FRAMES,
+    settle_eps_m: float = SETTLE_EPS_M,
+    contact_mu: float = SOFT_CONTACT_MU,
+    bend_multiplier: float = 1.0,
+    stretch_multiplier: float = 1.0,
+    iterations: int = ITERATIONS,
 ) -> dict[str, Any]:
     import warp as wp
     import newton
@@ -107,6 +114,8 @@ def drape_style3d(
         raise RuntimeError(f"{int((signed <= 0).sum())} pattern triangles are inverted or flat.")
 
     stretch, bend = style3d_stiffness(mechanical)
+    stretch = tuple(value * stretch_multiplier for value in stretch)
+    bend = tuple(value * bend_multiplier for value in bend)
     builder = newton.ModelBuilder()
     newton.solvers.SolverStyle3D.register_custom_attributes(builder)
     body_mesh = newton.Mesh(
@@ -131,7 +140,7 @@ def drape_style3d(
     )
     model = builder.finalize()
     model.soft_contact_ke = SOFT_CONTACT_KE
-    model.soft_contact_mu = SOFT_CONTACT_MU
+    model.soft_contact_mu = contact_mu
 
     cloth_count = int(welded_positions.shape[0])
     if model.particle_count != cloth_count:
@@ -139,7 +148,7 @@ def drape_style3d(
             f"Style3D kept {model.particle_count} of {cloth_count} garment vertices."
         )
 
-    solver = newton.solvers.SolverStyle3D(model=model, iterations=ITERATIONS)
+    solver = newton.solvers.SolverStyle3D(model=model, iterations=iterations)
     solver.collision.radius = COLLISION_RADIUS_M
     pipeline = newton.CollisionPipeline(model, soft_contact_margin=SOFT_CONTACT_MARGIN_M)
     contacts = pipeline.contacts()
@@ -186,7 +195,7 @@ def drape_style3d(
     converged = False
     phase_started = time.perf_counter()
     displacement = float("inf")
-    for frame in range(sew_frames + MAX_SETTLE_FRAMES):
+    for frame in range(sew_frames + max_settle_frames):
         if frame == sew_frames:
             wp.synchronize()
             timings["sew_ms"] = (time.perf_counter() - phase_started) * 1000.0
@@ -212,7 +221,7 @@ def drape_style3d(
             frame_contacts.append(int(contacts.soft_contact_count.numpy()[0]))
         if on_frame is not None:
             on_frame(frame)
-        if phase == "settle" and settle_frames >= MIN_SETTLE_FRAMES and displacement < SETTLE_EPS_M:
+        if phase == "settle" and settle_frames >= min_settle_frames and displacement < settle_eps_m:
             converged = True
             break
     wp.synchronize()
@@ -235,5 +244,9 @@ def drape_style3d(
         "final_displacement_m": displacement,
         "timings_ms": {key: round(value, 1) for key, value in timings.items()},
         "stiffness": {"stretch": stretch, "bend": bend},
-        "solver": {"substeps": substeps, "sew_frames": sew_frames, "cuda_graph": graph is not None},
+        "solver": {
+            "substeps": substeps, "sew_frames": sew_frames, "cuda_graph": graph is not None,
+            "iterations": iterations, "contact_mu": contact_mu, "settle_eps_m": settle_eps_m,
+            "min_settle_frames": min_settle_frames, "max_settle_frames": max_settle_frames,
+        },
     }

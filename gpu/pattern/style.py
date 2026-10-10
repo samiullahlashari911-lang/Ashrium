@@ -9,6 +9,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# GarmentCode cuts the sleeve for an arm angle below horizontal (10-50).
+# Its t-shirt template uses 10 (arms nearly level): on the ~45 deg A-pose
+# drape body the spare cloth bunched on top and the underarm pulled tight
+# instead of hanging (owner, 2026-10-10). 45 matches the arm angle GarmentCode
+# places the sleeve at (mean body arm_pose_angle 45.5) and real tee caps.
+SLEEVE_ANGLE_DEG = 45
+
 SUPPORTED_CATEGORIES = frozenset({"tee", "pant", "dress", "outerwear"})
 
 _HOOD = re.compile(r"\b(hood|hoodie|hooded)\b", re.I)
@@ -74,4 +81,5 @@ def parse_style(category: str, product_text: str) -> dict[str, Any]:
         "shirt_width": shirt_width,
         "category": category,
         "elastic_waist": bool(_ELASTIC_WAIST.search(text)),
+        "sleeve_angle": SLEEVE_ANGLE_DEG,
     }

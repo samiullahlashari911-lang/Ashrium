@@ -50,6 +50,7 @@ def _apply_style(design: dict[str, Any], style: dict[str, Any]) -> None:
     design["shirt"]["flare"]["v"] = 1.0
     design["sleeve"]["sleeveless"]["v"] = bool(style["sleeveless"])
     design["sleeve"]["length"]["v"] = float(style["sleeve_length"])
+    design["sleeve"]["sleeve_angle"]["v"] = int(style["sleeve_angle"])
     design["left"]["enable_asym"]["v"] = False
     design["pants"]["cuff"]["type"]["v"] = None
     design["pants"]["flare"]["v"] = 1.0
@@ -224,13 +225,14 @@ def instantiate_patterns(
     product_text: str,
     size_chart_json: str,
     sew: bool = False,
+    style_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """`sew=True` also returns each size's sewn 3D garment (ashrium.garment_mesh.v1)."""
     _ensure_garmentcode_path()
     from assets.bodies.body_params import BodyParameters
     from assets.garment_programs.meta_garment import MetaGarment
 
-    style = parse_style(category, product_text)
+    style = {**parse_style(category, product_text), **(style_overrides or {})}
     if style["unsupported_reason"]:
         return {
             "task": "pattern",
