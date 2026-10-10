@@ -181,7 +181,9 @@ def instantiate_patterns(
     category: str,
     product_text: str,
     size_chart_json: str,
+    sew: bool = False,
 ) -> dict[str, Any]:
+    """`sew=True` also returns each size's sewn 3D garment (ashrium.garment_mesh.v1)."""
     _ensure_garmentcode_path()
     from assets.bodies.body_params import BodyParameters
     from assets.garment_programs.meta_garment import MetaGarment
@@ -260,6 +262,10 @@ def instantiate_patterns(
         mesh["pattern_girths"] = pattern_girths
         # Girths not listed here were inferred for pattern geometry only.
         mesh["published_measurements"] = sorted(size["published"])
+        if sew:
+            from pattern.sew import sew_garment
+
+            mesh["garment_mesh"] = sew_garment(garment)
         meshes.append(mesh)
 
     return {
