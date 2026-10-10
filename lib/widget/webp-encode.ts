@@ -59,6 +59,60 @@ export function headlessKeepBox(
   return box;
 }
 
+/** MediaPipe Pose body points (shoulders down to toes) used to frame the upload. */
+const BODY_LANDMARK_INDICES = Array.from({ length: 22 }, (_, i) => 11 + i);
+const FOOT_LANDMARK_INDICES = [27, 28, 29, 30, 31, 32] as const;
+/** Margin around the body, as a fraction of the kept height. */
+const BODY_MARGIN = 0.06;
+/** The upload is never narrower than this (width / height), so it stays a natural photo. */
+const MIN_BODY_ASPECT = 0.75;
+
+/**
+ * The headless box tightened to the body: from the head crop down to just
+ * below the soles, and across the body and arms with a margin. A phone's tall
+ * camera frame with the outline matched leaves floor below the feet and wall
+ * either side; the GPU's silhouette step expects the person to fill the photo
+ * (feet near the bottom, body in the middle) and rejected the loose frame.
+ * Every coordinate stays exact: `headlessUvToFrameUv` maps back through it.
+ */
+export function bodyKeepBox(
+  landmarks: readonly PoseLandmarkSample[],
+  imageWidth: number,
+  imageHeight: number,
+): HeadlessKeepBox | null {
+  const headless = headlessKeepBox(landmarks, imageWidth, imageHeight);
+  if (!headless) {
+    return null;
+  }
+  const visible = (index: number, minimum: number): PoseLandmarkSample | null => {
+    const point = landmarks[index];
+    return point && (point.visibility ?? 0) >= minimum ? point : null;
+  };
+  const feet = FOOT_LANDMARK_INDICES.map((index) => visible(index, 0.3)).filter((p) => p !== null);
+  const body = BODY_LANDMARK_INDICES.map((index) => visible(index, 0.3)).filter((p) => p !== null);
+  if (feet.length === 0 || body.length < 4) {
+    return headless;
+  }
+
+  const soleY = Math.max(...feet.map((p) => p.y)) * imageHeight;
+  const bodyHeight = Math.max(soleY - headless.y, 1);
+  const margin = BODY_MARGIN * bodyHeight;
+  const bottom = Math.min(imageHeight, Math.round(soleY + margin));
+  const height = bottom - headless.y;
+  if (height / imageHeight < MIN_KEEP_HEIGHT_RATIO / 2) {
+    return headless;
+  }
+
+  const xs = body.map((p) => p.x * imageWidth);
+  const centre = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const width = Math.min(
+    imageWidth,
+    Math.max(Math.max(...xs) - Math.min(...xs) + 2 * margin, MIN_BODY_ASPECT * height),
+  );
+  const x = Math.round(Math.min(Math.max(centre - width / 2, 0), imageWidth - width));
+  return { x, y: headless.y, width: Math.round(width), height };
+}
+
 function drawToWebpCanvas(
   source: CanvasImageSource,
   sourceWidth: number,
@@ -108,7 +162,7 @@ export async function encodeVideoFrameToWebp(
     throw new Error('Camera frame is not ready.');
   }
 
-  const keepBox = headlessKeepBox(landmarks, video.videoWidth, video.videoHeight);
+  const keepBox = bodyKeepBox(landmarks, video.videoWidth, video.videoHeight);
   if (!keepBox) {
     throw new Error('Head crop failed. Face landmarks were not detected.');
   }
@@ -139,7 +193,8 @@ export function captureOnDevicePhoto(
   imageWidth: number,
   imageHeight: number,
 ): OnDevicePhoto | null {
-  const sourceBox = headlessKeepBox(landmarks, imageWidth, imageHeight);
+  // The same box as the upload, so GPU photo coordinates map back exactly.
+  const sourceBox = bodyKeepBox(landmarks, imageWidth, imageHeight);
   if (!sourceBox) {
     return null;
   }
@@ -213,7 +268,7 @@ export async function encodeImageFileToWebp(
   const bitmap = await createImageBitmap(file);
   try {
     const keepBox = landmarks
-      ? headlessKeepBox(landmarks, bitmap.width, bitmap.height)
+      ? bodyKeepBox(landmarks, bitmap.width, bitmap.height)
       : null;
     if (landmarks && !keepBox) {
       throw new Error('Head crop failed. Face landmarks were not detected.');

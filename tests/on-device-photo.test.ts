@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import type { PoseLandmarkSample } from '@/lib/widget/pose-gates';
 import {
+  bodyKeepBox,
   captureOnDevicePhoto,
   headlessKeepBox,
   headlessUvToFrameUv,
@@ -57,7 +60,7 @@ test('on-device photo keeps the full frame as a canvas, never a Blob', () => {
     assert.deepEqual([photo.frame.width, photo.frame.height], [1080, 1920]);
     assert.equal(photo.landmarks.length, 33);
 
-    const box = headlessKeepBox(POSE, 1080, 1920);
+    const box = bodyKeepBox(POSE, 1080, 1920);
     assert.deepEqual(photo.keepBox, box, 'same box the upload was cropped to');
   });
 });
@@ -67,9 +70,11 @@ test('large frames are scaled, and the head-crop box with them', () => {
     const photo = captureOnDevicePhoto({} as CanvasImageSource, POSE, 2880, 5120);
     assert.ok(photo);
     assert.equal(photo.frame.height, 2560);
-    const box = headlessKeepBox(POSE, 2880, 5120);
+    const box = bodyKeepBox(POSE, 2880, 5120);
     assert.ok(box);
+    assert.equal(photo.keepBox.x, box.x / 2);
     assert.equal(photo.keepBox.y, box.y / 2);
+    assert.equal(photo.keepBox.width, box.width / 2);
     assert.equal(photo.keepBox.height, box.height / 2);
   });
 });
@@ -101,4 +106,34 @@ test('release wipes the pixels at once', () => {
     assert.deepEqual([photo.frame.width, photo.frame.height], [0, 0]);
     releaseOnDevicePhoto(null);
   });
+});
+
+test('the upload hugs the body in a tall phone frame (the GPU needs the person to fill it)', () => {
+  // Real landmarks from the model photo (3:4), placed in a 9:16 frame the way
+  // the outline leaves them: wall either side, floor below the feet.
+  const fixtures = JSON.parse(readFileSync(path.join(process.cwd(), 'tests/fixtures/pose-landmarks.json'), 'utf8')) as Record<string, [number, number, number[]]>;
+  const [, , flat] = fixtures['model-front-whole'];
+  const frameW = 1080;
+  const frameH = 1920;
+  const photoH = 0.77 * frameH;
+  const photoW = (photoH * 3) / 4;
+  const offsetX = (frameW - photoW) / 2;
+  const offsetY = 0.08 * frameH;
+  const pose = Array.from({ length: 33 }, (_, i) => ({
+    x: (offsetX + flat[i * 3] * photoW) / frameW,
+    y: (offsetY + flat[i * 3 + 1] * photoH) / frameH,
+    visibility: flat[i * 3 + 2],
+  }));
+  const loose = headlessKeepBox(pose, frameW, frameH);
+  const box = bodyKeepBox(pose, frameW, frameH);
+  assert.ok(loose && box);
+  assert.equal(box.y, loose.y, 'same head crop');
+  const sole = Math.max(...[27, 28, 29, 30, 31, 32].map((i) => pose[i].y * frameH));
+  assert.ok(box.y + box.height > sole && box.y + box.height < sole + 0.1 * (sole - box.y), 'ends just below the soles');
+  assert.ok(box.y + box.height < 0.9 * frameH, 'drops the floor band');
+  for (let i = 11; i < 33; i += 1) {
+    const x = pose[i].x * frameW;
+    assert.ok(x > box.x && x < box.x + box.width, `body point ${i} inside`);
+  }
+  assert.ok(box.width < loose.width, 'drops the wall either side');
 });
