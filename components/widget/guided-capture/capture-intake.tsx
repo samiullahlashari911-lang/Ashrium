@@ -44,6 +44,8 @@ interface CaptureIntakeProps {
   showStep?: boolean;
   /** The avatar is painted from the shopper's photos on this device: say so before consent. */
   showLookNotice?: boolean;
+  /** This item has no 3D yet: the shopper learns before the photos that they get a size only. */
+  sizeOnly?: boolean;
 }
 
 type IntakePage = 'consent' | 'height' | 'sex' | 'weight';
@@ -142,6 +144,7 @@ export function CaptureIntake({
   submitLabel = 'Next',
   showStep = true,
   showLookNotice = false,
+  sizeOnly = false,
 }: CaptureIntakeProps): React.JSX.Element {
   const [page, setPage] = useState<IntakePage>('consent');
   const [heightCm, setHeightCm] = useState(HEIGHT_CM_DEFAULT);
@@ -261,6 +264,14 @@ export function CaptureIntake({
       <div key={page} className="ash-page-in flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-4">
         {page === 'consent' ? (
           <>
+            {sizeOnly ? (
+              <div role="note" className="flex flex-col gap-1 rounded-2xl border border-ash-line bg-ash-raised px-4 py-3">
+                <p className="text-sm font-semibold text-ash-ink">This item is size-only for now</p>
+                <p className="text-[13px] leading-relaxed text-ash-muted">
+                  You’ll get your size from your photos, but we can’t show this item on you yet.
+                </p>
+              </div>
+            ) : null}
             <PageTitle title={heading}>
               <p className="text-sm leading-relaxed text-ash-muted">
                 Your camera stays off until you agree. Here is everything that happens:

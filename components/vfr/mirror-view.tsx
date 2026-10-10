@@ -59,8 +59,22 @@ interface BodyAssets {
   parts: Uint8Array | null;
 }
 
+/** A network blip must not send the shopper back to the camera: retry the static assets. */
+async function withRetries<T>(load: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await load();
+    } catch (error) {
+      if (attempt >= attempts) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+    }
+  }
+}
+
 function loadBodyTriangles(): Promise<Uint32Array> {
-  return new GLTFLoader().loadAsync(MHR_HULL_GLB_PUBLIC_PATH).then((gltf) => {
+  return withRetries(() => new GLTFLoader().loadAsync(MHR_HULL_GLB_PUBLIC_PATH)).then((gltf) => {
     const mesh = findMhrHullMesh(gltf.scene);
     const index = mesh?.geometry.getIndex();
     if (!mesh || !index) {
@@ -233,7 +247,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
       return;
     }
     let cancelled = false;
-    void Promise.all([loadBodyTriangles(), loadBodyParts().catch(() => null)])
+    void Promise.all([loadBodyTriangles(), withRetries(loadBodyParts).catch(() => null)])
       .then(([triangles, parts]) => {
         if (cancelled) {
           return;
@@ -359,124 +373,134 @@ export const MirrorView: FC<MirrorViewProps> = ({
       return;
     }
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(1);
-    renderer.setSize(crop.w, crop.h, false);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.setClearColor(0x000000, 0);
-    const camera = new THREE.OrthographicCamera(crop.x, crop.x + crop.w, -crop.y, -(crop.y + crop.h), -10, 10);
-    const scene = new THREE.Scene();
+    // A draw that throws (no WebGL on this phone, a lost context) must say so,
+    // or the shopper waits on "Dressing you…" forever.
+    let renderer: THREE.WebGLRenderer | null = null;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(crop.w, crop.h, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setClearColor(0x000000, 0);
+      const camera = new THREE.OrthographicCamera(crop.x, crop.x + crop.w, -crop.y, -(crop.y + crop.h), -10, 10);
+      const scene = new THREE.Scene();
 
-    // The fitted body, depth only: it hides the garment's far side (the back
-    // of the collar behind the neck, the sleeve behind the arm).
-    const bodyCount = body.positions.length / 3;
-    const occluderPositions = new Float32Array(bodyCount * 3);
-    for (let i = 0; i < bodyCount; i += 1) {
-      occluderPositions[i * 3] = pixels[i * 2];
-      occluderPositions[i * 3 + 1] = -pixels[i * 2 + 1];
-      occluderPositions[i * 3 + 2] = viewDepth(view, sign, body.positions[i * 3], body.positions[i * 3 + 2]);
-    }
-    const occluderGeometry = new THREE.BufferGeometry();
-    occluderGeometry.setAttribute('position', new THREE.BufferAttribute(occluderPositions, 3));
-    occluderGeometry.setIndex(new THREE.BufferAttribute(body.triangles, 1));
-    const occluderMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
-    const occluder = new THREE.Mesh(occluderGeometry, occluderMaterial);
-    occluder.renderOrder = -1;
-    scene.add(occluder);
-
-    // The draped garment, carried into the photo patch by patch.
-    const projector = createPatchProjector(body.positions, pixels, body.parts);
-    const draped = compositeSimPositions(drape);
-    const count = drape.vertexCount;
-    const garmentPositions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i += 1) {
-      const [u, v] = projector.project(draped[i * 3], draped[i * 3 + 1], draped[i * 3 + 2]);
-      garmentPositions[i * 3] = u;
-      garmentPositions[i * 3 + 1] = -v;
-      // A hair in front of the body it rests on, so the body depth never wins a tie.
-      garmentPositions[i * 3 + 2] = viewDepth(view, sign, draped[i * 3], draped[i * 3 + 2]) + 0.003;
-    }
-    // Seam-smoothed normals and fold occlusion from the drape itself.
-    const smoothNormals = seamSmoothNormals(draped, drape.indices);
-    const occlusion = foldOcclusion(draped, smoothNormals, drape.indices, { strength: 4, floor: 0.45, spread: 3 });
-    const normals = new Float32Array(count * 3);
-    const colours = new Float32Array(count * 3);
-    const fabric = garment?.colorHex
-      ? new THREE.Color(garment.colorHex)
-      : albedo?.passed && albedo.albedoHex
-        ? new THREE.Color(albedo.albedoHex)
-        : NEUTRAL_FABRIC.clone();
-    // THREE.Color already holds linear values (ColorManagement converts hex and
-    // sRGB inputs on the way in); converting again crushed dark cloth to grey.
-    const linear = fabric.clone();
-    const ease = garment?.easeCm ?? DEFAULT_EASE_CM;
-    for (let i = 0; i < count; i += 1) {
-      const [nx, ny, nz] = viewNormal(view, sign, smoothNormals[i * 3], smoothNormals[i * 3 + 1], smoothNormals[i * 3 + 2]);
-      normals[i * 3] = nx;
-      normals[i * 3 + 1] = ny;
-      normals[i * 3 + 2] = nz;
-      if (showClearanceHeatmap) {
-        const heat = mapRadialClearanceToColor(drape.clearanceCm[i], ease);
-        const colour = new THREE.Color(heat.r, heat.g, heat.b).convertSRGBToLinear();
-        colours[i * 3] = colour.r;
-        colours[i * 3 + 1] = colour.g;
-        colours[i * 3 + 2] = colour.b;
-      } else {
-        colours[i * 3] = linear.r;
-        colours[i * 3 + 1] = linear.g;
-        colours[i * 3 + 2] = linear.b;
+      // The fitted body, depth only: it hides the garment's far side (the back
+      // of the collar behind the neck, the sleeve behind the arm).
+      const bodyCount = body.positions.length / 3;
+      const occluderPositions = new Float32Array(bodyCount * 3);
+      for (let i = 0; i < bodyCount; i += 1) {
+        occluderPositions[i * 3] = pixels[i * 2];
+        occluderPositions[i * 3 + 1] = -pixels[i * 2 + 1];
+        occluderPositions[i * 3 + 2] = viewDepth(view, sign, body.positions[i * 3], body.positions[i * 3 + 2]);
       }
-    }
-    const garmentGeometry = new THREE.BufferGeometry();
-    garmentGeometry.setAttribute('aOcclusion', new THREE.BufferAttribute(occlusion, 1));
-    garmentGeometry.setAttribute(
-      'aPatternUv',
-      new THREE.BufferAttribute(drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2), 2),
-    );
-    garmentGeometry.setAttribute('position', new THREE.BufferAttribute(garmentPositions, 3));
-    garmentGeometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    garmentGeometry.setAttribute('aColor', new THREE.BufferAttribute(colours, 3));
-    garmentGeometry.setIndex(new THREE.BufferAttribute(drape.indices, 1));
-    const garmentMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uLight: { value: new THREE.Vector3(view === 'front' ? 0.25 : 0.6, 0.7, view === 'front' ? 0.65 : 0.3).normalize() },
-        uExposure: { value: photoExposure(frame, crop) },
-        uHeat: { value: showClearanceHeatmap ? 1 : 0 },
-      },
-      vertexShader: GARMENT_VERTEX,
-      fragmentShader: GARMENT_FRAGMENT,
-      side: THREE.DoubleSide,
-    });
-    scene.add(new THREE.Mesh(garmentGeometry, garmentMaterial));
+      const occluderGeometry = new THREE.BufferGeometry();
+      occluderGeometry.setAttribute('position', new THREE.BufferAttribute(occluderPositions, 3));
+      occluderGeometry.setIndex(new THREE.BufferAttribute(body.triangles, 1));
+      const occluderMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
+      const occluder = new THREE.Mesh(occluderGeometry, occluderMaterial);
+      occluder.renderOrder = -1;
+      scene.add(occluder);
 
-    renderer.render(scene, camera);
-    // Contact shadow: a soft, slightly lowered dark copy of the garment under
-    // it, so the hem, sleeves and collar sit on the body instead of floating.
-    const shade = document.createElement('canvas');
-    shade.width = crop.w;
-    shade.height = crop.h;
-    const shadeContext = shade.getContext('2d');
-    if (shadeContext && !showClearanceHeatmap) {
-      shadeContext.drawImage(renderer.domElement, 0, 0);
-      shadeContext.globalCompositeOperation = 'source-in';
-      shadeContext.fillStyle = 'rgba(20, 16, 12, 0.42)';
-      shadeContext.fillRect(0, 0, crop.w, crop.h);
-      const blurPx = Math.max(2, Math.round(crop.h * 0.006));
-      context.save();
-      context.filter = `blur(${blurPx}px)`;
-      context.drawImage(shade, 0, Math.round(blurPx * 0.8));
-      context.restore();
-    }
-    shade.width = 0;
-    context.drawImage(renderer.domElement, 0, 0);
-    callbacks.current.onGarmentShown?.(true);
+      // The draped garment, carried into the photo patch by patch.
+      const projector = createPatchProjector(body.positions, pixels, body.parts);
+      const draped = compositeSimPositions(drape);
+      const count = drape.vertexCount;
+      const garmentPositions = new Float32Array(count * 3);
+      for (let i = 0; i < count; i += 1) {
+        const [u, v] = projector.project(draped[i * 3], draped[i * 3 + 1], draped[i * 3 + 2]);
+        garmentPositions[i * 3] = u;
+        garmentPositions[i * 3 + 1] = -v;
+        // A hair in front of the body it rests on, so the body depth never wins a tie.
+        garmentPositions[i * 3 + 2] = viewDepth(view, sign, draped[i * 3], draped[i * 3 + 2]) + 0.003;
+      }
+      // Seam-smoothed normals and fold occlusion from the drape itself.
+      const smoothNormals = seamSmoothNormals(draped, drape.indices);
+      const occlusion = foldOcclusion(draped, smoothNormals, drape.indices, { strength: 4, floor: 0.45, spread: 3 });
+      const normals = new Float32Array(count * 3);
+      const colours = new Float32Array(count * 3);
+      const fabric = garment?.colorHex
+        ? new THREE.Color(garment.colorHex)
+        : albedo?.passed && albedo.albedoHex
+          ? new THREE.Color(albedo.albedoHex)
+          : NEUTRAL_FABRIC.clone();
+      // THREE.Color already holds linear values (ColorManagement converts hex and
+      // sRGB inputs on the way in); converting again crushed dark cloth to grey.
+      const linear = fabric.clone();
+      const ease = garment?.easeCm ?? DEFAULT_EASE_CM;
+      for (let i = 0; i < count; i += 1) {
+        const [nx, ny, nz] = viewNormal(view, sign, smoothNormals[i * 3], smoothNormals[i * 3 + 1], smoothNormals[i * 3 + 2]);
+        normals[i * 3] = nx;
+        normals[i * 3 + 1] = ny;
+        normals[i * 3 + 2] = nz;
+        if (showClearanceHeatmap) {
+          const heat = mapRadialClearanceToColor(drape.clearanceCm[i], ease);
+          const colour = new THREE.Color(heat.r, heat.g, heat.b).convertSRGBToLinear();
+          colours[i * 3] = colour.r;
+          colours[i * 3 + 1] = colour.g;
+          colours[i * 3 + 2] = colour.b;
+        } else {
+          colours[i * 3] = linear.r;
+          colours[i * 3 + 1] = linear.g;
+          colours[i * 3 + 2] = linear.b;
+        }
+      }
+      const garmentGeometry = new THREE.BufferGeometry();
+      garmentGeometry.setAttribute('aOcclusion', new THREE.BufferAttribute(occlusion, 1));
+      garmentGeometry.setAttribute(
+        'aPatternUv',
+        new THREE.BufferAttribute(drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2), 2),
+      );
+      garmentGeometry.setAttribute('position', new THREE.BufferAttribute(garmentPositions, 3));
+      garmentGeometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+      garmentGeometry.setAttribute('aColor', new THREE.BufferAttribute(colours, 3));
+      garmentGeometry.setIndex(new THREE.BufferAttribute(drape.indices, 1));
+      const garmentMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          uLight: { value: new THREE.Vector3(view === 'front' ? 0.25 : 0.6, 0.7, view === 'front' ? 0.65 : 0.3).normalize() },
+          uExposure: { value: photoExposure(frame, crop) },
+          uHeat: { value: showClearanceHeatmap ? 1 : 0 },
+        },
+        vertexShader: GARMENT_VERTEX,
+        fragmentShader: GARMENT_FRAGMENT,
+        side: THREE.DoubleSide,
+      });
+      scene.add(new THREE.Mesh(garmentGeometry, garmentMaterial));
 
-    occluderGeometry.dispose();
-    occluderMaterial.dispose();
-    garmentGeometry.dispose();
-    garmentMaterial.dispose();
-    renderer.dispose();
-    renderer.forceContextLoss();
+      renderer.render(scene, camera);
+      // Contact shadow: a soft, slightly lowered dark copy of the garment under
+      // it, so the hem, sleeves and collar sit on the body instead of floating.
+      const shade = document.createElement('canvas');
+      shade.width = crop.w;
+      shade.height = crop.h;
+      const shadeContext = shade.getContext('2d');
+      if (shadeContext && !showClearanceHeatmap) {
+        shadeContext.drawImage(renderer.domElement, 0, 0);
+        shadeContext.globalCompositeOperation = 'source-in';
+        shadeContext.fillStyle = 'rgba(20, 16, 12, 0.42)';
+        shadeContext.fillRect(0, 0, crop.w, crop.h);
+        const blurPx = Math.max(2, Math.round(crop.h * 0.006));
+        context.save();
+        context.filter = `blur(${blurPx}px)`;
+        context.drawImage(shade, 0, Math.round(blurPx * 0.8));
+        context.restore();
+      }
+      shade.width = 0;
+      context.drawImage(renderer.domElement, 0, 0);
+      callbacks.current.onGarmentShown?.(true);
+
+      occluderGeometry.dispose();
+      occluderMaterial.dispose();
+      garmentGeometry.dispose();
+      garmentMaterial.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss();
+    } catch (error) {
+      console.error('Garment could not be drawn on the photo', error);
+      renderer?.dispose();
+      renderer?.forceContextLoss();
+      callbacks.current.onGarmentShown?.(false);
+    }
   }, [albedo, body, drape, garment?.colorHex, garment?.easeCm, photoUv, photos, showClearanceHeatmap, view]);
 
   const hasSide = Boolean(photos?.side && photoUv);

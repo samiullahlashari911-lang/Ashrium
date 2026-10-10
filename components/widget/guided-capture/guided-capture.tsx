@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { CaptureIntake, type CaptureIntakeValues } from '@/components/widget/guided-capture/capture-intake';
 import { CaptureViewport } from '@/components/widget/guided-capture/capture-viewport';
+import { usePoseLandmarker } from '@/components/widget/guided-capture/use-pose-landmarker';
 import { AvatarLoading } from '@/components/widget/loading/avatar-loading';
 import {
   SHOPPER_AVATAR_WAIT_MS,
   SHOPPER_GPU_TIMEOUT_MESSAGE,
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
+import { primeCaptureVoice } from '@/lib/widget/capture-voice';
 import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
 import {
   releaseOnDevicePhoto,
@@ -79,6 +81,8 @@ interface GuidedCaptureProps {
   allowGallery?: boolean;
   /** Keep the full camera frames on this device to paint the shopper's own avatar. */
   keepOnDeviceLook?: boolean;
+  /** This item has no 3D yet: say so before the photos (size only). */
+  sizeOnly?: boolean;
 }
 
 export function GuidedCapture({
@@ -90,8 +94,10 @@ export function GuidedCapture({
   dressSkipped = false,
   allowGallery = false,
   keepOnDeviceLook = false,
+  sizeOnly = false,
 }: GuidedCaptureProps): React.JSX.Element {
   const [step, setStep] = useState<CaptureStep>('intake');
+  const pose = usePoseLandmarker();
   const [intake, setIntake] = useState<CaptureIntakeValues | null>(null);
   const [frontBlob, setFrontBlob] = useState<Blob | null>(null);
   const [frontPhoto, setFrontPhoto] = useState<OnDevicePhoto | null>(null);
@@ -402,9 +408,12 @@ export function GuidedCapture({
         {warmupBanner}
         <CaptureIntake
           showLookNotice={keepOnDeviceLook}
+          sizeOnly={sizeOnly}
           submitLabel="Next"
           onConsentPassed={() => setGpuArmed(true)}
           onSubmit={(values) => {
+            // Inside the tap: phones only speak after a first utterance in a gesture.
+            primeCaptureVoice();
             setIntake(values);
             setStep('front');
           }}
@@ -422,6 +431,7 @@ export function GuidedCapture({
           key={step}
           view={view}
           sex={intake.sex}
+          pose={pose}
           allowGallery={allowGallery}
           keepOnDeviceLook={keepOnDeviceLook}
           flowStep={step}

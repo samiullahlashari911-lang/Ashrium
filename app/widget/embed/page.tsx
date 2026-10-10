@@ -42,6 +42,7 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
     approximateFit: true,
     albedoUrl: null,
     printQaPassed: false,
+    has3d: false,
     sizeVariants: [],
   },
   {
@@ -53,6 +54,7 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
     approximateFit: true,
     albedoUrl: null,
     printQaPassed: false,
+    has3d: false,
     sizeVariants: [],
   },
   {
@@ -64,6 +66,7 @@ const DEVELOPMENT_SANDBOX_GARMENTS: StorefrontGarment[] = [
     approximateFit: true,
     albedoUrl: null,
     printQaPassed: false,
+    has3d: false,
     sizeVariants: [],
   },
 ];

@@ -72,8 +72,10 @@ test('weight wheel stores kilograms for both units', () => {
 });
 
 test('live capture passes the last gate into pose evaluation and tints the outline', () => {
-  assert.match(viewportSource, /evaluatePoseGate\(pose, view, lastGateRef\.current\)/);
+  assert.match(viewportSource, /evaluatePoseGate\(smoothed, view, lastRawGateRef\.current, \{/);
   assert.match(viewportSource, /<SilhouetteOverlay\s+view=\{view\}\s+sex=\{sex\}\s+gate=\{gate\}\s+holdProgress=\{holdProgress\}/);
+  // The gate matches the body against where the outline is actually drawn.
+  assert.match(viewportSource, /onFrame=\{handleOutlineFrame\}/);
   // Side guide follows the way the shopper faces; the preview is a mirror.
   assert.match(viewportSource, /mirrored=\{view === 'side' && sideGuideMirrored\}/);
   assert.match(viewportSource, /-scale-x-100/);

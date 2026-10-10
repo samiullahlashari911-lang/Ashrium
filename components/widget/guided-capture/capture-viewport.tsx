@@ -1,18 +1,35 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 
 import { CaptureFlowMeter } from '@/components/widget/guided-capture/capture-flow-meter';
 import { SilhouetteOverlay } from '@/components/widget/guided-capture/silhouette-overlay';
 import {
   detectStillLandmarks,
-  usePoseLandmarker,
+  type PoseLandmarkerHandle,
 } from '@/components/widget/guided-capture/use-pose-landmarker';
 import { subscribeViewportActivity } from '@/lib/graphics/viewport-activity';
 import { CAPTURE_CLOTHING_TIP, CAPTURE_PRIVACY_NOTE } from '@/lib/privacy/consent-copy';
 import type { CaptureFlowStep } from '@/lib/widget/capture-progress';
+import {
+  CaptureVoice,
+  captureVoiceSupported,
+  readVoiceMuted,
+  writeVoiceMuted,
+} from '@/lib/widget/capture-voice';
 import { FRAME_QUALITY_COPY, assessCanvasQuality } from '@/lib/widget/frame-quality';
-import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
+import {
+  evaluatePoseGate,
+  gateStatusCopy,
+  type OutlineFrame,
+  type PoseLandmarkSample,
+} from '@/lib/widget/pose-gates';
+import {
+  INITIAL_GATE_HOLD,
+  PoseSmoother,
+  stepGateHold,
+  type GateHoldState,
+} from '@/lib/widget/pose-smoothing';
 import {
   captureOnDevicePhoto,
   encodeImageFileToWebp,
@@ -26,6 +43,12 @@ const ALIGNED_HOLD_MS = 1200;
 const NOSE = 0;
 const LEFT_SHOULDER = 11;
 const RIGHT_SHOULDER = 12;
+const POSE_DETECT_INTERVAL_MS = 66;
+/** Pose runs on a small copy of the frame; the captured photo stays full size. */
+const DETECT_FRAME_LONG_EDGE_PX = 480;
+/** The full model is swapped for lite when a detection averages longer than this. */
+const SLOW_DETECT_MS = 55;
+const SLOW_DETECT_SAMPLES = 20;
 
 /** True when the nose points to the raw frame's right; null while unclear. */
 function sideFacingRawRight(pose: readonly PoseLandmarkSample[]): boolean | null {
@@ -38,22 +61,26 @@ function sideFacingRawRight(pose: readonly PoseLandmarkSample[]): boolean | null
   const offset = nose.x - (left.x + right.x) / 2;
   return Math.abs(offset) < 0.02 ? null : offset > 0;
 }
-const POSE_DETECT_INTERVAL_MS = 66;
+
+function spokenCopy(status: PoseGateStatus, view: CaptureView): string {
+  return status === 'aligned' ? 'Hold still' : gateStatusCopy(status, view);
+}
 
 interface CaptureViewportProps {
   view: CaptureView;
   /** Picks the female / male / neutral outline. */
   sex: CaptureSex;
+  /** The capture's shared pose model (loaded once by GuidedCapture). */
+  pose: PoseLandmarkerHandle;
   /**
    * `photo` stays in this browser (a canvas, never uploaded): the shopper's
-   * own look painted on their avatar. Live camera captures only.
+   * own photo for the try-on result. Live camera captures only.
    */
   onCaptured: (blob: Blob, gate: PoseGateStatus, photo?: OnDevicePhoto | null) => void;
-  /** Keep the full camera frame on this device to paint the shopper's own avatar. */
+  /** Keep the full camera frame on this device for the try-on result. */
   keepOnDeviceLook?: boolean;
   onBack: () => void;
   allowGallery?: boolean;
-  requireConfirm?: boolean;
   flowStep: Extract<CaptureFlowStep, 'front' | 'side'>;
 }
 
@@ -78,38 +105,71 @@ function stopStream(stream: MediaStream | null): void {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
+/** The shopper checks the photo (head included, on this device only) before it is used. */
+function ReviewPhoto({ pending, view }: { pending: PendingCapture; view: CaptureView }): React.JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frame = pending.photo?.frame ?? null;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !frame) {
+      return;
+    }
+    canvas.width = frame.width;
+    canvas.height = frame.height;
+    canvas.getContext('2d')?.drawImage(frame, 0, 0);
+    return () => {
+      canvas.width = 0;
+      canvas.height = 0;
+    };
+  }, [frame]);
+
+  return frame ? (
+    <canvas
+      ref={canvasRef}
+      role="img"
+      aria-label={`Your ${view} photo`}
+      className="absolute inset-0 h-full w-full -scale-x-100 object-contain"
+    />
+  ) : (
+    <div
+      role="img"
+      aria-label={`${view} pose, head cropped`}
+      className="absolute inset-0 bg-contain bg-center bg-no-repeat"
+      style={{ backgroundImage: `url(${pending.previewUrl})` }}
+    />
+  );
+}
+
 export function CaptureViewport({
   view,
   sex,
+  pose: poseLandmarker,
   onCaptured,
   onBack,
   allowGallery = false,
-  requireConfirm = false,
   flowStep,
   keepOnDeviceLook = false,
 }: CaptureViewportProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // A capture waiting out its 420 ms flash; its frame is wiped if we unmount first.
-  const pendingDeliveryRef = useRef<{ timer: number; photo: OnDevicePhoto | null } | null>(null);
-  useEffect(() => () => {
-    const delivery = pendingDeliveryRef.current;
-    if (delivery) {
-      window.clearTimeout(delivery.timer);
-      releaseOnDevicePhoto(delivery.photo);
-    }
-  }, []);
-  const alignedSinceRef = useRef<number | null>(null);
+  const detectCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const outlineFrameRef = useRef<OutlineFrame | null>(null);
+  const smootherRef = useRef(new PoseSmoother());
+  const holdRef = useRef<GateHoldState>(INITIAL_GATE_HOLD);
+  const detectCostRef = useRef({ samples: 0, meanMs: 0 });
+  const voiceRef = useRef(new CaptureVoice());
   const capturingRef = useRef(false);
   const lastVideoTimeRef = useRef(-1);
   const lastDetectAtRef = useRef(0);
-  const lastGateRef = useRef<PoseGateStatus>('not_detected');
+  const lastRawGateRef = useRef<PoseGateStatus>('not_detected');
   const lastHoldBucketRef = useRef(-1);
   const sourceRef = useRef<CaptureSource>('live');
   const viewportActiveRef = useRef(false);
-  const { landmarkerRef, ready, error: poseError } = usePoseLandmarker();
+  const { landmarkerRef, ready, error: poseError, model, fallBackToLite } = poseLandmarker;
   const [viewportActive, setViewportActive] = useState(false);
   const [source, setSource] = useState<CaptureSource>('live');
   const [gate, setGate] = useState<PoseGateStatus>('not_detected');
@@ -120,11 +180,57 @@ export function CaptureViewport({
   const [holdProgress, setHoldProgress] = useState(0);
   const [pending, setPending] = useState<PendingCapture | null>(null);
   const [flash, setFlash] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [voiceAvailable, setVoiceAvailable] = useState(false);
   // Side guide faces the way the shopper faces on the (mirrored) preview.
   const [sideGuideMirrored, setSideGuideMirrored] = useState(false);
 
   sourceRef.current = source;
   viewportActiveRef.current = viewportActive;
+
+  // A capture waiting out its flash; its frame is wiped if we unmount first.
+  const pendingDeliveryRef = useRef<{ timer: number; photo: OnDevicePhoto | null } | null>(null);
+  useEffect(() => () => {
+    const delivery = pendingDeliveryRef.current;
+    if (delivery) {
+      window.clearTimeout(delivery.timer);
+      releaseOnDevicePhoto(delivery.photo);
+    }
+  }, []);
+
+  useEffect(() => {
+    const isMuted = readVoiceMuted();
+    voiceRef.current.muted = isMuted;
+    setMuted(isMuted);
+    setVoiceAvailable(captureVoiceSupported());
+    const voice = voiceRef.current;
+    return () => voice.stop();
+  }, []);
+
+  const toggleMuted = (): void => {
+    const next = !muted;
+    setMuted(next);
+    writeVoiceMuted(next);
+    voiceRef.current.muted = next;
+    if (next) {
+      voiceRef.current.stop();
+    } else {
+      voiceRef.current.say(spokenCopy(holdRef.current.shown, view), true);
+    }
+  };
+
+  const handleOutlineFrame = useCallback((frame: OutlineFrame | null) => {
+    outlineFrameRef.current = frame;
+  }, []);
+
+  const resetHold = useCallback((): void => {
+    holdRef.current = INITIAL_GATE_HOLD;
+    smootherRef.current.reset();
+    lastRawGateRef.current = 'not_detected';
+    lastHoldBucketRef.current = -1;
+    setHoldProgress(0);
+    setGate('not_detected');
+  }, []);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -136,7 +242,7 @@ export function CaptureViewport({
 
   useEffect(() => {
     if (!viewportActive) {
-      alignedSinceRef.current = null;
+      holdRef.current = { ...holdRef.current, alignedSince: null };
       setHoldProgress(0);
       videoRef.current?.pause();
       return;
@@ -150,21 +256,17 @@ export function CaptureViewport({
 
   useEffect(() => {
     capturingRef.current = false;
-    alignedSinceRef.current = null;
     lastVideoTimeRef.current = -1;
     lastDetectAtRef.current = 0;
-    lastGateRef.current = 'not_detected';
-    lastHoldBucketRef.current = -1;
-    setHoldProgress(0);
+    resetHold();
     setPending((current) => {
       discardPending(current);
       return null;
     });
     setEncodeError(null);
     setGalleryError(null);
-    setGate('not_detected');
     setSource('live');
-  }, [view]);
+  }, [resetHold, view]);
 
   useEffect(() => {
     return () => {
@@ -189,8 +291,7 @@ export function CaptureViewport({
           audio: false,
           video: {
             facingMode: { ideal: 'user' },
-            // The avatar is painted from this frame: ~4x the face pixels of
-            // 960x720. Pose detection downsamples internally either way.
+            // The try-on is drawn on this frame; pose runs on a small copy.
             width: { ideal: 1920 },
             height: { ideal: 1440 },
           },
@@ -244,8 +345,9 @@ export function CaptureViewport({
       }
 
       const video = videoRef.current;
+      const stage = stageRef.current;
       const landmarker = landmarkerRef.current;
-      if (!video || !landmarker || video.readyState < 2) {
+      if (!video || !stage || !landmarker || video.readyState < 2 || video.videoWidth === 0) {
         return;
       }
 
@@ -261,101 +363,136 @@ export function CaptureViewport({
       lastVideoTimeRef.current = video.currentTime;
       lastDetectAtRef.current = now;
 
-      let pose: PoseLandmarkSample[] | undefined;
+      const detectCanvas = detectCanvasRef.current ?? document.createElement('canvas');
+      detectCanvasRef.current = detectCanvas;
+      const detectScale = Math.min(1, DETECT_FRAME_LONG_EDGE_PX / Math.max(video.videoWidth, video.videoHeight));
+      const detectWidth = Math.round(video.videoWidth * detectScale);
+      const detectHeight = Math.round(video.videoHeight * detectScale);
+      if (detectCanvas.width !== detectWidth || detectCanvas.height !== detectHeight) {
+        detectCanvas.width = detectWidth;
+        detectCanvas.height = detectHeight;
+      }
+
+      let rawPose: PoseLandmarkSample[] | undefined;
       try {
-        const result = landmarker.detectForVideo(video, now);
-        pose = result.landmarks[0] as PoseLandmarkSample[] | undefined;
+        detectCanvas.getContext('2d')?.drawImage(video, 0, 0, detectWidth, detectHeight);
+        const result = landmarker.detectForVideo(detectCanvas, now);
+        rawPose = result.landmarks[0] as PoseLandmarkSample[] | undefined;
       } catch {
-        if (lastGateRef.current !== 'not_detected') {
-          lastGateRef.current = 'not_detected';
-          setGate('not_detected');
-        }
-        return;
+        rawPose = undefined;
       }
 
-      const nextGate = pose ? evaluatePoseGate(pose, view, lastGateRef.current) : 'not_detected';
-      if (view === 'side' && pose) {
-        const facing = sideFacingRawRight(pose);
-        // Raw-right is screen-left on the mirrored preview; the outline faces screen-right.
-        if (facing !== null) {
-          setSideGuideMirrored(facing);
-        }
-      }
-      if (nextGate !== lastGateRef.current) {
-        lastGateRef.current = nextGate;
-        setGate(nextGate);
+      const cost = detectCostRef.current;
+      const elapsedMs = performance.now() - now;
+      cost.samples += 1;
+      cost.meanMs += (elapsedMs - cost.meanMs) / Math.min(cost.samples, SLOW_DETECT_SAMPLES);
+      if (model === 'full' && cost.samples >= SLOW_DETECT_SAMPLES && cost.meanMs > SLOW_DETECT_MS) {
+        cost.samples = 0;
+        cost.meanMs = 0;
+        fallBackToLite();
       }
 
-      if (nextGate === 'aligned' && pose) {
-        if (alignedSinceRef.current === null) {
-          alignedSinceRef.current = now;
-          setEncodeError(null);
-        }
-
-        const elapsed = now - alignedSinceRef.current;
-        const progress = Math.min(1, elapsed / ALIGNED_HOLD_MS);
-        const holdBucket = Math.floor(progress * 30);
-        if (holdBucket !== lastHoldBucketRef.current) {
-          lastHoldBucketRef.current = holdBucket;
-          setHoldProgress(progress);
-        }
-
-        if (elapsed >= ALIGNED_HOLD_MS) {
-          capturingRef.current = true;
-          const photo = keepOnDeviceLook
-            ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight)
-            : null;
-          // Q9: a frame too dark or blurred to paint the avatar is retaken now, with the reason.
-          const quality = photo ? assessCanvasQuality(photo.frame) : 'ok';
-          if (quality !== 'ok') {
-            releaseOnDevicePhoto(photo);
-            capturingRef.current = false;
-            alignedSinceRef.current = null;
-            setHoldProgress(0);
-            setEncodeError(FRAME_QUALITY_COPY[quality]);
-            return;
+      let rawGate: PoseGateStatus = 'not_detected';
+      if (rawPose) {
+        const { landmarks: smoothed, motion } = smootherRef.current.push(rawPose);
+        const box = stage.getBoundingClientRect();
+        rawGate = evaluatePoseGate(smoothed, view, lastRawGateRef.current, {
+          mapping: {
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+            viewWidth: box.width,
+            viewHeight: box.height,
+            mirrored: true,
+          },
+          outline: outlineFrameRef.current ?? undefined,
+          motion,
+        });
+        if (view === 'side') {
+          const facing = sideFacingRawRight(smoothed);
+          // Raw-right is screen-left on the mirrored preview; the outline faces screen-right.
+          if (facing !== null) {
+            setSideGuideMirrored(facing);
           }
-          void encodeVideoFrameToWebp(video, pose)
-            .then((blob) => {
-              if (requireConfirm) {
-                setPending({
-                  blob,
-                  gate: 'aligned',
-                  previewUrl: URL.createObjectURL(blob),
-                  photo,
-                });
-                stopStream(streamRef.current);
-                streamRef.current = null;
-                return;
-              }
-
-              capturingRef.current = true;
-              alignedSinceRef.current = null;
-              setHoldProgress(1);
-              setFlash(true);
-              const delivery = window.setTimeout(() => {
-                pendingDeliveryRef.current = null;
-                onCaptured(blob, 'aligned', photo);
-              }, 420);
-              pendingDeliveryRef.current = { timer: delivery, photo };
-            })
-            .catch(() => {
-              releaseOnDevicePhoto(photo);
-              capturingRef.current = false;
-              alignedSinceRef.current = null;
-              setHoldProgress(0);
-              setEncodeError(
-                'Head crop failed. Stay aligned so we can remove your face before upload.',
-              );
-            });
         }
       } else {
-        alignedSinceRef.current = null;
+        smootherRef.current.reset();
+      }
+      lastRawGateRef.current = rawGate;
+
+      const previousShown = holdRef.current.shown;
+      const hold = stepGateHold(holdRef.current, rawGate, now);
+      holdRef.current = hold;
+      if (hold.shown !== previousShown) {
+        setGate(hold.shown);
+        if (hold.shown === 'aligned') {
+          setEncodeError(null);
+        }
+        voiceRef.current.say(spokenCopy(hold.shown, view), true);
+      } else if (hold.shown !== 'aligned') {
+        voiceRef.current.say(spokenCopy(hold.shown, view));
+      }
+
+      if (hold.shown !== 'aligned' || hold.alignedSince === null) {
         if (lastHoldBucketRef.current !== 0) {
           lastHoldBucketRef.current = 0;
           setHoldProgress(0);
         }
+        return;
       }
+
+      const elapsed = now - hold.alignedSince;
+      const progress = Math.min(1, elapsed / ALIGNED_HOLD_MS);
+      const holdBucket = Math.floor(progress * 30);
+      if (holdBucket !== lastHoldBucketRef.current) {
+        lastHoldBucketRef.current = holdBucket;
+        setHoldProgress(progress);
+      }
+
+      // The photo is taken only on a frame that passes on its own, never during a grace miss.
+      if (elapsed < ALIGNED_HOLD_MS || rawGate !== 'aligned' || !rawPose) {
+        return;
+      }
+
+      const pose = rawPose;
+      capturingRef.current = true;
+      const photo = keepOnDeviceLook
+        ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight)
+        : null;
+      // A frame too dark or blurred to draw the try-on on is retaken now, with the reason.
+      const quality = photo ? assessCanvasQuality(photo.frame) : 'ok';
+      if (quality !== 'ok') {
+        releaseOnDevicePhoto(photo);
+        capturingRef.current = false;
+        resetHold();
+        setEncodeError(FRAME_QUALITY_COPY[quality]);
+        voiceRef.current.say(FRAME_QUALITY_COPY[quality], true);
+        return;
+      }
+      void encodeVideoFrameToWebp(video, pose)
+        .then((blob) => {
+          setHoldProgress(1);
+          setFlash(true);
+          voiceRef.current.say('Got it. Check your photo.', true);
+          const delivery = window.setTimeout(() => {
+            pendingDeliveryRef.current = null;
+            setFlash(false);
+            setPending({
+              blob,
+              gate: 'aligned',
+              previewUrl: URL.createObjectURL(blob),
+              photo,
+            });
+          }, 420);
+          pendingDeliveryRef.current = { timer: delivery, photo };
+        })
+        .catch(() => {
+          releaseOnDevicePhoto(photo);
+          capturingRef.current = false;
+          resetHold();
+          setEncodeError(
+            'Head crop failed. Stay aligned so we can remove your face before upload.',
+          );
+        });
     };
 
     if (ready && !pending && viewportActive) {
@@ -363,26 +500,24 @@ export function CaptureViewport({
     }
 
     return () => cancelAnimationFrame(frameId);
-  }, [keepOnDeviceLook, landmarkerRef, onCaptured, pending, ready, requireConfirm, view, viewportActive]);
+  }, [fallBackToLite, keepOnDeviceLook, landmarkerRef, model, pending, ready, resetHold, view, viewportActive]);
 
   const title = view === 'front' ? 'Front photo' : 'Side photo';
   const hint =
     view === 'front'
-      ? 'Prop your phone up, step back until your whole body fits the outline, arms slightly open. We take the photo for you.'
+      ? 'Prop your phone up and step back until your head and feet meet the outline, arms slightly open. We take the photo for you.'
       : 'Turn sideways and hold both arms straight out in front of you at shoulder height. Hold still for a moment.';
 
-  const chooseLive = (): void => {
+  const retake = (): void => {
     if (pending) {
       discardPending(pending);
       setPending(null);
     }
     capturingRef.current = false;
-    alignedSinceRef.current = null;
-    setHoldProgress(0);
+    resetHold();
     setGalleryError(null);
     setEncodeError(null);
     setCameraError(null);
-    setGate('not_detected');
     setSource('live');
   };
 
@@ -416,7 +551,17 @@ export function CaptureViewport({
       });
       await image.decode();
       const pose = await detectStillLandmarks(landmarker, image);
-      const nextGate = pose ? evaluatePoseGate(pose, view) : 'not_detected';
+      const nextGate = pose
+        ? evaluatePoseGate(pose, view, undefined, {
+          mapping: {
+            videoWidth: image.naturalWidth,
+            videoHeight: image.naturalHeight,
+            viewWidth: image.naturalWidth,
+            viewHeight: image.naturalHeight,
+            mirrored: false,
+          },
+        })
+        : 'not_detected';
       setGate(nextGate);
       if (nextGate !== 'aligned' || !pose) {
         setGalleryError(
@@ -427,18 +572,12 @@ export function CaptureViewport({
       }
 
       const blob = await encodeImageFileToWebp(file, pose);
-      if (requireConfirm) {
-        discardPending(pending);
-        setPending({
-          blob,
-          gate: 'aligned',
-          previewUrl: URL.createObjectURL(blob),
-        });
-        return;
-      }
-
-      capturingRef.current = false;
-      onCaptured(blob, 'aligned');
+      discardPending(pending);
+      setPending({
+        blob,
+        gate: 'aligned',
+        previewUrl: URL.createObjectURL(blob),
+      });
     } catch {
       setGalleryError(
         'Could not verify that photo. Use a full-body shot so we can crop the head on this device.',
@@ -449,6 +588,8 @@ export function CaptureViewport({
       setGalleryBusy(false);
     }
   };
+
+  const aligned = gate === 'aligned';
 
   return (
     <div
@@ -468,7 +609,26 @@ export function CaptureViewport({
             </svg>
           </button>
           <h1 className="text-base font-semibold tracking-tight">{title}</h1>
-          <span className="h-10 w-10" />
+          {voiceAvailable ? (
+            <button
+              type="button"
+              onClick={toggleMuted}
+              aria-label={muted ? 'Turn spoken guidance on' : 'Mute spoken guidance'}
+              aria-pressed={muted}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-ash-line bg-ash-surface text-ash-ink transition hover:border-ash-subtle active:scale-95"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                {muted ? (
+                  <path d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                ) : (
+                  <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                )}
+              </svg>
+            </button>
+          ) : (
+            <span className="h-10 w-10" />
+          )}
         </div>
         <CaptureFlowMeter step={flowStep} />
         <p className="text-[13px] leading-relaxed text-ash-muted">{hint}</p>
@@ -478,14 +638,12 @@ export function CaptureViewport({
         </ul>
       </header>
 
-      <div className="relative mx-4 mb-2 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift">
+      <div
+        ref={stageRef}
+        className="relative mx-4 mb-2 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift"
+      >
         {pending ? (
-          <div
-            role="img"
-            aria-label={`${view} pose, head cropped`}
-            className="absolute inset-0 bg-contain bg-center bg-no-repeat"
-            style={{ backgroundImage: `url(${pending.previewUrl})` }}
-          />
+          <ReviewPhoto pending={pending} view={view} />
         ) : (
           <>
             <video
@@ -506,6 +664,7 @@ export function CaptureViewport({
               gate={gate}
               holdProgress={holdProgress}
               mirrored={view === 'side' && sideGuideMirrored}
+              onFrame={handleOutlineFrame}
             />
           </>
         )}
@@ -519,20 +678,20 @@ export function CaptureViewport({
         <div className="absolute inset-x-0 top-4 flex justify-center px-4">
           <span
             aria-live="polite"
-            className="inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-[13px] font-semibold text-ash-ink shadow-card"
+            className="inline-flex max-w-full items-center gap-2.5 rounded-full bg-white/92 px-5 py-2.5 text-[15px] font-semibold leading-snug text-ash-ink shadow-card"
           >
             <span
               aria-hidden="true"
               className={[
-                'h-2.5 w-2.5 rounded-full transition-colors',
-                gate === 'aligned' || pending ? 'bg-[#22C77A]' : 'bg-[#F0444F]',
+                'h-3 w-3 shrink-0 rounded-full transition-colors duration-300',
+                aligned || pending ? 'bg-[#22C77A]' : 'bg-[#F0444F]',
               ].join(' ')}
             />
             {pending
-              ? 'Pose verified'
+              ? 'Check your photo'
               : flash
                 ? 'Got it'
-                : gate === 'aligned'
+                : aligned
                   ? 'Perfect, hold still'
                   : gateStatusCopy(gate, view)}
           </span>
@@ -552,9 +711,8 @@ export function CaptureViewport({
           <p className="text-center text-[13px] text-ash-subtle">Loading pose guidance…</p>
         ) : pending ? (
           <p className="text-center text-[13px] text-ash-subtle">
-            {view === 'front'
-              ? 'Front pose passed. Tap Next for the side pose.'
-              : 'Side pose passed. We will build your avatar next.'}
+            Is your whole body in the picture, standing straight? This photo stays on your phone;
+            only a copy without your head is uploaded.
           </p>
         ) : (
           <p className="text-center text-[13px] text-ash-subtle">
@@ -566,7 +724,7 @@ export function CaptureViewport({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={chooseLive}
+              onClick={retake}
               className={[
                 'rounded-full border px-3 py-2 text-xs font-semibold transition',
                 source === 'live'
@@ -599,14 +757,22 @@ export function CaptureViewport({
           </div>
         ) : null}
 
-        {pending && requireConfirm ? (
-          <button
-            type="button"
-            className="ash-cta py-4"
-            onClick={() => onCaptured(pending.blob, pending.gate, pending.photo)}
-          >
-            Next
-          </button>
+        {pending ? (
+          <div className="grid grid-cols-[1fr_1.4fr] gap-3">
+            <button type="button" className="ash-cta-secondary py-4" onClick={retake}>
+              Retake
+            </button>
+            <button
+              type="button"
+              className="ash-cta py-4"
+              onClick={() => {
+                voiceRef.current.stop();
+                onCaptured(pending.blob, pending.gate, pending.photo);
+              }}
+            >
+              Use this photo
+            </button>
+          </div>
         ) : null}
       </div>
     </div>

@@ -58,6 +58,8 @@ export interface StorefrontGarment {
   /** Public product image. Not CAD rest-lengths. Null when print QA failed. */
   albedoUrl: string | null;
   printQaPassed: boolean;
+  /** At least one size has a sewn GarmentCode garment to drape; otherwise size only. */
+  has3d: boolean;
   sizeVariants: StorefrontSizeVariant[];
 }
 

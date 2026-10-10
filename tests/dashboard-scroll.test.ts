@@ -55,7 +55,7 @@ test('canvases and capture subscribe to viewport activity before scheduling fram
   assert.match(capture, /viewportActiveRef/);
   assert.match(capture, /videoRef\.current\?\.pause\(\)/);
   assert.match(capture, /POSE_DETECT_INTERVAL_MS/);
-  assert.match(capture, /lastGateRef/);
+  assert.match(capture, /lastRawGateRef/);
   assert.match(readSource('lib/graphics/viewport-activity.ts'), /let isIntersecting = false/);
 });
 

@@ -68,7 +68,12 @@ export type FitDrapeSource = 'cache' | 'xpbd' | 'unavailable';
  * show), or the drape failed a quality check (`drape_quality`). Null for every
  * other unavailable case.
  */
-export type FitDrapeUnavailableReason = 'too_small' | 'drape_quality';
+/**
+ * Why no drape came back: the size is too tight to close on the body, the
+ * drape failed its quality checks, the garment has no sewn 3D (size only), or
+ * the session's GPU time ran out.
+ */
+export type FitDrapeUnavailableReason = 'too_small' | 'drape_quality' | 'no_garment' | 'gpu_budget';
 
 export interface FitDrapeResolve {
   source: FitDrapeSource;

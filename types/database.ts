@@ -382,6 +382,7 @@ export type FitJobRow = {
   dispatched_at: string | null;
   gpu_started_at: string | null;
   completed_at: string | null;
+  try_on_outcome: Json | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
@@ -409,6 +410,7 @@ export type FitJobInsert = {
   dispatched_at?: string | null;
   gpu_started_at?: string | null;
   completed_at?: string | null;
+  try_on_outcome?: Json | null;
   error_message?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -436,6 +438,7 @@ export type FitJobUpdate = {
   dispatched_at?: string | null;
   gpu_started_at?: string | null;
   completed_at?: string | null;
+  try_on_outcome?: Json | null;
   error_message?: string | null;
   created_at?: string;
   updated_at?: string;

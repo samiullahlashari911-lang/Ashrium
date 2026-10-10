@@ -17,6 +17,7 @@ import { recommendFit } from '@/lib/fit/recommend';
 import {
   fetchFitDrapeResolve,
   fetchFitRecommendation,
+  reportTryOnShown,
   type FitRecommendResponse,
   type FitResolveResponse,
 } from '@/lib/widget/fit-client';
@@ -99,7 +100,15 @@ export function StorefrontViewport({
   const [paintFailure, setPaintFailure] = useState<PaintUnavailableReason | null>(null);
   const [captureAttempt, setCaptureAttempt] = useState(0);
   // The photo view confirms the drape is actually drawn before "Size M on you".
-  const [garmentShown, setGarmentShown] = useState<boolean | null>(null);
+  // Kept with the drape it answers for: a reset effect on a new drape ran after
+  // the photo view's own draw in the same commit and erased the answer.
+  const [shownReport, setShownReport] = useState<{ payload: string | null; shown: boolean } | null>(null);
+  const shownPayloadRef = useRef<string | null>(null);
+  const handleGarmentShown = useCallback((shown: boolean) => {
+    setShownReport({ payload: shownPayloadRef.current, shown });
+  }, []);
+  // "Try again" on the recommended size re-requests its drape.
+  const [drapeAttempt, setDrapeAttempt] = useState(0);
 
   const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
@@ -253,7 +262,7 @@ export function StorefrontViewport({
     return () => {
       cancelled = true;
     };
-  }, [activeSku, embedToken, result]);
+  }, [activeSku, drapeAttempt, embedToken, result]);
 
   const recommendedDrape = drapes[RECOMMENDED_DRAPE_KEY];
 
@@ -294,33 +303,40 @@ export function StorefrontViewport({
     ? recommendedDrape
     : drapes[activeSize];
 
-  // Shopper picked another size: drape that one on the same avatar.
+  // Shopper picked another size: drape that one on the same avatar. The drape
+  // is kept by size; it is dropped only if the fitting itself changed (another
+  // job or product). Depending on `drapes` here cancelled the request with its
+  // own "loading" write, so a picked size never landed.
+  const drapesRef = useRef(drapes);
+  drapesRef.current = drapes;
+  const fittingKey = `${result?.session.fitJobId ?? ''}:${activeSku}`;
+  const fittingKeyRef = useRef(fittingKey);
+  fittingKeyRef.current = fittingKey;
+  const [sizeDrapeAttempt, setSizeDrapeAttempt] = useState(0);
   useEffect(() => {
-    if (!result?.session.fitJobId || !activeSize || showingRecommended || drapes[activeSize]) {
+    const jobId = result?.session.fitJobId;
+    if (!jobId || !activeSize || showingRecommended || drapesRef.current[activeSize]) {
       return;
     }
-    let cancelled = false;
+    const requestedFor = `${jobId}:${activeSku}`;
     setDrapes((current) => ({ ...current, [activeSize]: 'loading' }));
     void fetchFitDrapeResolve(embedToken, {
-      jobId: result.session.fitJobId,
+      jobId,
       sku: activeSku,
       allowXpbd: true,
       sizeCode: activeSize,
     })
       .then((drape) => {
-        if (!cancelled) {
+        if (fittingKeyRef.current === requestedFor) {
           setDrapes((current) => ({ ...current, [activeSize]: drape }));
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (fittingKeyRef.current === requestedFor) {
           setDrapes((current) => ({ ...current, [activeSize]: 'failed' }));
         }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSize, activeSku, drapes, embedToken, result, showingRecommended]);
+  }, [activeSize, activeSku, embedToken, result, showingRecommended, sizeDrapeAttempt]);
 
   useEffect(() => {
     if (!recommendation?.gate.highConfidence) {
@@ -357,11 +373,19 @@ export function StorefrontViewport({
     ? activeDrapeEntry.payloadBase64
     : null;
   const heatmapAvailable = drapePayloadBase64 !== null;
-  useEffect(() => {
-    setGarmentShown(null);
-  }, [drapePayloadBase64]);
+  shownPayloadRef.current = drapePayloadBase64;
+  const garmentShown = shownReport && shownReport.payload === drapePayloadBase64 ? shownReport.shown : null;
   const drawn = garmentShown === true;
   const draping = activeDrapeEntry === 'loading';
+
+  // The job's outcome log: was this size actually drawn on the shopper's photo?
+  const fitJobId = result?.session.fitJobId ?? null;
+  useEffect(() => {
+    if (!fitJobId || !activeSku || garmentShown === null || !drapePayloadBase64) {
+      return;
+    }
+    void reportTryOnShown(embedToken, { jobId: fitJobId, sku: activeSku, sizeCode: activeSize, shown: garmentShown });
+  }, [activeSize, activeSku, drapePayloadBase64, embedToken, fitJobId, garmentShown]);
 
   const canvasGarment = recommendation
     ? {
@@ -384,6 +408,37 @@ export function StorefrontViewport({
   const unavailableReason = typeof activeDrapeEntry === 'object' ? activeDrapeEntry.unavailableReason : null;
   // One clean line instead of a reason list: this size (or every size) is too small.
   const tooTight = unavailableReason === 'too_small' || recommendation?.size.fits === false;
+
+  // Q14: when no garment is on the photo, one clear card says why, with one next step.
+  const drapeSettledForSize = activeDrapeEntry !== undefined && activeDrapeEntry !== 'loading';
+  const stillDrawing = drapePayloadBase64 !== null && garmentShown === null;
+  const sizeIndex = activeSize ? sizeOptions.indexOf(activeSize) : -1;
+  const nextLargerSize = sizeIndex >= 0 ? sizeOptions[sizeIndex + 1] ?? null : null;
+  const missingGarment: 'size_only' | 'no_fit' | 'too_tight' | 'session_over' | 'not_drawn' | null =
+    !revealed || draping || drawn || stillDrawing || (!drapeSettledForSize && !holdExpired)
+      ? null
+      : !printQaPassed || !activeGarment?.has3d || unavailableReason === 'no_garment'
+        ? 'size_only'
+        : recommendation?.size.fits === false
+          ? 'no_fit'
+          : unavailableReason === 'too_small'
+            ? 'too_tight'
+            // The session's 2-minute GPU window has closed: a retry would fail the same way.
+            : unavailableReason === 'gpu_budget'
+              ? 'session_over'
+              : 'not_drawn';
+  const retryDrape = (): void => {
+    if (showingRecommended || activeSize === null) {
+      setDrapeAttempt((attempt) => attempt + 1);
+      return;
+    }
+    setDrapes((current) => {
+      const next = { ...current };
+      delete next[activeSize];
+      return next;
+    });
+    setSizeDrapeAttempt((attempt) => attempt + 1);
+  };
   const statusChip = !printQaPassed
     ? 'Garment preview is off for this product'
     : draping
@@ -425,7 +480,7 @@ export function StorefrontViewport({
               onPrintQaFail={() => setClientPrintQaPassed(false)}
               onFitSummary={setFitLine}
               onPaintUnavailable={setPaintFailure}
-              onGarmentShown={setGarmentShown}
+              onGarmentShown={handleGarmentShown}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
             />
             <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
@@ -433,7 +488,7 @@ export function StorefrontViewport({
                 markClassName="h-5 w-5 shrink-0 text-ash-accent"
                 wordClassName="text-xs font-semibold tracking-[0.02em] text-ash-ink"
               />
-              <span
+              {missingGarment ? null : <span
                 key={statusChip}
                 aria-live="polite"
                 className="ash-rise inline-flex max-w-[60%] items-center gap-2 rounded-full bg-white/85 px-3 py-1.5 text-[11px] font-semibold text-ash-ink shadow-card"
@@ -442,8 +497,55 @@ export function StorefrontViewport({
                   <span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-ash-accent/30 border-t-ash-accent" />
                 ) : null}
                 <span className="truncate">{statusChip}</span>
-              </span>
+              </span>}
             </div>
+            {missingGarment ? (
+              <div
+                role="status"
+                className="ash-rise absolute inset-x-3 bottom-3 flex flex-col gap-3 rounded-2xl bg-white/95 p-4 shadow-lift md:inset-x-6 md:bottom-6"
+              >
+                <div className="flex flex-col gap-1">
+                  <p className="text-[15px] font-semibold leading-snug text-ash-ink">
+                    {missingGarment === 'size_only'
+                      ? 'This item is size-only for now'
+                      : missingGarment === 'no_fit'
+                        ? 'None of this item’s sizes fit you'
+                        : missingGarment === 'too_tight'
+                          ? `Size ${activeSize ?? ''} is too tight to show on you`
+                          : missingGarment === 'session_over'
+                            ? `Size ${activeSize ?? ''} can’t be shown now`
+                            : `We couldn’t draw size ${activeSize ?? ''} on you`}
+                  </p>
+                  <p className="text-[13px] leading-relaxed text-ash-muted">
+                    {missingGarment === 'size_only'
+                      ? 'We can’t show it on you yet. Your size is measured from your body and this item’s size chart.'
+                      : missingGarment === 'not_drawn'
+                        ? 'Your size is still measured from your body. Try once more.'
+                        : missingGarment === 'session_over'
+                          ? 'Your fitting session has ended. Retake photos to see another size on you.'
+                        : missingGarment === 'too_tight' && nextLargerSize
+                          ? 'A bigger size may close around you.'
+                          : 'Close this window to pick another item.'}
+                  </p>
+                </div>
+                {missingGarment === 'too_tight' && nextLargerSize ? (
+                  <button
+                    type="button"
+                    className="ash-cta py-3"
+                    onClick={() => {
+                      setSelectedSize(nextLargerSize);
+                      setAddedSize(null);
+                    }}
+                  >
+                    Try size {nextLargerSize}
+                  </button>
+                ) : missingGarment === 'not_drawn' ? (
+                  <button type="button" className="ash-cta py-3" onClick={retryDrape}>
+                    Try again
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <aside className="ash-card flex flex-col gap-5 p-5 md:self-start">
@@ -648,6 +750,7 @@ export function StorefrontViewport({
             embedToken={embedToken}
             allowGallery={allowGallery}
             keepOnDeviceLook
+            sizeOnly={activeGarment ? !activeGarment.has3d : false}
             onAvatarReady={handleAvatarReady}
             reveal={result ? revealStage : null}
             dressSkipped={dressSkipped}

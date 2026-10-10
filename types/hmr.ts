@@ -153,6 +153,9 @@ export type PoseGateStatus =
   | 'raise_wrists'
   | 'off_center'
   | 'show_head'
+  | 'fit_outline'
+  | 'stand_straight'
+  | 'hold_still'
   | 'arms_closed'
   | 'arms_too_high'
   | 'not_detected';

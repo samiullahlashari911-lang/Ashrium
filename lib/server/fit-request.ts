@@ -69,3 +69,33 @@ export function parseResolveRequest(value: unknown): ResolveRequest | null {
     ...(typeof value.sizeCode === 'string' ? { sizeCode: value.sizeCode.trim() } : {}),
   };
 }
+
+export interface OutcomeRequest {
+  jobId: string;
+  sku: string;
+  sizeCode: string | null;
+  shown: boolean;
+}
+
+export function parseOutcomeRequest(value: unknown): OutcomeRequest | null {
+  if (
+    !isRecord(value)
+    || !isFitJobId(value.jobId)
+    || typeof value.sku !== 'string'
+    || value.sku.trim().length === 0
+    || typeof value.shown !== 'boolean'
+    || (
+      value.sizeCode !== null
+      && (typeof value.sizeCode !== 'string' || value.sizeCode.length > SIZE_CODE_MAX_LENGTH)
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    jobId: value.jobId,
+    sku: value.sku.trim(),
+    sizeCode: typeof value.sizeCode === 'string' ? value.sizeCode.trim() : null,
+    shown: value.shown,
+  };
+}

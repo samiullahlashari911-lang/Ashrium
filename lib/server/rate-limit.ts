@@ -34,6 +34,7 @@ export const RATE_LIMITS = {
   hmrAbort: 30,
   fitRecommend: 60,
   fitResolve: 20,
+  fitOutcome: 40,
   catalogSync: 10,
   marketingLead: 8,
 } as const;

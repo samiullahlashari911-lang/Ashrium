@@ -12,6 +12,7 @@ import {
 } from '@/lib/graphics/meshopt-delta';
 import { runDrapePrediction, type DrapePrediction } from '@/lib/ml/gpu';
 import { DRAPE_MIN_REMAINING_MS, gpuHoldMsUntilDeadline } from '@/lib/ml/session-gpu';
+import { recordTryOnOutcome } from '@/lib/server/try-on-outcome';
 import {
   holdGpuForFitJob,
   releaseGpuHoldForFitJob,
@@ -376,6 +377,37 @@ async function runNewtonDrape(options: {
  * back unavailable with the reason. JS XPBD is not on this path.
  */
 export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitDrapeResolve> {
+  const trace: DrapeTrace = { size: null };
+  try {
+    const result = await resolveFitDrapeFor(input, trace);
+    await recordTryOnOutcome(input.jobId, input.tenantId, {
+      kind: 'drape',
+      sku: input.sku,
+      size: trace.size,
+      drape: result.source === 'xpbd'
+        ? 'newton'
+        : result.source === 'cache'
+          ? 'cache'
+          : result.unavailableReason ?? 'unavailable',
+    });
+    return result;
+  } catch (error) {
+    await recordTryOnOutcome(input.jobId, input.tenantId, {
+      kind: 'drape',
+      sku: input.sku,
+      size: trace.size,
+      drape: 'error',
+    });
+    throw error;
+  }
+}
+
+/** The size being draped, once known, for the job's outcome log. */
+interface DrapeTrace {
+  size: string | null;
+}
+
+async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace): Promise<FitDrapeResolve> {
   const allowNewton = input.allowXpbd ?? true;
   const { data: job, error: jobError } = await input.supabase
     .from('fit_jobs')
@@ -420,6 +452,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
     return unavailable(mhr ? MHR_TOPOLOGY_VERSION : ANNY_TOPOLOGY_VERSION);
   }
   const size = requested ? { variantId: requested.id } : recommended;
+  trace.size = requested ? requested.sizeCode : recommended.sizeCode;
   if (!size.variantId) {
     return unavailable(mhr ? MHR_TOPOLOGY_VERSION : ANNY_TOPOLOGY_VERSION);
   }
@@ -455,13 +488,13 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
       typeof job.gpu_hold_until === 'string' ? job.gpu_hold_until : null,
     );
     if (!allowNewton || remainingMs < DRAPE_MIN_REMAINING_MS) {
-      return unavailable(MHR_TOPOLOGY_VERSION);
+      return unavailable(MHR_TOPOLOGY_VERSION, null, allowNewton ? 'gpu_budget' : null);
     }
 
     const variantRow = (variants ?? []).find((row) => row.id === size.variantId);
     const sewn = await loadSewnGarment(input.supabase, variantRow?.rest_length_path ?? null);
     if (!sewn) {
-      return unavailable(MHR_TOPOLOGY_VERSION);
+      return unavailable(MHR_TOPOLOGY_VERSION, null, 'no_garment');
     }
 
     const drape = await runNewtonDrape({

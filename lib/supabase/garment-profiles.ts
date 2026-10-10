@@ -268,6 +268,7 @@ export function toStorefrontGarment(
     approximateFit: row.approximate_fit || !printQaPassed,
     albedoUrl: printQaPassed ? row.cad_pattern_url : null,
     printQaPassed,
+    has3d: printQaPassed && variants.some((variant) => Boolean(variant.rest_length_path)),
     sizeVariants: variants.map(toStorefrontSizeVariant),
   };
 }

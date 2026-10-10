@@ -4,6 +4,7 @@ import {
   type FitJobPublicStatus,
   type FitJobStatusPayload,
 } from '@/types/hmr';
+import type { FitDrapeUnavailableReason } from '@/types/graphics';
 
 export interface DualUploadTargets {
   jobId: string;
@@ -453,8 +454,8 @@ export interface FitResolveResponse {
   topologyVersion: string;
   meanStrain: number | null;
   payloadBase64: string | null;
-  /** Why the requested size has no drape (too small for this body, failed a quality check). */
-  unavailableReason: 'too_small' | 'drape_quality' | null;
+  /** Why the requested size has no drape: too tight, failed a quality check, no 3D, out of GPU time. */
+  unavailableReason: FitDrapeUnavailableReason | null;
 }
 
 function isFitResolveResponse(value: unknown): value is FitResolveResponse {
@@ -471,8 +472,30 @@ function isFitResolveResponse(value: unknown): value is FitResolveResponse {
     && (value.payloadBase64 === null || typeof value.payloadBase64 === 'string')
     && (value.unavailableReason === null
       || value.unavailableReason === 'too_small'
-      || value.unavailableReason === 'drape_quality')
+      || value.unavailableReason === 'drape_quality'
+      || value.unavailableReason === 'no_garment'
+      || value.unavailableReason === 'gpu_budget')
   );
+}
+
+/**
+ * Tells the server whether this size was actually drawn on the shopper's
+ * photo, for the job's outcome log. Best-effort: never throws.
+ */
+export async function reportTryOnShown(
+  embedToken: string | null,
+  input: { jobId: string; sku: string; sizeCode: string | null; shown: boolean },
+): Promise<void> {
+  try {
+    await fetch('/api/v1/fit/outcome', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: authHeaders(embedToken, true),
+      body: JSON.stringify(input),
+    });
+  } catch {
+    // Telemetry only.
+  }
 }
 
 export async function fetchFitDrapeResolve(

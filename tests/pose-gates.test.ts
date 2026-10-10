@@ -3,253 +3,285 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { evaluatePoseGate, gateStatusCopy, type PoseLandmarkSample } from '@/lib/widget/pose-gates';
+import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
+import { outlineBodyBounds, outlineFrameInView } from '@/lib/widget/outline-frame';
+import {
+  estimateCrownY,
+  estimateSoleY,
+  evaluatePoseGate,
+  gateStatusCopy,
+  toView,
+  type OutlineFrame,
+  type PoseGateContext,
+  type PoseLandmarkSample,
+} from '@/lib/widget/pose-gates';
+import {
+  ALIGNED_GRACE_MS,
+  INITIAL_GATE_HOLD,
+  PoseSmoother,
+  STATUS_SETTLE_MS,
+  stepGateHold,
+  type GateHoldState,
+} from '@/lib/widget/pose-smoothing';
+import type { PoseGateStatus } from '@/types/hmr';
 
-function landmarks(overrides: Record<number, Partial<PoseLandmarkSample>>): PoseLandmarkSample[] {
-  const points: PoseLandmarkSample[] = Array.from({ length: 33 }, () => ({
-    x: 0.5,
-    y: 0.5,
-    visibility: 1,
+type Fixture = [number, number, number[]];
+const fixtures = JSON.parse(
+  readFileSync(path.join(process.cwd(), 'tests/fixtures/pose-landmarks.json'), 'utf8'),
+) as Record<string, Fixture>;
+
+/** Real MediaPipe landmarks from the model photos, with that photo as the view. */
+function real(key: string): { landmarks: PoseLandmarkSample[]; context: PoseGateContext } {
+  const [width, height, flat] = fixtures[key];
+  const landmarks = Array.from({ length: 33 }, (_, index) => ({
+    x: flat[index * 3],
+    y: flat[index * 3 + 1],
+    visibility: flat[index * 3 + 2],
   }));
-
-  Object.entries(overrides).forEach(([index, sample]) => {
-    points[Number(index)] = {
-      x: sample.x ?? 0.5,
-      y: sample.y ?? 0.5,
-      visibility: sample.visibility ?? 1,
-    };
-  });
-
-  return points;
+  return {
+    landmarks,
+    context: {
+      mapping: { videoWidth: width, videoHeight: height, viewWidth: width, viewHeight: height, mirrored: false },
+    },
+  };
 }
 
-const FRONT_ALIGNED = landmarks({
-  11: { x: 0.38, y: 0.28 },
-  12: { x: 0.62, y: 0.28 },
-  15: { x: 0.28, y: 0.48 },
-  16: { x: 0.72, y: 0.48 },
-  23: { x: 0.42, y: 0.52 },
-  24: { x: 0.58, y: 0.52 },
-  27: { x: 0.43, y: 0.88 },
-  28: { x: 0.57, y: 0.88 },
+/** The outline drawn exactly around this body (crown, soles, torso centre). */
+function ownOutline(landmarks: PoseLandmarkSample[]): OutlineFrame {
+  const crown = estimateCrownY(landmarks);
+  const sole = estimateSoleY(landmarks);
+  assert.ok(crown !== null && sole !== null);
+  return {
+    top: crown,
+    bottom: sole,
+    centerX: (landmarks[11].x + landmarks[12].x + landmarks[23].x + landmarks[24].x) / 4,
+  };
+}
+
+const SQUARE: PoseGateContext['mapping'] = {
+  videoWidth: 1000,
+  videoHeight: 1000,
+  viewWidth: 1000,
+  viewHeight: 1000,
+  mirrored: false,
+};
+/** Crown 0.085 and soles 0.94 of the synthetic body below. */
+const OUTLINE: OutlineFrame = { top: 0.085, bottom: 0.94, centerX: 0.5 };
+
+/** A synthetic upright front A-pose, square frame, head and feet in view. */
+function standing(overrides: Record<number, Partial<PoseLandmarkSample>> = {}): PoseLandmarkSample[] {
+  const points: Record<number, [number, number]> = {
+    0: [0.5, 0.165],
+    1: [0.51, 0.15], 2: [0.515, 0.15], 3: [0.52, 0.15],
+    4: [0.49, 0.15], 5: [0.485, 0.15], 6: [0.48, 0.15],
+    7: [0.53, 0.155], 8: [0.47, 0.155], 9: [0.51, 0.18], 10: [0.49, 0.18],
+    11: [0.6, 0.25], 12: [0.4, 0.25],
+    13: [0.66, 0.38], 14: [0.34, 0.38],
+    15: [0.72, 0.5], 16: [0.28, 0.5],
+    17: [0.73, 0.52], 18: [0.27, 0.52], 19: [0.73, 0.52], 20: [0.27, 0.52], 21: [0.72, 0.51], 22: [0.28, 0.51],
+    23: [0.56, 0.52], 24: [0.44, 0.52],
+    25: [0.56, 0.72], 26: [0.44, 0.72],
+    27: [0.56, 0.9], 28: [0.44, 0.9],
+    29: [0.56, 0.92], 30: [0.44, 0.92],
+    31: [0.57, 0.94], 32: [0.43, 0.94],
+  };
+  return Array.from({ length: 33 }, (_, index) => ({
+    x: overrides[index]?.x ?? points[index][0],
+    y: overrides[index]?.y ?? points[index][1],
+    visibility: overrides[index]?.visibility ?? 1,
+  }));
+}
+
+function shift(landmarks: PoseLandmarkSample[], dx: number, dy: number): PoseLandmarkSample[] {
+  return landmarks.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
+}
+
+/** Scale about the synthetic body's centre (distance from the camera). */
+function scale(landmarks: PoseLandmarkSample[], factor: number): PoseLandmarkSample[] {
+  return landmarks.map((p) => ({ ...p, x: 0.5 + (p.x - 0.5) * factor, y: 0.5125 + (p.y - 0.5125) * factor }));
+}
+
+const front = (
+  landmarks: PoseLandmarkSample[],
+  extra: Partial<PoseGateContext> = {},
+  previous?: PoseGateStatus,
+): PoseGateStatus => evaluatePoseGate(landmarks, 'front', previous, { mapping: SQUARE, outline: OUTLINE, ...extra });
+
+test('real model photos pass when the body fills its outline', () => {
+  for (const key of ['model-front-whole', 'model-side-whole']) {
+    const { landmarks, context } = real(key);
+    const view = key.includes('side') ? 'side' : 'front';
+    assert.equal(evaluatePoseGate(landmarks, view, undefined, { ...context, outline: ownOutline(landmarks) }), 'aligned', key);
+    assert.equal(evaluatePoseGate(landmarks, view, undefined, context), 'aligned', `${key} gallery band`);
+  }
 });
 
-const SIDE_ALIGNED = landmarks({
-  11: { x: 0.49, y: 0.28 },
-  12: { x: 0.51, y: 0.28 },
-  15: { x: 0.49, y: 0.22 },
-  16: { x: 0.51, y: 0.22 },
-  23: { x: 0.49, y: 0.52 },
-  24: { x: 0.51, y: 0.52 },
-  27: { x: 0.49, y: 0.88 },
-  28: { x: 0.51, y: 0.88 },
+test('the estimated crown and soles sit on the real silhouette (male mask: 0.108 / 0.955)', () => {
+  const { landmarks } = real('model-front-whole');
+  assert.ok(Math.abs((estimateCrownY(landmarks) ?? 0) - 0.108) < 0.02);
+  assert.ok(Math.abs((estimateSoleY(landmarks) ?? 0) - 0.955) < 0.02);
 });
 
-test('a head out of view blocks capture before the hold starts', () => {
-  // Face landmarks above the frame: the on-device head crop would fail closed.
-  const headless = landmarks({
-    ...Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => [i, { x: 0.5, y: 0.1, visibility: 0.1 }])),
-    11: { x: 0.38, y: 0.28 },
-    12: { x: 0.62, y: 0.28 },
-    15: { x: 0.28, y: 0.48 },
-    16: { x: 0.72, y: 0.48 },
-    23: { x: 0.42, y: 0.52 },
-    24: { x: 0.58, y: 0.52 },
-    27: { x: 0.43, y: 0.88 },
-    28: { x: 0.57, y: 0.88 },
+test('a head cut off by the frame is never green, though the model still reports the eyes', () => {
+  for (const key of ['model-front-headless', 'model-side-headless']) {
+    const { landmarks, context } = real(key);
+    const view = key.includes('side') ? 'side' : 'front';
+    // The eyes are in frame with full confidence: the crown is what is missing.
+    assert.ok((landmarks[2].visibility ?? 0) > 0.9 && landmarks[2].y > 0);
+    assert.ok((estimateCrownY(landmarks) ?? 1) < 0);
+    assert.equal(evaluatePoseGate(landmarks, view, undefined, { ...context, outline: ownOutline(landmarks) }), 'show_head', key);
+    assert.notEqual(evaluatePoseGate(landmarks, view, undefined, context), 'aligned', key);
+  }
+  assert.match(gateStatusCopy('show_head', 'front'), /whole head/i);
+});
+
+test('feet cut off by the frame are never green', () => {
+  for (const key of ['model-front-feetless', 'model-side-feetless']) {
+    const { landmarks, context } = real(key);
+    const view = key.includes('side') ? 'side' : 'front';
+    assert.equal(evaluatePoseGate(landmarks, view, undefined, { ...context, outline: ownOutline(landmarks) }), 'not_detected', key);
+    assert.notEqual(evaluatePoseGate(landmarks, view, undefined, context), 'aligned', key);
+  }
+});
+
+test('green only when the body matches the drawn outline', () => {
+  assert.equal(front(standing()), 'aligned');
+  // A few centimetres off is still green.
+  assert.equal(front(shift(standing(), 0.02, 0.02)), 'aligned');
+  assert.equal(front(scale(standing(), 1.15)), 'too_close');
+  assert.equal(front(scale(standing(), 0.85)), 'too_far');
+  // Right size, but the phone points too high or low.
+  assert.equal(front(shift(standing(), 0, -0.07)), 'fit_outline');
+  assert.equal(front(shift(standing(), 0.1, 0)), 'off_center');
+  assert.match(gateStatusCopy('fit_outline', 'front'), /outline/);
+});
+
+test('a lock holds through small drift that would not start one', () => {
+  const drifted = shift(standing(), 0, -0.07);
+  assert.equal(front(drifted), 'fit_outline');
+  assert.equal(front(drifted, {}, 'aligned'), 'aligned');
+});
+
+test('bending, leaning and squatting are never green', () => {
+  // Bending toward the camera: shoulders drop toward the hips.
+  const bending = standing({
+    0: { y: 0.4 }, 1: { y: 0.39 }, 2: { y: 0.39 }, 3: { y: 0.39 }, 4: { y: 0.39 }, 5: { y: 0.39 }, 6: { y: 0.39 },
+    7: { y: 0.39 }, 8: { y: 0.39 }, 9: { y: 0.41 }, 10: { y: 0.41 },
+    11: { y: 0.44 }, 12: { y: 0.44 }, 15: { y: 0.7 }, 16: { y: 0.7 },
   });
-  assert.equal(evaluatePoseGate(headless, 'front'), 'show_head');
-  assert.match(gateStatusCopy('show_head', 'front'), /head/i);
+  assert.equal(front(bending), 'stand_straight');
+
+  const leaning = standing({ 11: { x: 0.74 }, 12: { x: 0.54 } });
+  assert.equal(front(leaning), 'stand_straight');
+
+  const squatting = standing({ 23: { y: 0.66 }, 24: { y: 0.66 }, 25: { x: 0.66, y: 0.74 }, 26: { x: 0.34, y: 0.74 } });
+  assert.equal(front(squatting), 'stand_straight');
+  assert.match(gateStatusCopy('stand_straight', 'front'), /straight/i);
 });
 
-test('front gate names the arm or position problem instead of a generic miss', () => {
-  const closed = [...FRONT_ALIGNED];
-  closed[15] = { x: 0.43, y: 0.5, visibility: 1 };
-  closed[16] = { x: 0.57, y: 0.5, visibility: 1 };
-  assert.equal(evaluatePoseGate(closed, 'front'), 'arms_closed');
-
-  const raised = [...FRONT_ALIGNED];
-  raised[15] = { x: 0.28, y: 0.1, visibility: 1 };
-  raised[16] = { x: 0.72, y: 0.1, visibility: 1 };
-  assert.equal(evaluatePoseGate(raised, 'front'), 'arms_too_high');
-
-  const shifted = FRONT_ALIGNED.map((point) => ({ ...point, x: point.x + 0.3 }));
-  assert.equal(evaluatePoseGate(shifted, 'front'), 'off_center');
+test('moving during the hold is not green', () => {
+  assert.equal(front(standing(), { motion: 0.03 }), 'hold_still');
+  assert.equal(front(standing(), { motion: 0.015 }), 'hold_still');
+  assert.equal(front(standing(), { motion: 0.015 }, 'aligned'), 'aligned');
+  assert.equal(front(standing(), { motion: 0.002 }), 'aligned');
 });
 
-test('front A-pose is aligned when the body fills the silhouette', () => {
-  assert.equal(evaluatePoseGate(FRONT_ALIGNED, 'front'), 'aligned');
-  assert.match(gateStatusCopy('aligned', 'front'), /Hold still/);
+test('front arms: closed or raised are named', () => {
+  assert.equal(front(standing({ 15: { x: 0.55 }, 16: { x: 0.45 } })), 'arms_closed');
+  assert.equal(front(standing({ 15: { y: 0.1 }, 16: { y: 0.1 } })), 'arms_too_high');
 });
 
-test('side profile is aligned when shoulders are stacked', () => {
-  assert.equal(evaluatePoseGate(SIDE_ALIGNED, 'side'), 'aligned');
-  assert.match(gateStatusCopy('turn_required', 'side'), /side/i);
+test('facing: front needs square shoulders, side needs a profile', () => {
+  assert.equal(front(standing({ 11: { x: 0.52 }, 12: { x: 0.48 } })), 'turn_required');
+  assert.equal(evaluatePoseGate(standing(), 'side', undefined, { mapping: SQUARE, outline: OUTLINE }), 'turn_required');
 });
 
-test('missing landmarks are not_detected', () => {
-  const hiddenWrists = landmarks({
-    11: { x: 0.38, y: 0.28 },
-    12: { x: 0.62, y: 0.28 },
-    15: { x: 0.28, y: 0.48, visibility: 0.1 },
-    16: { x: 0.72, y: 0.48, visibility: 0.1 },
-    23: { x: 0.42, y: 0.52 },
-    24: { x: 0.58, y: 0.52 },
-    27: { x: 0.43, y: 0.88 },
-    28: { x: 0.57, y: 0.88 },
-  });
-
-  assert.equal(evaluatePoseGate(hiddenWrists, 'front'), 'not_detected');
+test('side needs the wrists at or above the shoulders', () => {
+  const { landmarks, context } = real('model-side-whole');
+  const outline = ownOutline(landmarks);
+  const dropped = landmarks.map((p, index) => (index === 15 || index === 16 ? { ...p, y: 0.5 } : p));
+  assert.equal(evaluatePoseGate(dropped, 'side', undefined, { ...context, outline }), 'raise_wrists');
+  assert.match(gateStatusCopy('raise_wrists', 'side'), /shoulder height/i);
 });
 
-test('too close when the body exceeds the frame', () => {
-  const close = landmarks({
-    11: { x: 0.38, y: 0.01 },
-    12: { x: 0.62, y: 0.01 },
-    15: { x: 0.28, y: 0.4 },
-    16: { x: 0.72, y: 0.4 },
-    23: { x: 0.42, y: 0.5 },
-    24: { x: 0.58, y: 0.5 },
-    27: { x: 0.43, y: 0.98 },
-    28: { x: 0.57, y: 0.98 },
-  });
-
-  assert.equal(evaluatePoseGate(close, 'front'), 'too_close');
+test('missing wrists or ankles are not_detected', () => {
+  assert.equal(front(standing({ 15: { visibility: 0.1 }, 16: { visibility: 0.1 } })), 'not_detected');
+  assert.equal(
+    front(standing({ 27: { visibility: 0.1 }, 28: { visibility: 0.1 }, 29: { visibility: 0.1 }, 30: { visibility: 0.1 }, 31: { visibility: 0.1 }, 32: { visibility: 0.1 } })),
+    'not_detected',
+  );
 });
 
-test('too far when the body is small in frame', () => {
-  const far = landmarks({
-    11: { x: 0.44, y: 0.4 },
-    12: { x: 0.56, y: 0.4 },
-    15: { x: 0.38, y: 0.5 },
-    16: { x: 0.62, y: 0.5 },
-    23: { x: 0.46, y: 0.55 },
-    24: { x: 0.54, y: 0.55 },
-    27: { x: 0.47, y: 0.7 },
-    28: { x: 0.53, y: 0.7 },
-  });
-
-  assert.equal(evaluatePoseGate(far, 'front'), 'too_far');
+test('raw camera points map into the cropped, mirrored preview', () => {
+  // A 3:4 frame drawn object-cover into a taller 0.6 view: the sides are cropped.
+  const mapping = { videoWidth: 1440, videoHeight: 1920, viewWidth: 600, viewHeight: 1000, mirrored: true };
+  const centre = toView({ x: 0.5, y: 0.5 }, mapping);
+  assert.ok(Math.abs(centre.x - 0.5) < 1e-9 && Math.abs(centre.y - 0.5) < 1e-9);
+  const left = toView({ x: 0.3, y: 0 }, mapping);
+  // Mirrored: raw-left lands right of centre; the 0.75 frame is wider than the view.
+  assert.ok(left.x > 0.5 && Math.abs(left.x - (0.5 + 0.2 * (1440 * (1000 / 1920)) / 600)) < 1e-9);
+  assert.ok(Math.abs(left.y) < 1e-9);
 });
 
-test('front turn_required when shoulders are too narrow', () => {
-  const turned = landmarks({
-    11: { x: 0.48, y: 0.28 },
-    12: { x: 0.52, y: 0.28 },
-    15: { x: 0.28, y: 0.48 },
-    16: { x: 0.72, y: 0.48 },
-    23: { x: 0.42, y: 0.52 },
-    24: { x: 0.58, y: 0.52 },
-    27: { x: 0.43, y: 0.88 },
-    28: { x: 0.57, y: 0.88 },
-  });
-
-  assert.equal(evaluatePoseGate(turned, 'front'), 'turn_required');
+test('the outline frame comes from the drawn outline itself', () => {
+  const bounds = outlineBodyBounds(CAPTURE_OUTLINES.male.front);
+  assert.ok(bounds.top > 0 && bounds.top < 80 && bounds.bottom > 920 && bounds.bottom <= 1000);
+  // The overlay lays the SVG out at 86% height inside a 6% padded box.
+  const frame = outlineFrameInView(
+    bounds,
+    { left: 73.6, top: 59.2, width: 552.8, height: 881.6 },
+    { left: 0, top: 0, width: 700, height: 1000 },
+  );
+  assert.ok(frame);
+  assert.ok(Math.abs(frame.centerX - 0.5) < 1e-9);
+  assert.ok(frame.top > 0.059 && frame.bottom < 0.941 && frame.bottom - frame.top > 0.8);
 });
 
-test('side turn_required when the shopper still faces the camera', () => {
-  assert.equal(evaluatePoseGate(FRONT_ALIGNED, 'side'), 'turn_required');
+function run(steps: Array<[PoseGateStatus, number]>): GateHoldState {
+  return steps.reduce((state, [raw, at]) => stepGateHold(state, raw, at), INITIAL_GATE_HOLD);
+}
+
+test('a one-frame wobble does not restart the 1.2 s hold', () => {
+  const held = run([['aligned', 0], ['too_far', 66], ['aligned', 132]]);
+  assert.equal(held.shown, 'aligned');
+  assert.equal(held.alignedSince, 0);
+
+  const wobbling = run([['aligned', 0], ['too_far', 66], ['fit_outline', 132], ['too_far', 198]]);
+  assert.equal(wobbling.shown, 'aligned');
+
+  const left = run([['aligned', 0], ['too_far', 66], ['too_far', 66 + ALIGNED_GRACE_MS]]);
+  assert.equal(left.shown, 'too_far');
+  assert.equal(left.alignedSince, null);
 });
 
-test('side raise_wrists when wrists hang below the shoulders', () => {
-  const dropped = landmarks({
-    11: { x: 0.49, y: 0.28 },
-    12: { x: 0.51, y: 0.28 },
-    15: { x: 0.49, y: 0.48 },
-    16: { x: 0.51, y: 0.48 },
-    23: { x: 0.49, y: 0.52 },
-    24: { x: 0.51, y: 0.52 },
-    27: { x: 0.49, y: 0.88 },
-    28: { x: 0.51, y: 0.88 },
-  });
-
-  assert.equal(evaluatePoseGate(dropped, 'side'), 'raise_wrists');
-  assert.match(gateStatusCopy('raise_wrists', 'side'), /wrists/i);
+test('red instructions change only once they settle', () => {
+  const start = run([['too_far', 0], ['too_far', STATUS_SETTLE_MS]]);
+  assert.equal(start.shown, 'too_far');
+  const flicker = stepGateHold(start, 'off_center', STATUS_SETTLE_MS + 66);
+  assert.equal(flicker.shown, 'too_far');
+  const settled = stepGateHold(flicker, 'off_center', STATUS_SETTLE_MS * 2 + 66);
+  assert.equal(settled.shown, 'off_center');
 });
 
-test('side is aligned when wrists sit at the shoulders', () => {
-  const atShoulders = landmarks({
-    11: { x: 0.49, y: 0.28 },
-    12: { x: 0.51, y: 0.28 },
-    15: { x: 0.49, y: 0.28 },
-    16: { x: 0.51, y: 0.28 },
-    23: { x: 0.49, y: 0.52 },
-    24: { x: 0.51, y: 0.52 },
-    27: { x: 0.49, y: 0.88 },
-    28: { x: 0.51, y: 0.88 },
-  });
-
-  assert.equal(evaluatePoseGate(atShoulders, 'side'), 'aligned');
+test('smoothing reports motion and steadies jitter', () => {
+  const smoother = new PoseSmoother();
+  assert.equal(smoother.push(standing()).motion, 0);
+  assert.equal(smoother.push(standing()).motion, 0);
+  const jittered = smoother.push(shift(standing(), 0.02, 0));
+  assert.ok(jittered.motion > 0 && jittered.motion < 0.02 / 0.65);
+  assert.ok(Math.abs(jittered.landmarks[11].x - 0.61) < 1e-9, 'half of a one-frame jump');
+  // The jump still counts as motion while the body pauses for a moment.
+  const paused = smoother.push(shift(standing(), 0.02, 0));
+  assert.equal(paused.motion, jittered.motion);
 });
 
-test('side is aligned when only the near wrist is visible and raised', () => {
-  const nearOnly = landmarks({
-    11: { x: 0.49, y: 0.28 },
-    12: { x: 0.51, y: 0.28 },
-    15: { x: 0.50, y: 0.22 },
-    16: { x: 0.51, y: 0.48, visibility: 0.1 },
-    23: { x: 0.49, y: 0.52 },
-    24: { x: 0.51, y: 0.52 },
-    27: { x: 0.49, y: 0.88 },
-    28: { x: 0.51, y: 0.88 },
-  });
-
-  assert.equal(evaluatePoseGate(nearOnly, 'side'), 'aligned');
-});
-
-test('front is aligned when the body fills the outline without clipping', () => {
-  const filling = landmarks({
-    11: { x: 0.38, y: 0.22 },
-    12: { x: 0.62, y: 0.22 },
-    15: { x: 0.28, y: 0.42 },
-    16: { x: 0.72, y: 0.42 },
-    23: { x: 0.42, y: 0.52 },
-    24: { x: 0.58, y: 0.52 },
-    27: { x: 0.43, y: 0.94 },
-    28: { x: 0.57, y: 0.94 },
-  });
-
-  assert.equal(evaluatePoseGate(filling, 'front'), 'aligned');
-});
-
-test('hysteresis keeps a borderline fill aligned after a lock', () => {
-  const borderline = landmarks({
-    11: { x: 0.38, y: 0.08 },
-    12: { x: 0.62, y: 0.08 },
-    15: { x: 0.26, y: 0.32 },
-    16: { x: 0.74, y: 0.32 },
-    23: { x: 0.42, y: 0.48 },
-    24: { x: 0.58, y: 0.48 },
-    27: { x: 0.43, y: 0.98 },
-    28: { x: 0.57, y: 0.98 },
-  });
-
-  assert.equal(evaluatePoseGate(borderline, 'front'), 'too_close');
-  assert.equal(evaluatePoseGate(borderline, 'front', 'aligned'), 'aligned');
-});
-
-test('front A-pose is aligned when wrists sit at the shoulders', () => {
-  const atShoulders = landmarks({
-    11: { x: 0.38, y: 0.28 },
-    12: { x: 0.62, y: 0.28 },
-    15: { x: 0.28, y: 0.3 },
-    16: { x: 0.72, y: 0.3 },
-    23: { x: 0.42, y: 0.52 },
-    24: { x: 0.58, y: 0.52 },
-    27: { x: 0.43, y: 0.88 },
-    28: { x: 0.57, y: 0.88 },
-  });
-
-  assert.equal(evaluatePoseGate(atShoulders, 'front'), 'aligned');
-});
-
-const guidedCapture = readFileSync(
-  path.join(process.cwd(), 'components/widget/guided-capture/guided-capture.tsx'),
+const viewportSource = readFileSync(
+  path.join(process.cwd(), 'components/widget/guided-capture/capture-viewport.tsx'),
   'utf8',
 );
 
-test('a verified front capture advances to side without a confirm Next', () => {
-  assert.match(guidedCapture, /setStep\('side'\)/);
-  assert.doesNotMatch(guidedCapture, /requireConfirm/);
+test('each capture is reviewed before it is used: Retake or Use this photo', () => {
+  assert.match(viewportSource, /Use this photo/);
+  assert.match(viewportSource, /Retake/);
+  assert.match(viewportSource, /onCaptured\(pending\.blob, pending\.gate, pending\.photo\)/);
 });
-
