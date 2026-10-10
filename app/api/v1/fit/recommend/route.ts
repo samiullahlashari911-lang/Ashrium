@@ -1,3 +1,4 @@
+import { isElasticWaist } from '@/lib/catalog/elastic-waist';
 import { isAnnyParametricVector, readFitParametricVector, readFitResiduals, readMhrParametricVector } from '@/types/hmr';
 import { mhrSimulationCacheVector } from '@/lib/fit/mhr-cache-vector';
 import { recommendFit } from '@/lib/fit/recommend';
@@ -72,6 +73,7 @@ export async function POST(request: Request): Promise<Response> {
     parametric.derived_measurements,
     garment?.category ?? null,
     garment?.sizeVariants ?? [],
+    { elasticWaist: isElasticWaist(loaded?.garment.name) },
   );
 
   const mhr = readMhrParametricVector(parametric);
@@ -106,6 +108,7 @@ export async function POST(request: Request): Promise<Response> {
     measurements: parametric.derived_measurements,
     category: garment?.category ?? null,
     variants: garment?.sizeVariants ?? [],
+    garmentName: loaded?.garment.name ?? null,
     captureGatesPassed: body.captureGatesPassed,
     ingestTier: garment?.ingestTier ?? null,
     approximateFit: garment?.approximateFit ?? true,

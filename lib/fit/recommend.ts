@@ -1,4 +1,5 @@
 import { evaluateConfidenceGate } from '@/lib/fit/confidence-gate';
+import { isElasticWaist } from '@/lib/catalog/elastic-waist';
 import { categoryEase, recommendSize } from '@/lib/fit/size-recommend';
 import type { AnnyDerivedMeasurements } from '@/types/hmr';
 import type {
@@ -12,6 +13,8 @@ export interface RecommendFitInput {
   measurements: AnnyDerivedMeasurements;
   category: GarmentCategory | null;
   variants: readonly StorefrontSizeVariant[];
+  /** Product name: an elastic / drawstring waist is sized by the seat. */
+  garmentName?: string | null;
   captureGatesPassed: boolean;
   ingestTier: GarmentIngestTier | null;
   approximateFit: boolean;
@@ -23,7 +26,9 @@ export interface RecommendFitInput {
 }
 
 export function recommendFit(input: RecommendFitInput): FitRecommendation {
-  const size = recommendSize(input.measurements, input.category, input.variants);
+  const size = recommendSize(input.measurements, input.category, input.variants, {
+    elasticWaist: isElasticWaist(input.garmentName),
+  });
   const gate = evaluateConfidenceGate({
     captureGatesPassed: input.captureGatesPassed,
     ingestTier: input.ingestTier,

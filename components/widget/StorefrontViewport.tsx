@@ -197,6 +197,7 @@ export function StorefrontViewport({
       measurements: result.parametric.derived_measurements,
       category: activeGarment.category,
       variants: activeGarment.sizeVariants,
+      garmentName: activeGarment.name,
       captureGatesPassed: result.session.captureGatesPassed,
       ingestTier: activeGarment.ingestTier,
       approximateFit: activeGarment.approximateFit || !printQaPassed,

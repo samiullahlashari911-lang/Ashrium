@@ -42,3 +42,18 @@ test('a drape that will not come is not "waiting"', () => {
     'Waiting for the cloth simulation',
   ]);
 });
+
+// Joggers: the chart's waist is the relaxed elastic; it stretches over a bigger waist.
+const JOGGERS: StorefrontSizeVariant[] = [
+  { id: 'l', sizeCode: 'L', chestCm: 0, waistCm: 72, hipCm: 104, lengthCm: 96 },
+  { id: 'xl', sizeCode: 'XL', chestCm: 0, waistCm: 75, hipCm: 108, lengthCm: 98 },
+  { id: 'xxl', sizeCode: 'XXL', chestCm: 0, waistCm: 78, hipCm: 112, lengthCm: 100 },
+];
+
+test('an elastic waist is sized by the hip, not the relaxed waist', () => {
+  const body = { chest_cm: 96, waist_cm: 88, hip_cm: 102 };
+  const size = recommendSize(body, 'pant', JOGGERS, { elasticWaist: true });
+  assert.equal(size.sizeCode, 'XL');
+  assert.equal(size.fits, true);
+  assert.equal(recommendSize(body, 'pant', JOGGERS).fits, false);
+});

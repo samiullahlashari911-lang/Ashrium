@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { isElasticWaist } from '@/lib/catalog/elastic-waist';
 import { GARMENT_CAD_BUCKET, sewnGarmentObjectPath } from '@/lib/catalog/rest-length-store';
 import { mhrSimulationCacheVector } from '@/lib/fit/mhr-cache-vector';
 import { matchSimulationCache } from '@/lib/fit/simulation-match';
@@ -407,7 +408,9 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
     return unavailable(MHR_TOPOLOGY_VERSION);
   }
 
-  const recommended = recommendSize(measurements, storefront.category, storefront.sizeVariants);
+  const recommended = recommendSize(measurements, storefront.category, storefront.sizeVariants, {
+    elasticWaist: isElasticWaist(garment.name),
+  });
   const requested = input.sizeCode
     ? storefront.sizeVariants.find(
       (variant) => variant.sizeCode.toLowerCase() === input.sizeCode?.toLowerCase(),

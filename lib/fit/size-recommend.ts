@@ -43,10 +43,11 @@ function easeFor(category: GarmentCategory | null): CategoryEaseCm {
   return CATEGORY_EASE_CM[category ?? 'other'];
 }
 
-function primaryGirths(category: GarmentCategory | null): readonly GirthKey[] {
+function primaryGirths(category: GarmentCategory | null, elasticWaist = false): readonly GirthKey[] {
   switch (category) {
     case 'pant':
-      return ['waistCm', 'hipCm'];
+      // A relaxed elastic waist stretches over the body: the seat decides.
+      return elasticWaist ? ['hipCm'] : ['waistCm', 'hipCm'];
     case 'tee':
     case 'outerwear':
       return ['chestCm', 'waistCm'];
@@ -109,8 +110,9 @@ function variantFits(
   variant: StorefrontSizeVariant,
   needed: Record<GirthKey, number>,
   category: GarmentCategory | null,
+  elasticWaist: boolean,
 ): boolean {
-  return primaryGirths(category).every((key) => {
+  return primaryGirths(category, elasticWaist).every((key) => {
     const published = variant[key];
     if (!published || published <= 0) {
       return true;
@@ -142,6 +144,7 @@ function pickSmallestFitting(
   needed: Record<GirthKey, number>,
   category: GarmentCategory | null,
   source: SizeRecommendation['source'],
+  elasticWaist: boolean,
 ): SizeRecommendation {
   const ordered = [...variants].sort((left, right) => {
     const rankDelta = sizeRank(left.sizeCode) - sizeRank(right.sizeCode);
@@ -152,7 +155,7 @@ function pickSmallestFitting(
     return left.chestCm - right.chestCm;
   });
 
-  const fitting = ordered.find((variant) => variantFits(variant, needed, category));
+  const fitting = ordered.find((variant) => variantFits(variant, needed, category, elasticWaist));
   return fitting
     ? toRecommendation(fitting, source, true)
     : toRecommendation(ordered[ordered.length - 1], source, false);
@@ -166,13 +169,15 @@ export function recommendSize(
   measurements: AnnyDerivedMeasurements,
   category: GarmentCategory | null,
   variants: readonly StorefrontSizeVariant[],
+  options: { elasticWaist?: boolean } = {},
 ): SizeRecommendation {
   const needed = neededGirths(measurements, category);
+  const elasticWaist = options.elasticWaist ?? false;
   if (variants.length > 0) {
-    return pickSmallestFitting(variants, needed, category, 'variant');
+    return pickSmallestFitting(variants, needed, category, 'variant', elasticWaist);
   }
 
-  return pickSmallestFitting(DEFAULT_LETTER_SIZE_CHART, needed, category, 'ease_chart');
+  return pickSmallestFitting(DEFAULT_LETTER_SIZE_CHART, needed, category, 'ease_chart', elasticWaist);
 }
 
 export function categoryEase(category: GarmentCategory | null): CategoryEaseCm {
