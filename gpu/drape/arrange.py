@@ -5,7 +5,9 @@ taller/shorter and sits elsewhere, so the garment is moved (never scaled: the
 size is the size) so its torso centres on the shopper's chest and its shoulder
 line rests just above theirs; then every panel is slid out along its normal
 until it clears the skin, the seams are welded, and any welded vertex still
-inside the body is pushed out. Metres, Y-up.
+inside the body is pushed out. Distances are exact (closest point on the
+watertight LOD 1 body): a nearest-vertex sign on the simplified collider
+flipped near the hands and shoved a front panel 70 cm out. Metres, Y-up.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from drape.border import nearest_vertices, signed_distance_to_mesh, vertex_faces
 from pattern.sew import weld
 
 TORSO_TOKENS = ("ftorso", "btorso", "torso", "front", "back")
@@ -21,7 +24,8 @@ CLEAR_M = 0.012
 # Lateral offsets from the centre line: past the head and neck (~9 cm), on the shoulder.
 SHOULDER_BAND_M = (0.12, 0.17)
 SHOULDER_LIFT_M = 0.015
-MAX_PUSH_M = 0.30
+MAX_PUSH_M = 0.15
+MAX_PUSH_STEP_M = 0.02
 
 
 def body_normals(positions: np.ndarray, faces: np.ndarray) -> np.ndarray:
@@ -38,17 +42,25 @@ def body_normals(positions: np.ndarray, faces: np.ndarray) -> np.ndarray:
     return normals
 
 
-def signed_distance(points: np.ndarray, body: np.ndarray, normals: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Approximate signed distance (outside > 0) and the nearest body vertex per point."""
-    nearest = np.empty(points.shape[0], dtype=np.int64)
-    for start in range(0, points.shape[0], 512):
-        chunk = points[start:start + 512]
-        d2 = ((chunk[:, None, :] - body[None, :, :]) ** 2).sum(axis=2)
-        nearest[start:start + 512] = np.argmin(d2, axis=1)
-    offset = points - body[nearest]
-    distance = np.linalg.norm(offset, axis=1)
-    sign = np.where(np.einsum("ij,ij->i", offset, normals[nearest]) >= 0, 1.0, -1.0)
-    return sign * distance, nearest
+class Body:
+    """The watertight LOD 1 body with lookup tables for exact distances."""
+
+    def __init__(self, positions: np.ndarray, faces: np.ndarray) -> None:
+        self.positions = positions
+        self.faces = faces.reshape(-1, 3)
+        self.normals = body_normals(positions, self.faces)
+        self.incident = vertex_faces(self.faces, positions.shape[0])
+
+    def distance(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Signed distance (outside > 0) and the closest surface point."""
+        return signed_distance_to_mesh(points, self.positions, self.faces, self.incident)
+
+    def outward(self, points: np.ndarray, distance: np.ndarray, closest: np.ndarray) -> np.ndarray:
+        """Unit direction from the surface out through each point."""
+        offset = (points - closest) * np.sign(distance)[:, None]
+        length = np.linalg.norm(offset, axis=1, keepdims=True)
+        fallback = self.normals[nearest_vertices(closest, self.positions, 1)[:, 0]]
+        return np.where(length > 1e-6, offset / np.maximum(length, 1e-12), fallback)
 
 
 def _is_torso(name: str) -> bool:
@@ -64,24 +76,26 @@ def _shoulder_top(points: np.ndarray, centre_x: float) -> float:
     return float(band[:, 1].max())
 
 
-def _panel_outward(panel: np.ndarray, body: np.ndarray, normals: np.ndarray) -> np.ndarray:
+def _panel_outward(panel: np.ndarray, body: Body) -> np.ndarray:
     """The flat panel's plane normal, pointing away from the body it faces."""
     centred = panel - panel.mean(axis=0)
     _u, _s, vt = np.linalg.svd(centred, full_matrices=False)
     normal = vt[2]
-    _distance, nearest = signed_distance(panel, body, normals)
-    facing = np.einsum("ij,j->i", panel - body[nearest], normal)
+    distance, closest = body.distance(panel)
+    facing = np.einsum("ij,j->i", body.outward(panel, distance, closest), normal)
     if float(np.median(facing)) < 0:
         normal = -normal
     return normal / max(float(np.linalg.norm(normal)), 1e-12)
 
 
-def relax_flat_triangles(positions: np.ndarray, triangles: np.ndarray, min_area_m2: float = 1e-7) -> int:
-    """Ease vertices of triangles a weld squashed flat toward their neighbours (in place).
+def relax_flat_triangles(positions: np.ndarray, triangles: np.ndarray, min_area_m2: float = 1e-10) -> int:
+    """Nudge the middle point of triangles a weld squashed flat 1 mm off the line (in place).
 
-    Averaging stitched vertices can line up three seam points; Newton drops a
-    zero-area triangle, which breaks its edge bookkeeping. Returns how many
-    were flat before relaxing.
+    Averaging stitched vertices can line up three seam points exactly; Newton's
+    add_triangles drops a zero-area triangle, which breaks Style3D's edge
+    bookkeeping. Averaging toward neighbours does not work there: a seam's
+    neighbours sit symmetrically on both panels, so their mean is on the line.
+    The solver smooths the 1 mm out in its first frame. Returns how many were flat.
     """
     def areas() -> np.ndarray:
         corners = positions[triangles]
@@ -91,16 +105,9 @@ def relax_flat_triangles(positions: np.ndarray, triangles: np.ndarray, min_area_
 
     flat = areas() < min_area_m2
     initially = int(flat.sum())
-    neighbours: dict[int, set[int]] = {}
-    for a, b, c in triangles:
-        for u, v in ((a, b), (b, c), (c, a)):
-            neighbours.setdefault(int(u), set()).add(int(v))
-            neighbours.setdefault(int(v), set()).add(int(u))
-    for _ in range(20):
+    for _ in range(5):
         if not flat.any():
             break
-        # Move only the middle point of each flat triangle (its widest angle):
-        # easing all three toward each other can collapse a small fan to a point.
         for tri in triangles[flat]:
             corners = positions[tri]
             cosines = []
@@ -108,9 +115,12 @@ def relax_flat_triangles(positions: np.ndarray, triangles: np.ndarray, min_area_
                 u = corners[(k + 1) % 3] - corners[k]
                 v = corners[(k + 2) % 3] - corners[k]
                 cosines.append(float(np.dot(u, v)) / max(float(np.linalg.norm(u) * np.linalg.norm(v)), 1e-18))
-            vertex = int(tri[int(np.argmin(cosines))])
-            ring = np.asarray(sorted(neighbours[vertex]), dtype=np.int64)
-            positions[vertex] = 0.7 * positions[vertex] + 0.3 * positions[ring].mean(axis=0)
+            middle = int(np.argmin(cosines))  # the widest angle sits between the other two
+            line = corners[(middle + 2) % 3] - corners[(middle + 1) % 3]
+            line /= max(float(np.linalg.norm(line)), 1e-12)
+            axis = np.eye(3)[int(np.argmin(np.abs(line)))]
+            off = np.cross(line, axis)
+            positions[int(tri[middle])] += off / max(float(np.linalg.norm(off)), 1e-12) * 0.001
         flat = areas() < min_area_m2
     if flat.any():
         raise RuntimeError(f"{int(flat.sum())} garment triangles stay flat after the weld.")
@@ -148,8 +158,7 @@ def orient_panels(
     panel_triangles: np.ndarray,
     panel_of_triangle: np.ndarray,
     positions: np.ndarray,
-    body: np.ndarray,
-    normals: np.ndarray,
+    body: Body,
 ) -> tuple[np.ndarray, np.ndarray, list[int]]:
     """Wind every panel the same way across its seams, then outward from the body.
 
@@ -202,8 +211,8 @@ def orient_panels(
     corners = positions[welded_out]
     face_normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
     centroids = corners.mean(axis=1)
-    _distance, nearest = signed_distance(centroids, body, normals)
-    outward = np.einsum("ij,ij->i", face_normals, centroids - body[nearest])
+    distance, closest = body.distance(centroids)
+    outward = np.einsum("ij,ij->i", face_normals, body.outward(centroids, distance, closest))
     if float(np.sum(np.sign(outward))) < 0:
         welded_out = welded_out[:, [0, 2, 1]]
         panel_out = panel_out[:, [0, 2, 1]]
@@ -212,9 +221,11 @@ def orient_panels(
 
 def arrange_on_body(
     garment: dict[str, Any],
-    body: np.ndarray,
+    body_positions: np.ndarray,
     body_faces: np.ndarray,
 ) -> dict[str, Any]:
+    """`body_positions`/`body_faces`: the watertight LOD 1 body (not the collider)."""
+    body = Body(body_positions, body_faces)
     positions = np.asarray(garment["positions"], dtype=np.float64).reshape(-1, 3)
     panel_of_vertex = np.asarray(garment["panel_of_vertex"], dtype=np.int64)
     names: list[str] = list(garment["panels"])
@@ -224,9 +235,9 @@ def arrange_on_body(
     torso = np.isin(panel_of_vertex, torso_panels)
 
     # Shopper chest: the body band at 72% of its height (torso only, arms excluded).
-    height = float(body[:, 1].max() - body[:, 1].min())
-    chest_y = float(body[:, 1].min()) + 0.72 * height
-    band = body[np.abs(body[:, 1] - chest_y) < 0.03]
+    height = float(body_positions[:, 1].max() - body_positions[:, 1].min())
+    chest_y = float(body_positions[:, 1].min()) + 0.72 * height
+    band = body_positions[np.abs(body_positions[:, 1] - chest_y) < 0.03]
     central = band[np.abs(band[:, 0] - np.median(band[:, 0])) < 0.18]
     body_cx = float(np.median(central[:, 0]))
     body_cz = 0.5 * float(central[:, 2].min() + central[:, 2].max())
@@ -237,24 +248,25 @@ def arrange_on_body(
     shift = np.array([body_cx - garment_cx, 0.0, body_cz - garment_cz])
     positions = positions + shift
 
-    near_torso = body[np.abs(body[:, 2] - body_cz) < 0.16]
+    near_torso = body_positions[np.abs(body_positions[:, 2] - body_cz) < 0.16]
     lift = (_shoulder_top(near_torso, body_cx) + SHOULDER_LIFT_M) - _shoulder_top(
         positions[torso], body_cx
     )
     positions[:, 1] += lift
 
-    normals = body_normals(body, body_faces)
     pushes: dict[str, float] = {}
     for panel_index, name in enumerate(names):
         mask = panel_of_vertex == panel_index
         panel = positions[mask]
-        outward = _panel_outward(panel, body, normals)
+        outward = _panel_outward(panel, body)
         travelled = 0.0
         while travelled < MAX_PUSH_M:
-            distance, _ = signed_distance(panel, body, normals)
+            distance, _ = body.distance(panel)
             if float(distance.min()) >= CLEAR_M:
                 break
-            step = max(CLEAR_M - float(distance.min()), 0.005)
+            # Small steps, capped in total: what a panel cannot clear the
+            # per-vertex push after the weld handles.
+            step = float(np.clip(CLEAR_M - float(distance.min()), 0.005, MAX_PUSH_STEP_M))
             panel = panel + outward * step
             travelled += step
         positions[mask] = panel
@@ -266,9 +278,10 @@ def arrange_on_body(
     np.add.at(sums, welded_id, positions)
     welded = sums / np.bincount(welded_id, minlength=welded_count)[:, None]
 
-    distance, nearest = signed_distance(welded, body, normals)
+    distance, closest = body.distance(welded)
     inside = distance < CLEAR_M
-    welded[inside] = body[nearest[inside]] + normals[nearest[inside]] * CLEAR_M
+    direction = body.outward(welded[inside], distance[inside], closest[inside])
+    welded[inside] = closest[inside] + direction * CLEAR_M
 
     triangles = np.asarray(garment["triangles"], dtype=np.int64).reshape(-1, 3)
     welded_triangles = welded_id[triangles]
@@ -284,7 +297,6 @@ def arrange_on_body(
         panel_of_vertex[triangles[keep][:, 0]],
         welded,
         body,
-        normals,
     )
     rest_uv, mirrored = solver_rest_uv(
         np.asarray(garment["uv"], dtype=np.float64).reshape(-1, 2), panel_oriented, panel_of_vertex

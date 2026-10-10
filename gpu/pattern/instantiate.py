@@ -127,6 +127,48 @@ def _cross_check(
 
 GIRTH_KEYS = ("chestCm", "waistCm", "hipCm")
 
+# Owner Q23 (2026-10-09): the sewn pattern must match the published chart, not
+# just pass the cross-check: the drape shows the real size.
+CALIBRATE_TOL_CM = 1.0
+CALIBRATE_MAX_ITERATIONS = 8
+
+
+class CalibrationError(RuntimeError):
+    pass
+
+
+def calibration_keys(category: str, published: set[str], elastic_waist: bool) -> list[str]:
+    """Published chart values the pattern must reproduce (length always)."""
+    girths = ("waistCm", "hipCm") if category == "pant" else ("chestCm", "waistCm")
+    keys = [key for key in girths if key in published and not (key == "waistCm" and elastic_waist)]
+    return [*keys, "lengthCm"]
+
+
+def calibrate_to_chart(
+    target: dict[str, Any],
+    keys: list[str],
+    build: Any,
+) -> tuple[dict[str, float], int]:
+    """Re-instantiate with adjusted inputs until each key is within CALIBRATE_TOL_CM.
+
+    GarmentCode adds its own ease and shaping, so asking it for a 104.9 cm chest
+    gave a 110.1 cm pattern. A multiplicative fixed point on the inputs
+    converges in a few re-instantiations; a size that cannot match fails.
+    """
+    proxy = {key: value for key, value in target.items()}
+    girths: dict[str, float] = {}
+    for iteration in range(1, CALIBRATE_MAX_ITERATIONS + 1):
+        girths = build(dict(proxy))
+        errors = {key: float(target[key]) - float(girths[key]) for key in keys}
+        if all(abs(error) <= CALIBRATE_TOL_CM for error in errors.values()):
+            return girths, iteration
+        for key in keys:
+            if girths[key] <= 0:
+                raise CalibrationError(f"pattern {key} is empty")
+            proxy[key] = float(proxy[key]) * float(target[key]) / float(girths[key])
+    worst = {key: round(float(girths[key]) - float(target[key]), 1) for key in keys}
+    raise CalibrationError(f"pattern cannot match the chart within {CALIBRATE_TOL_CM} cm: off by {worst}")
+
 
 def _parse_size_chart(raw: str, category: str) -> list[dict[str, Any]]:
     """Published sizes. Tops/dresses need chest + length; pants need waist or hip + length.
@@ -202,50 +244,54 @@ def instantiate_patterns(
     meshes: list[dict[str, Any]] = []
 
     for size in sizes:
-        body = BodyParameters(str(body_yaml_path()))
-        _fill_unpublished_girths(size, body)
-        _scale_body(body, size)
-        design = copy.deepcopy(base_design)
-        _apply_style(design, style)
-        _apply_garment_length(body, design, category, float(size["lengthCm"]))
+        failure: dict[str, Any] = {}
+        built: dict[str, Any] = {}
 
-        try:
+        def build(proxy: dict[str, Any]) -> dict[str, float]:
+            """Instantiate the pattern for chart-proxy girths/length; return its own girths."""
+            body = BodyParameters(str(body_yaml_path()))
+            _fill_unpublished_girths(proxy, body)
+            _scale_body(body, proxy)
+            design = copy.deepcopy(base_design)
+            _apply_style(design, style)
+            _apply_garment_length(body, design, category, float(proxy["lengthCm"]))
             garment = MetaGarment(f"ashrium_{size['sizeCode']}", body, design)
             garment.assert_non_empty()
-        except Exception as error:
-            return {
-                "task": "pattern",
-                "status": "instantiate_failed",
-                "unsupported_reason": str(error),
-                "meshes": [],
-            }
-
-        if garment.is_self_intersecting():
-            return {
-                "task": "pattern",
-                "status": "self_intersecting",
-                "unsupported_reason": f"self-intersecting 2D pattern for size {size['sizeCode']}",
-                "meshes": [],
-            }
-
-        panels = collect_body_panels(garment)
-        if len(panels) == 0:
-            return {
-                "task": "pattern",
-                "status": "instantiate_failed",
-                "unsupported_reason": "GarmentCode produced no body panels.",
-                "meshes": [],
-            }
-
-        try:
+            if garment.is_self_intersecting():
+                failure.update(
+                    status="self_intersecting",
+                    reason=f"self-intersecting 2D pattern for size {size['sizeCode']}",
+                )
+                raise RuntimeError(failure["reason"])
+            panels = collect_body_panels(garment)
+            if len(panels) == 0:
+                failure.update(status="instantiate_failed", reason="GarmentCode produced no body panels.")
+                raise RuntimeError(failure["reason"])
             quarter_widths, pattern_girths = sample_quarter_widths_m(panels, category)
+            built.update(garment=garment, quarter_widths=quarter_widths)
+            return pattern_girths
+
+        keys = calibration_keys(category, size["published"], bool(style.get("elastic_waist")))
+        try:
+            pattern_girths, iterations = calibrate_to_chart(size, keys, build)
+        except CalibrationError as error:
+            return {
+                "task": "pattern",
+                "status": "chart_mismatch",
+                "unsupported_reason": f"size {size['sizeCode']}: {error}",
+                "meshes": [],
+            }
         except Exception as error:
             return {
                 "task": "pattern",
-                "status": "instantiate_failed",
-                "unsupported_reason": str(error),
+                "status": failure.get("status", "instantiate_failed"),
+                "unsupported_reason": failure.get("reason", str(error)),
                 "meshes": [],
             }
+        garment = built["garment"]
+        quarter_widths = built["quarter_widths"]
+        # As before calibration: the stored rest mesh carries the template-inferred girths.
+        _fill_unpublished_girths(size, BodyParameters(str(body_yaml_path())))
 
         mismatch = _cross_check(category, size, pattern_girths, bool(style.get("elastic_waist")))
         if mismatch:
@@ -260,6 +306,7 @@ def instantiate_patterns(
 
         mesh = to_rest_length_mesh(category, str(size["sizeCode"]), size, quarter_widths)
         mesh["pattern_girths"] = pattern_girths
+        mesh["calibration_iterations"] = iterations
         # Girths not listed here were inferred for pattern geometry only.
         mesh["published_measurements"] = sorted(size["published"])
         if sew:

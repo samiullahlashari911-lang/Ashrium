@@ -10,6 +10,7 @@ Inputs and outputs are metres, Y-up (Three.js); Newton runs Z-up.
 from __future__ import annotations
 
 import base64
+import os
 import time
 from typing import Any, Callable
 
@@ -21,18 +22,21 @@ ITERATIONS = 10
 SEW_FRAMES = 20
 MIN_SETTLE_FRAMES = 45
 MAX_SETTLE_FRAMES = 240
-SETTLE_EPS_M = 1.0e-4
+# Settled when 95% of the cloth moves under 0.2 mm per frame (12 mm/s): a
+# mean let a still torso hide sleeves that were still dropping.
+SETTLE_EPS_M = 2.0e-4
 DIVERGED_M = 3.0
 GRAVITY = -9.81
 COLLISION_RADIUS_M = 3.5e-3
 SOFT_CONTACT_KE = 5.0e3
 SOFT_CONTACT_MU = 0.3
 SOFT_CONTACT_MARGIN_M = 0.01
-# KES-mapped catalog values are relative per fibre (cotton 90 / 45 / 0.04).
-# Drape look only (never the size): cotton lands near Newton's Style3D
-# garment examples (stretch ~1e3, bend ~4e-5).
+# KES-mapped catalog values (cotton 90 / 45 / 0.04). Drape look only, never
+# the size. Bending is KES B in gf*cm^2/cm; 1 gf*cm^2/cm = 9.81e-5 N*m, which
+# lands Newton's Style3D jacket example (B ~0.2-0.4) at its 1e-5-4e-5. The
+# earlier 1e-3 scale made a cotton tee ~10x too stiff: boxy sleeves.
 STRETCH_SCALE = 10.0
-BEND_SCALE = 1.0e-3
+BEND_SCALE = 9.81e-5
 
 
 def _y_to_z(points: np.ndarray) -> np.ndarray:
@@ -84,6 +88,11 @@ def drape_style3d(
 
     timings: dict[str, float] = {}
     started = time.perf_counter()
+    cache_dir = os.environ.get("ASHRIUM_WARP_CACHE", "").strip()
+    if cache_dir:
+        # Compiled Warp/Newton kernels on the weights Volume: a new container
+        # skips the ~55 s first-drape compile.
+        wp.config.kernel_cache_dir = cache_dir
     wp.init()
     if not wp.is_cuda_available():
         raise RuntimeError("task=drape requires CUDA.")
@@ -192,7 +201,7 @@ def drape_style3d(
         current = states[0].particle_q.numpy()
         if not np.isfinite(current).all() or float(np.abs(current).max()) > DIVERGED_M:
             raise RuntimeError(f"Style3D drape diverged at frame {frame}.")
-        displacement = float(np.mean(np.linalg.norm(current - previous, axis=1)))
+        displacement = float(np.percentile(np.linalg.norm(current - previous, axis=1), 95))
         previous = current.copy()
         phase = "sew" if frame < sew_frames else "settle"
         if phase == "settle":

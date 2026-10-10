@@ -12,7 +12,10 @@ if str(COG_ROOT) not in sys.path:
     sys.path.insert(0, str(COG_ROOT))
 
 from pattern.instantiate import (  # noqa: E402
+    CalibrationError,
     _cross_check,
+    calibrate_to_chart,
+    calibration_keys,
     _fill_unpublished_girths,
     _parse_size_chart,
 )
@@ -85,6 +88,33 @@ class PatternGirthTests(unittest.TestCase):
         self.assertAlmostEqual(girths["chestCm"], 107.0)
         self.assertLessEqual(girths["waistCm"], girths["chestCm"])
         self.assertEqual(girths["lengthCm"], 74.0)
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_pattern_is_recut_until_it_matches_the_chart(self) -> None:
+        # Live: asking GarmentCode for a 104.9 cm chest / 64 cm tee gave 110.1 / 70.2.
+        def garmentcode(proxy: dict) -> dict:
+            return {"chestCm": proxy["chestCm"] * 1.05, "lengthCm": proxy["lengthCm"] * 1.097 - 0.1}
+
+        target = {"sizeCode": "M", "chestCm": 104.9, "lengthCm": 64.0, "published": {"chestCm", "lengthCm"}}
+        girths, iterations = calibrate_to_chart(target, ["chestCm", "lengthCm"], garmentcode)
+        self.assertLessEqual(abs(girths["chestCm"] - 104.9), 1.0)
+        self.assertLessEqual(abs(girths["lengthCm"] - 64.0), 1.0)
+        self.assertGreater(iterations, 1)
+        self.assertEqual(target["chestCm"], 104.9, "the chart itself is never changed")
+
+    def test_a_size_that_cannot_match_fails(self) -> None:
+        def stuck(proxy: dict) -> dict:
+            return {"chestCm": 120.0, "lengthCm": proxy["lengthCm"]}
+
+        with self.assertRaises(CalibrationError):
+            calibrate_to_chart({"chestCm": 100.0, "lengthCm": 70.0}, ["chestCm", "lengthCm"], stuck)
+
+    def test_keys_are_the_published_values_plus_length(self) -> None:
+        self.assertEqual(calibration_keys("tee", {"chestCm", "lengthCm"}, False), ["chestCm", "lengthCm"])
+        self.assertEqual(
+            calibration_keys("pant", {"waistCm", "hipCm", "lengthCm"}, True), ["hipCm", "lengthCm"]
+        )
 
 
 if __name__ == "__main__":
