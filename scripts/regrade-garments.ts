@@ -61,6 +61,8 @@ for (const profile of profiles) {
     continue;
   }
 
+  // Same order for every colourway, so each product grades once.
+  sizes.sort((left, right) => left.size_code.localeCompare(right.size_code));
   const sizeVariants = sizes.map((variant) => ({
     sizeCode: variant.size_code,
     chestCm: variant.chest_cm ?? 0,

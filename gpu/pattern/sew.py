@@ -130,8 +130,9 @@ def sew_outlines(
         "units": "m",
         "up": "y",
         "panels": [outline.name for outline in outlines],
-        "positions": positions.astype(np.float32).reshape(-1).tolist(),
-        "uv": np.concatenate(uv_parts).astype(np.float32).reshape(-1).tolist(),
+        # 0.01 mm: plenty for cloth, and the stored garment stays a few MB at most.
+        "positions": np.round(positions, 5).reshape(-1).tolist(),
+        "uv": np.round(np.concatenate(uv_parts), 5).reshape(-1).tolist(),
         "triangles": np.concatenate(triangle_parts).astype(np.int32).reshape(-1).tolist(),
         "panel_of_vertex": np.concatenate(panel_of_vertex).tolist(),
         "stitches": [list(pair) for pair in pairs],
