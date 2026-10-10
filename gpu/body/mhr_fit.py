@@ -137,12 +137,6 @@ def skeleton_quaternions(skel_state: torch.Tensor) -> torch.Tensor:
     return _require_skeleton_state(skel_state)[..., MHR_SKELETON_QUAT_START:MHR_SKELETON_QUAT_END]
 
 
-def skeleton_height_cm(skel_state: torch.Tensor) -> torch.Tensor:
-    positions = skeleton_positions(skel_state)
-    spans = positions.amax(dim=-2) - positions.amin(dim=-2)
-    return spans.amax(dim=-1)
-
-
 def mesh_stature_cm(vertices: torch.Tensor) -> torch.Tensor:
     spans = vertices.amax(dim=-2) - vertices.amin(dim=-2)
     return spans.amax(dim=-1)
@@ -401,7 +395,10 @@ def fit_two_view_mhr(
         if not _finite_tensors(loss, keypoint_loss, silhouette_loss, clothing):
             break
 
-        stature = skeleton_height_cm(skel[2:3]).reshape(-1)[0]
+        # Stated height is sole to crown on the body surface. The skeleton's joint
+        # span reached a joint at ground level below the feet, so every body came
+        # out 5.5-7.3 cm short (owner Q28, 2026-10-10).
+        stature = mesh_stature_cm(verts[2:3]).reshape(-1)[0]
         stature_grad = torch.autograd.grad(
             stature,
             scale,
@@ -492,7 +489,7 @@ def fit_two_view_mhr(
             canon_joints.detach().cpu().numpy(),
         )
         chest_from_armpit = float(girths.pop("chest_from_armpit", 0.0))
-        height_hat = float(skeleton_height_cm(canon_skel)[0].cpu())
+        height_hat = float(stature.reshape(-1)[0].cpu())
         quats = F.normalize(skeleton_quaternions(canon_skel)[0], p=2, dim=-1)
         joint_rotations = quats.detach().cpu().numpy().astype(np.float32).reshape(-1)
         if joint_rotations.shape[0] != MHR_JOINT_QUAT_DIM:

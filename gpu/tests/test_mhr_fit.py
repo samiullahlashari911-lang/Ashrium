@@ -45,6 +45,7 @@ try:
         MIN_PLAUSIBLE_STATURE_CM,
         PLATEAU_PATIENCE,
         batched_view_model_params,
+        mesh_stature_cm,
         native_joint_coords_mhr_cm,
         native_joint_rmse_cm,
         pack_model_params,
@@ -190,6 +191,17 @@ class AdaptiveConvergenceAndHeightTests(unittest.TestCase):
         self.assertEqual(plateau_count_after(1e-8, 1e-6, 2, 1.0), 3)
         self.assertEqual(plateau_count_after(0.5, 0.0, 2, 1.0), 0)
         self.assertEqual(plateau_count_after(0.0, 0.2, 2, 1.0), 0)
+
+    def test_stated_height_is_the_body_surface_not_the_joint_span(self) -> None:
+        # Live: the head top landed exactly at the stated height but the feet
+        # floated 5.5-7.3 cm above ground: the joint span reached a ground-level
+        # joint below the feet, so bodies came out ~7 cm short.
+        source = (Path(__file__).resolve().parents[1] / "body" / "mhr_fit.py").read_text(encoding="utf-8")
+        self.assertIn("stature = mesh_stature_cm(verts[2:3]).reshape(-1)[0]", source)
+        self.assertNotIn("skeleton_height_cm", source)
+        assert torch is not None
+        verts = torch.tensor([[[0.0, 7.3, 0.0], [10.0, 172.8, 2.0], [-60.0, 100.0, 5.0]]])
+        self.assertAlmostEqual(float(mesh_stature_cm(verts)[0]), 165.5, places=4)
 
     def test_height_projection_moves_along_stature_gradient_not_uniform_scale(self) -> None:
         assert torch is not None

@@ -363,7 +363,9 @@ This is the most failure-prone area of the codebase. Follow these exactly.
   1. SAM 2 silhouettes (Apache 2.0)
   2. SAM 3D Body per view as **initializer only**
   3. Joint differentiable MHR fit: shared identity (20 body) + shared
-     skeleton (68), per-view pose; hard constraint skeleton height = stated
+     skeleton (68), per-view pose; hard constraint body stature (sole to
+     crown on the canonical mesh, owner Q28 2026-10-10; the joint span ran
+     to a ground-level joint and left bodies ~7 cm short) = stated
      height; keypoints primary, silhouette **weak** (clothed outline must
      not inflate girths)
   4. Re-evaluate MHR in **canonical pose** (do not measure a reposed LBS
