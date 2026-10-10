@@ -390,18 +390,16 @@ def _torso_slice_points(
     points = vertices[near][:, [axis_a, axis_b]]
     if points.shape[0] < 12:
         return None
-    linked = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=2) <= ARM_GAP_CM
-    labels = np.full(points.shape[0], -1, dtype=np.int64)
-    for seed in range(points.shape[0]):
-        if labels[seed] >= 0:
-            continue
-        labels[seed] = seed
-        stack = [seed]
-        while stack:
-            current = stack.pop()
-            for neighbour in np.flatnonzero(linked[current] & (labels < 0)):
-                labels[neighbour] = seed
-                stack.append(int(neighbour))
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    from scipy.spatial import cKDTree
+
+    pairs = cKDTree(points).query_pairs(ARM_GAP_CM, output_type="ndarray")
+    graph = coo_matrix(
+        (np.ones(pairs.shape[0]), (pairs[:, 0], pairs[:, 1])),
+        shape=(points.shape[0], points.shape[0]),
+    )
+    _count, labels = connected_components(graph, directed=False)
     keep = np.zeros(points.shape[0], dtype=bool)
     for label in np.unique(labels):
         member = labels == label
