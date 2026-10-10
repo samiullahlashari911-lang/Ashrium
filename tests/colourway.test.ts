@@ -14,3 +14,9 @@ test('no colour word: the product photo decides', () => {
   assert.equal(colourwayHex('Floral Embroidered Puff Sleeve Peplum Blouse / Picture Color'), null);
   assert.equal(colourwayHex('Plain Tee'), null);
 });
+
+test('denim blue reads as indigo', () => {
+  assert.equal(colourwayHex('Plus Size High-Waisted Elastic Waistband Casual Jeans / Blue'), '#3d5277');
+  assert.equal(colourwayHex('Plus Size High-Waisted Elastic Waistband Casual Jeans / Light Blue'), '#7d93b5');
+  assert.equal(colourwayHex("Men's Shirt / Navy Blue"), '#1f2a44');
+});

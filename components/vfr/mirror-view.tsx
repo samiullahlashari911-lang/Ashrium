@@ -8,6 +8,7 @@ import type { AnnyCanvasGarment, PaintUnavailableReason } from '@/components/vfr
 import { fitSummaryLine, summarizeFit } from '@/lib/fit/fit-summary';
 import { findMhrHullMesh, vertexBufferToMeters } from '@/lib/graphics/anny-hull';
 import { loadBodyParts } from '@/lib/graphics/body-parts';
+import { foldOcclusion, seamSmoothNormals } from '@/lib/graphics/cloth-shading';
 import { compositeSimPositions, decodeSimDelta, simDeltaFromBase64 } from '@/lib/graphics/meshopt-delta';
 import {
   bodyFramePixels,
@@ -47,7 +48,7 @@ export interface MirrorViewProps {
 }
 
 /** Fallback fabric when the product image gives no colour (print QA off). */
-const NEUTRAL_FABRIC = new THREE.Color(0.32, 0.33, 0.36);
+const NEUTRAL_FABRIC = new THREE.Color().setRGB(0.32, 0.33, 0.36, THREE.SRGBColorSpace);
 /** Space around the shopper in the cropped photo (fraction of their height). */
 const CROP_MARGIN = 0.08;
 
@@ -124,31 +125,66 @@ function viewNormal(view: MirrorViewName, sign: 1 | -1, x: number, y: number, z:
 
 const GARMENT_VERTEX = `
 attribute vec3 aColor;
+attribute float aOcclusion;
+attribute vec2 aPatternUv;
 varying vec3 vNormalView;
 varying vec3 vColor;
+varying float vOcclusion;
+varying vec2 vPatternUv;
 void main() {
   vNormalView = normal;
   vColor = aColor;
+  vOcclusion = aOcclusion;
+  vPatternUv = aPatternUv;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
+// Cloth, not a cut-out: soft key + fill light matched to the photo's exposure,
+// fold occlusion from the drape's own geometry (lib/graphics/cloth-shading.ts),
+// a faint jersey knit laid out in GarmentCode pattern space (so it follows
+// each panel's grain), and a velvety edge sheen.
 const GARMENT_FRAGMENT = `
 uniform vec3 uLight;
 uniform float uExposure;
 uniform float uHeat;
 varying vec3 vNormalView;
 varying vec3 vColor;
+varying float vOcclusion;
+varying vec2 vPatternUv;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
 void main() {
   vec3 n = normalize(vNormalView);
   if (!gl_FrontFacing) n = -n;
-  float lambert = max(dot(n, uLight), 0.0);
-  float wrap = mix(0.45 + 0.55 * lambert, 0.75 + 0.25 * lambert, uHeat);
-  float rim = pow(1.0 - abs(n.z), 3.0) * 0.18 * (1.0 - uHeat);
-  // Dark cloth still catches light: a floor on the base and a soft sheen keep
-  // the folds of a black tee readable instead of a flat silhouette.
-  vec3 base = max(vColor, vec3(0.018));
-  vec3 sheen = vec3(0.05) * pow(lambert, 2.0) * (1.0 - uHeat);
-  vec3 colour = base * wrap * mix(uExposure, 1.0, uHeat) - rim * base + sheen;
+  float keyLight = clamp((dot(n, uLight) + 0.3) / 1.3, 0.0, 1.0);
+  float facing = max(n.z, 0.0);
+  // Peaks at ~1.0: a lit fold face stays below white, so shading always shows.
+  float shade = (0.42 + 0.46 * keyLight + 0.12 * facing) * mix(vOcclusion, 1.0, uHeat);
+  // Cloth turning away from the camera darkens (legs and sleeves read round).
+  shade *= mix(0.74, 1.0, pow(facing, 0.6));
+
+  // Jersey: vertical wales ~2 mm apart plus a soft slub, in pattern metres.
+  float wales = 0.5 + 0.5 * sin(vPatternUv.x * 3000.0);
+  float slub = noise(vPatternUv * 260.0);
+  float knit = 1.0 + ((wales - 0.5) * 0.05 + (slub - 0.5) * 0.08) * (1.0 - uHeat);
+
+  // White cloth is never paper white in a photo: keep headroom for the light.
+  vec3 base = clamp(vColor, vec3(0.035), vec3(0.86));
+  float edge = pow(1.0 - max(n.z, 0.0), 2.5);
+  // Dark cloth catches a soft highlight on its lit folds, or it reads as a hole.
+  vec3 sheen = (vec3(0.035) * edge + vec3(0.05) * pow(keyLight, 3.0)) * (1.0 - uHeat);
+  // The highlight takes the cloth's own hue, so dark blue denim stays blue.
+  vec3 tint = base / max(max(base.r, max(base.g, base.b)), 0.001);
+  vec3 colour = base * shade * knit * mix(min(uExposure, 1.05), 1.0, uHeat) + sheen * tint * (0.4 + base);
   gl_FragColor = vec4(colour, 1.0);
   #include <colorspace_fragment>
 }`;
@@ -360,11 +396,9 @@ export const MirrorView: FC<MirrorViewProps> = ({
       // A hair in front of the body it rests on, so the body depth never wins a tie.
       garmentPositions[i * 3 + 2] = viewDepth(view, sign, draped[i * 3], draped[i * 3 + 2]) + 0.003;
     }
-    const canonical = new THREE.BufferGeometry();
-    canonical.setAttribute('position', new THREE.BufferAttribute(draped, 3));
-    canonical.setIndex(new THREE.BufferAttribute(drape.indices, 1));
-    canonical.computeVertexNormals();
-    const canonicalNormals = canonical.getAttribute('normal');
+    // Seam-smoothed normals and fold occlusion from the drape itself.
+    const smoothNormals = seamSmoothNormals(draped, drape.indices);
+    const occlusion = foldOcclusion(draped, smoothNormals, drape.indices, { strength: 4, floor: 0.45, spread: 3 });
     const normals = new Float32Array(count * 3);
     const colours = new Float32Array(count * 3);
     const fabric = garment?.colorHex
@@ -372,10 +406,12 @@ export const MirrorView: FC<MirrorViewProps> = ({
       : albedo?.passed && albedo.albedoHex
         ? new THREE.Color(albedo.albedoHex)
         : NEUTRAL_FABRIC.clone();
-    const linear = fabric.clone().convertSRGBToLinear();
+    // THREE.Color already holds linear values (ColorManagement converts hex and
+    // sRGB inputs on the way in); converting again crushed dark cloth to grey.
+    const linear = fabric.clone();
     const ease = garment?.easeCm ?? DEFAULT_EASE_CM;
     for (let i = 0; i < count; i += 1) {
-      const [nx, ny, nz] = viewNormal(view, sign, canonicalNormals.getX(i), canonicalNormals.getY(i), canonicalNormals.getZ(i));
+      const [nx, ny, nz] = viewNormal(view, sign, smoothNormals[i * 3], smoothNormals[i * 3 + 1], smoothNormals[i * 3 + 2]);
       normals[i * 3] = nx;
       normals[i * 3 + 1] = ny;
       normals[i * 3 + 2] = nz;
@@ -391,8 +427,12 @@ export const MirrorView: FC<MirrorViewProps> = ({
         colours[i * 3 + 2] = linear.b;
       }
     }
-    canonical.dispose();
     const garmentGeometry = new THREE.BufferGeometry();
+    garmentGeometry.setAttribute('aOcclusion', new THREE.BufferAttribute(occlusion, 1));
+    garmentGeometry.setAttribute(
+      'aPatternUv',
+      new THREE.BufferAttribute(drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2), 2),
+    );
     garmentGeometry.setAttribute('position', new THREE.BufferAttribute(garmentPositions, 3));
     garmentGeometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     garmentGeometry.setAttribute('aColor', new THREE.BufferAttribute(colours, 3));
@@ -410,6 +450,24 @@ export const MirrorView: FC<MirrorViewProps> = ({
     scene.add(new THREE.Mesh(garmentGeometry, garmentMaterial));
 
     renderer.render(scene, camera);
+    // Contact shadow: a soft, slightly lowered dark copy of the garment under
+    // it, so the hem, sleeves and collar sit on the body instead of floating.
+    const shade = document.createElement('canvas');
+    shade.width = crop.w;
+    shade.height = crop.h;
+    const shadeContext = shade.getContext('2d');
+    if (shadeContext && !showClearanceHeatmap) {
+      shadeContext.drawImage(renderer.domElement, 0, 0);
+      shadeContext.globalCompositeOperation = 'source-in';
+      shadeContext.fillStyle = 'rgba(20, 16, 12, 0.42)';
+      shadeContext.fillRect(0, 0, crop.w, crop.h);
+      const blurPx = Math.max(2, Math.round(crop.h * 0.006));
+      context.save();
+      context.filter = `blur(${blurPx}px)`;
+      context.drawImage(shade, 0, Math.round(blurPx * 0.8));
+      context.restore();
+    }
+    shade.width = 0;
     context.drawImage(renderer.domElement, 0, 0);
     callbacks.current.onGarmentShown?.(true);
 
