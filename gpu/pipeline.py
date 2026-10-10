@@ -125,9 +125,9 @@ class AshriumPipeline:
         # SAM 2 / SAM 3D Body predictors hold per-image state: one shopper at a time.
         with self._sam2_lock:
             with clock.measure("sam2_front"):
-                front_mask, front_bbox = segment_person(self.sam2, front_rgb)
+                front_mask, front_bbox = segment_person(self.sam2, front_rgb, "front")
             with clock.measure("sam2_side"):
-                side_mask, side_bbox = segment_person(self.sam2, side_rgb)
+                side_mask, side_bbox = segment_person(self.sam2, side_rgb, "side")
 
         report("body")
         with self._sam3d_lock:

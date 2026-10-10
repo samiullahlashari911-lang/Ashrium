@@ -16,8 +16,8 @@ PROMPT_XS = (0.3, 0.4, 0.5, 0.6, 0.7)
 PROMPT_YS = (0.15, 0.3, 0.45)
 
 
-def person_mask_area(mask: np.ndarray) -> float | None:
-    """Area fraction if the mask is shaped like a head-cropped standing person, else None.
+def person_mask_rejection(mask: np.ndarray) -> str | None:
+    """Why a mask is not a head-cropped standing person (None when it is one).
 
     The capture frames the body from the cropped neck to the feet. Wall and
     floor masks wrap the frame edges; a person touches the top and bottom rows
@@ -27,19 +27,28 @@ def person_mask_area(mask: np.ndarray) -> float | None:
     height, width = binary.shape
     area = float(binary.mean())
     if not 0.04 <= area <= 0.7:
-        return None
+        return f"area {area:.2f}"
     rows = np.flatnonzero(binary.any(axis=1))
-    if rows[0] > 0.2 * height or rows[-1] < 0.75 * height:
-        return None
+    if rows[0] > 0.2 * height:
+        return f"top {rows[0] / height:.2f}"
+    if rows[-1] < 0.75 * height:
+        return f"bottom {rows[-1] / height:.2f}"
     if 0.5 * (binary[:, 0].mean() + binary[:, -1].mean()) > 0.25:
-        return None
+        return "side edges"
     if binary[0].mean() > 0.6 or binary[-1].mean() > 0.5:
-        return None
+        return "top/bottom edge"
     # A person is one solid region; low-contrast wall comes back as speckle.
     count, labels, stats, _ = cv2.connectedComponentsWithStats(binary.astype(np.uint8), connectivity=8)
     if count < 2 or stats[1:, cv2.CC_STAT_AREA].max() < 0.9 * binary.sum():
+        return "fragmented"
+    return None
+
+
+def person_mask_area(mask: np.ndarray) -> float | None:
+    """Area fraction if the mask is shaped like a head-cropped standing person, else None."""
+    if person_mask_rejection(mask) is not None:
         return None
-    return area
+    return float((np.asarray(mask) > 0.5).mean())
 
 
 def pick_person_mask(candidates: list[np.ndarray]) -> np.ndarray | None:
@@ -59,7 +68,11 @@ def pick_person_mask(candidates: list[np.ndarray]) -> np.ndarray | None:
     return max(plausible, key=lambda mask: (votes(mask), mask.sum()))
 
 
-def segment_person(predictor, image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def segment_person(
+    predictor,
+    image_rgb: np.ndarray,
+    view: str = "capture",
+) -> tuple[np.ndarray, np.ndarray]:
     """Return a boolean HxW silhouette and an xyxy bbox for the standing person."""
     height, width = image_rgb.shape[:2]
     candidates: list[np.ndarray] = []
@@ -75,10 +88,27 @@ def segment_person(predictor, image_rgb: np.ndarray) -> tuple[np.ndarray, np.nda
                     multimask_output=True,
                 )
                 candidates.extend(np.asarray(masks).reshape(-1, height, width))
+        # The phone crops the upload to the body (neck to just below the feet),
+        # so the whole photo is the person's box: a patterned top or a torso off
+        # the point grid no longer splits the person into parts.
+        box = np.array([0.01 * width, 0.0, 0.99 * width, height - 1.0], dtype=np.float32)
+        for points in (None, np.array([[0.5 * width, 0.3 * height]], dtype=np.float32)):
+            masks, _scores, _ = predictor.predict(
+                point_coords=points,
+                point_labels=None if points is None else np.array([1], dtype=np.int32),
+                box=box,
+                multimask_output=True,
+            )
+            candidates.extend(np.asarray(masks).reshape(-1, height, width))
 
     mask = pick_person_mask(candidates)
     if mask is None:
-        raise RuntimeError("SAM 2 did not find a person silhouette in the capture.")
+        reasons = [person_mask_rejection(candidate) or "ok" for candidate in candidates]
+        counts: dict[str, int] = {}
+        for reason in reasons:
+            counts[reason.split(" ")[0]] = counts.get(reason.split(" ")[0], 0) + 1
+        print(f"SAM 2 {view}: no person mask in {width}x{height}; {len(candidates)} candidates; {sorted(set(reasons))[:12]} {counts}")
+        raise RuntimeError(f"SAM 2 did not find a person silhouette in the {view} photo.")
 
     ys, xs = np.where(mask)
     pad_x = max(4, int(0.02 * width))
