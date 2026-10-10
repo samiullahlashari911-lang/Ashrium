@@ -272,16 +272,16 @@ patterns to replicate, not copy pixel-for-pixel:
   badge for high-confidence size claims, an outlined/muted badge with
   "Approximate fit" copy when the confidence AND-gate fails. Never render an
   approximate result to look identical to a confident one.
-- **Shopper result: the plain 3D avatar, front and side.** **Owner decision
-  (2026-10-10, evening; replaces the mirror view below):** the shopper sees
-  their fitted MHR body as a plain unpainted mannequin (no photo painting, no
-  face, neutral undergarment) from a fixed Front or Side camera (no orbit),
-  dressed only in the simulated size, so the tried garment fully replaces what
-  they wore for the photos (`components/vfr/anny-canvas.tsx` with `view`,
-  `photos={null}`). The mirror view below is kept as the sandbox
-  "Photo (debug)" view. When no size in the chart fits, the largest is named
-  with `fits: false` and the reason shown; it is never a hard size claim.
-- *Superseded:* **Shopper result: the mirror view.** **Owner decision (2026-10-10, Q15/Q16/
+- **Owner decision (2026-10-10, night) — no mannequin anywhere:** the shopper
+  result is the mirror view below, showing the shopper's whole photo with
+  their head and face (on device only; the crop starts at the top of the
+  frame), Front / Side. The fitted body mesh is never shown: it drapes the
+  garment and hides its far side. The garment is drawn in its colourway
+  colour (`lib/graphics/colourway.ts`; the product photo is not a fabric
+  texture). "Size M on you" appears only once the drape is drawn. A size too
+  small for the body says so in one line and asks the shopper to try another
+  garment. The 3D avatar is not shown to shoppers or in the sandbox.
+- **Shopper result: the mirror view.** **Owner decision (2026-10-10, Q15/Q16/
   Q29; replaces the painted 360-degree avatar):** the shopper sees their own
   front or side photo (Front / Side switch) with the selected size drawn in
   where Newton draped it on their fitted body (`components/vfr/mirror-view.tsx`,

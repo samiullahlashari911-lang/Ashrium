@@ -41,6 +41,8 @@ export interface MirrorViewProps {
   onPrintQaFail?: () => void;
   onFitSummary?: (line: string | null) => void;
   onPaintUnavailable?: (reason: PaintUnavailableReason) => void;
+  /** The drape is drawn into the photo (true) or could not be drawn (false). */
+  onGarmentShown?: (shown: boolean) => void;
   className?: string;
 }
 
@@ -162,14 +164,15 @@ export const MirrorView: FC<MirrorViewProps> = ({
   onPrintQaFail,
   onFitSummary,
   onPaintUnavailable,
+  onGarmentShown,
   className,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [view, setView] = useState<MirrorViewName>('front');
   const [body, setBody] = useState<BodyAssets | null>(null);
   const [albedo, setAlbedo] = useState<PrintQaResult | null>(null);
-  const callbacks = useRef({ onBodyReady, onPrintQaFail, onFitSummary, onPaintUnavailable });
-  callbacks.current = { onBodyReady, onPrintQaFail, onFitSummary, onPaintUnavailable };
+  const callbacks = useRef({ onBodyReady, onPrintQaFail, onFitSummary, onPaintUnavailable, onGarmentShown });
+  callbacks.current = { onBodyReady, onPrintQaFail, onFitSummary, onPaintUnavailable, onGarmentShown };
   const readySent = useRef(false);
 
   const photoUv = 'photo_uv' in parametric ? parametric.photo_uv ?? null : null;
@@ -180,7 +183,9 @@ export const MirrorView: FC<MirrorViewProps> = ({
     }
     try {
       return decodeSimDelta(simDeltaFromBase64(drapePayloadBase64));
-    } catch {
+    } catch (error) {
+      console.error('Garment drape could not be decoded', error);
+      callbacks.current.onGarmentShown?.(false);
       return null;
     }
   }, [drapePayloadBase64]);
@@ -290,7 +295,10 @@ export const MirrorView: FC<MirrorViewProps> = ({
     const margin = CROP_MARGIN * (maxY - minY);
     const crop = {
       x: Math.max(0, Math.floor(minX - margin)),
-      y: Math.max(0, Math.floor(minY - margin)),
+      // From the top of the frame: the shopper's whole head and face stay in
+      // their photo (the fitted body is measured from the headless copy, so
+      // cropping to it cut the head off). On this device only.
+      y: 0,
       w: 0,
       h: 0,
     };
@@ -359,7 +367,11 @@ export const MirrorView: FC<MirrorViewProps> = ({
     const canonicalNormals = canonical.getAttribute('normal');
     const normals = new Float32Array(count * 3);
     const colours = new Float32Array(count * 3);
-    const fabric = albedo?.passed && albedo.albedoHex ? new THREE.Color(albedo.albedoHex) : NEUTRAL_FABRIC.clone();
+    const fabric = garment?.colorHex
+      ? new THREE.Color(garment.colorHex)
+      : albedo?.passed && albedo.albedoHex
+        ? new THREE.Color(albedo.albedoHex)
+        : NEUTRAL_FABRIC.clone();
     const linear = fabric.clone().convertSRGBToLinear();
     const ease = garment?.easeCm ?? DEFAULT_EASE_CM;
     for (let i = 0; i < count; i += 1) {
@@ -399,6 +411,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
 
     renderer.render(scene, camera);
     context.drawImage(renderer.domElement, 0, 0);
+    callbacks.current.onGarmentShown?.(true);
 
     occluderGeometry.dispose();
     occluderMaterial.dispose();
@@ -406,7 +419,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
     garmentMaterial.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
-  }, [albedo, body, drape, garment?.easeCm, photoUv, photos, showClearanceHeatmap, view]);
+  }, [albedo, body, drape, garment?.colorHex, garment?.easeCm, photoUv, photos, showClearanceHeatmap, view]);
 
   const hasSide = Boolean(photos?.side && photoUv);
 

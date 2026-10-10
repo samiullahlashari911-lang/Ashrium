@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FC } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { RadialHeatmapLegend } from '@/components/vfr/radial-heatmap-legend';
 import type { OnDevicePhotos } from '@/lib/widget/webp-encode';
@@ -11,7 +12,6 @@ import {
   applyFacelessMannequin,
   applyMannequinMaterial,
   createGarmentAlbedoMaterial,
-  garmentCodeUvsFromPositions,
   paintMannequinUndergarment,
 } from '@/lib/graphics/anny-garment';
 import {
@@ -37,6 +37,7 @@ import {
   simDeltaFromBase64,
 } from '@/lib/graphics/meshopt-delta';
 import {
+  albedoHexToRgbInteger,
   evaluatePrintQaFromImage,
   failedPrintQa,
   type PrintQaResult,
@@ -63,6 +64,8 @@ export interface AnnyCanvasGarment {
   category?: GarmentCategory | null;
   albedoUrl?: string | null;
   printQaPassed?: boolean;
+  /** Colour from the colourway name (lib/graphics/colourway.ts); wins over the product photo. */
+  colorHex?: string | null;
 }
 
 export type PaintUnavailableReason = 'not_painted' | 'face_not_found';
@@ -103,6 +106,8 @@ export interface AnnyCanvasProps {
    * no sway; switching views glides the camera. Unset keeps the orbit.
    */
   view?: AvatarView | null;
+  /** The drape is drawn on the avatar (true) or could not be drawn (false). */
+  onGarmentShown?: (shown: boolean) => void;
   className?: string;
 }
 
@@ -175,6 +180,10 @@ const ORBIT_LIMIT_RAD = (65 * Math.PI) / 180;
 const SWAY_RAD = (30 * Math.PI) / 180;
 const SWAY_MS = 6000;
 const VIEW_SWITCH_MS = 700;
+/** How long a landed drape waits for the product photo's colour before showing anyway. */
+const ALBEDO_WAIT_MS = 2500;
+/** Cloth colour while the product photo has not arrived. */
+const NEUTRAL_CLOTH_HEX = '#d8d2c8';
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -271,6 +280,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   revealed = true,
   photos = null,
   view = null,
+  onGarmentShown,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -288,6 +298,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   const turntableRef = useRef(turntable);
   const viewRef = useRef(view);
   viewRef.current = view;
+  const garmentShownRef = useRef(onGarmentShown);
+  garmentShownRef.current = onGarmentShown;
   printQaFailRef.current = onPrintQaFail;
   bodyReadyRef.current = onBodyReady;
   bodyErrorRef.current = onBodyError;
@@ -699,23 +711,34 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         return;
       }
 
-      let loadedAlbedo: LoadedAlbedo | null = null;
-      if (albedoUrl) {
-        loadedAlbedo = await inspectAlbedoImage(albedoUrl);
-        if (cancelled) {
-          loadedAlbedo.texture?.dispose();
-          return;
-        }
-        if (!loadedAlbedo.qa.passed) {
-          loadedAlbedo.texture?.dispose();
-          printQaFailRef.current?.();
-          return;
-        }
+      // The garment's colour comes from the product photo, but the drape never
+      // waits on it: past ALBEDO_WAIT_MS the garment shows in a neutral cloth
+      // colour and is recoloured when the photo arrives (owner 2026-10-10: a
+      // landed drape showed "Size M on you" with no shirt drawn). The photo
+      // is never mapped onto the cloth: it is a product shot, not a fabric
+      // texture (it painted grey wedges on the shoulders).
+      const albedoRequest = albedoUrl ? inspectAlbedoImage(albedoUrl) : null;
+      let loadedAlbedo: LoadedAlbedo | null = albedoRequest
+        ? await Promise.race([
+            albedoRequest,
+            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), ALBEDO_WAIT_MS)),
+          ])
+        : null;
+      if (cancelled) {
+        loadedAlbedo?.texture?.dispose();
+        return;
       }
+      if (loadedAlbedo && !loadedAlbedo.qa.passed) {
+        loadedAlbedo.texture?.dispose();
+        printQaFailRef.current?.();
+        garmentShownRef.current?.(false);
+        return;
+      }
+      loadedAlbedo?.texture?.dispose();
 
       const albedoMaterial = createGarmentAlbedoMaterial({
-        map: loadedAlbedo?.texture ?? null,
-        albedoHex: loadedAlbedo?.qa.albedoHex,
+        map: null,
+        albedoHex: loadedAlbedo?.qa.albedoHex ?? NEUTRAL_CLOTH_HEX,
       });
 
       let geometry: THREE.BufferGeometry | null = null;
@@ -725,13 +748,15 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
         geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         geometry.setAttribute('aClearanceCm', new THREE.BufferAttribute(mesh.clearanceCm, 1));
-        geometry.setAttribute(
-          'uv',
-          new THREE.BufferAttribute(garmentCodeUvsFromPositions(mesh.restPositions), 2),
-        );
         geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+        // Panels arrive split at their seams; shading them apart drew a jagged
+        // line down the front. Merge coincident seam vertices before normals.
+        const merged = mergeVertices(geometry, 1e-5);
+        geometry.dispose();
+        geometry = merged;
         geometry.computeVertexNormals();
-      } catch {
+      } catch (error) {
+        console.error('Garment drape could not be decoded', error);
         geometry?.dispose();
         geometry = null;
       }
@@ -739,7 +764,9 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       if (!geometry || cancelled || handlesRef.current !== handles) {
         geometry?.dispose();
         albedoMaterial.dispose();
-        loadedAlbedo?.texture?.dispose();
+        if (!geometry && !cancelled) {
+          garmentShownRef.current?.(false);
+        }
         return;
       }
 
@@ -758,6 +785,23 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       handles.albedoMaterial = albedoMaterial;
       handles.heatMaterial = heatMaterial;
       setGarmentDraped(true);
+      garmentShownRef.current?.(true);
+      if (!loadedAlbedo && albedoRequest) {
+        // The product photo was slow: recolour (or turn the preview off) when it lands.
+        void albedoRequest.then((late) => {
+          late.texture?.dispose();
+          if (cancelled || handles.garmentMesh !== garmentMesh) {
+            return;
+          }
+          if (!late.qa.passed) {
+            printQaFailRef.current?.();
+            return;
+          }
+          if (late.qa.albedoHex) {
+            albedoMaterial.color.setHex(albedoHexToRgbInteger(late.qa.albedoHex));
+          }
+        });
+      }
       const positionAttribute = geometry.getAttribute('position');
       const clearanceAttribute = geometry.getAttribute('aClearanceCm');
       const heightsY = new Float32Array(positionAttribute.count);
