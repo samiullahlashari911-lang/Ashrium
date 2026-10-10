@@ -254,3 +254,72 @@ def sew_garment(garment: Any, spacing_cm: float = SPACING_CM) -> dict[str, Any]:
     mesh = sew_outlines(outlines, stitches, spacing_cm)
     mesh["spacing_cm"] = spacing_cm
     return mesh
+
+
+def garment_openings_cm(mesh: dict[str, Any]) -> dict[str, Any]:
+    """Rounds of the sewn garment's open edges, measured on the flat pattern (cm).
+
+    Each boundary loop of the welded garment is one opening: the lowest is the
+    hem, loops that touch a sleeve panel are sleeve openings, and the remaining
+    torso loop is the neck. `neck_front_depth` drops from the neck's highest
+    point to its lowest front point (GarmentCode placement, +z front).
+    """
+    uv = np.asarray(mesh["uv"], dtype=np.float64).reshape(-1, 2) * 100.0
+    placed = np.asarray(mesh["positions"], dtype=np.float64).reshape(-1, 3) * 100.0
+    triangles = np.asarray(mesh["triangles"], dtype=np.int64).reshape(-1, 3)
+    panel_of_vertex = np.asarray(mesh["panel_of_vertex"], dtype=np.int64)
+    names = list(mesh["panels"])
+    welded = weld(mesh["stitches"], panel_of_vertex.shape[0])
+
+    owners: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for a, b, c in triangles:
+        for u, v in ((a, b), (b, c), (c, a)):
+            wu, wv = int(welded[u]), int(welded[v])
+            owners.setdefault((min(wu, wv), max(wu, wv)), []).append((int(u), int(v)))
+    boundary = {edge: pair[0] for edge, pair in owners.items() if len(pair) == 1}
+    adjacency: dict[int, list[int]] = {}
+    for a, b in boundary:
+        adjacency.setdefault(a, []).append(b)
+        adjacency.setdefault(b, []).append(a)
+
+    loops = []
+    seen: set[int] = set()
+    for start in adjacency:
+        if start in seen:
+            continue
+        loop = [start]
+        seen.add(start)
+        current = start
+        while True:
+            nxt = [n for n in adjacency[current] if n not in seen]
+            if not nxt:
+                break
+            current = nxt[0]
+            seen.add(current)
+            loop.append(current)
+        length = 0.0
+        members: list[int] = []
+        for i, w in enumerate(loop):
+            edge = (min(w, loop[(i + 1) % len(loop)]), max(w, loop[(i + 1) % len(loop)]))
+            if edge in boundary:
+                u, v = boundary[edge]
+                length += float(np.linalg.norm(uv[u] - uv[v]))
+                members.extend((u, v))
+        idx = np.unique(np.asarray(members, dtype=np.int64))
+        sleeve = any("sleeve" in names[int(p)] for p in panel_of_vertex[idx])
+        loops.append({"round": length, "vertices": idx, "sleeve": sleeve, "y": float(placed[idx, 1].mean())})
+
+    body = sorted((loop for loop in loops if not loop["sleeve"]), key=lambda loop: loop["y"])
+    if len(body) < 2:
+        raise RuntimeError("Sewn garment has no separate hem and neck openings.")
+    hem, neck = body[0], body[-1]
+    neck_points = placed[neck["vertices"]]
+    centre_x = float(np.median(neck_points[:, 0]))
+    front = neck_points[(neck_points[:, 2] > np.median(neck_points[:, 2])) & (np.abs(neck_points[:, 0] - centre_x) < 3.0)]
+    depth = float(neck_points[:, 1].max() - (front[:, 1].min() if front.size else neck_points[:, 1].min()))
+    return {
+        "hem_round": round(hem["round"], 1),
+        "neck_round": round(neck["round"], 1),
+        "neck_front_depth": round(depth, 1),
+        "sleeve_rounds": [round(loop["round"], 1) for loop in loops if loop["sleeve"]],
+    }

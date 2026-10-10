@@ -117,5 +117,16 @@ class CalibrationTests(unittest.TestCase):
         )
 
 
+class NecklineTests(unittest.TestCase):
+    def test_crewneck_in_the_name_cuts_a_crewneck(self) -> None:
+        from pattern.style import CREWNECK_COLLAR, parse_style
+
+        crew = parse_style("tee", "Men's Crewneck Short Sleeve T-Shirt / Black")
+        self.assertEqual(crew["collar_fc_depth"], CREWNECK_COLLAR["collar_fc_depth"])
+        self.assertEqual(crew["collar_width"], CREWNECK_COLLAR["collar_width"])
+        plain = parse_style("tee", "Relaxed T-Shirt")
+        self.assertNotIn("collar_fc_depth", plain)
+
+
 if __name__ == "__main__":
     unittest.main()

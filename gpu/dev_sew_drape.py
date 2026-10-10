@@ -202,6 +202,25 @@ def sew_and_drape(
     }
 
 
+@dev.function(image=image, cpu=4.0, memory=8192, timeout=900)
+def sew_sweep(product_text: str, size_chart: str, category: str, variants: list[dict]) -> list[dict]:
+    """Pattern + sewing only (no GPU): garment openings per style override."""
+    if "/opt/ashrium" not in sys.path:
+        sys.path.insert(0, "/opt/ashrium")
+    from pattern.instantiate import instantiate_patterns
+    from pattern.sew import garment_openings_cm
+
+    out = []
+    for variant in variants:
+        result = instantiate_patterns(category, product_text, size_chart, sew=True, style_overrides=variant)
+        if result["status"] != "ok":
+            out.append({"variant": variant, "status": result["status"], "reason": result["unsupported_reason"]})
+            continue
+        for mesh in result["meshes"]:
+            out.append({"variant": variant, "size": mesh["sizeCode"], **garment_openings_cm(mesh["garment_mesh"])})
+    return out
+
+
 @dev.local_entrypoint()
 def main(
     body: str = "tmp/avatar-e2e/body-result.json",
@@ -211,6 +230,7 @@ def main(
     sew_frames: int = 20,
     graph: bool = True,
     runs: str = "",
+    sweep: str = "",
 ) -> None:
     """`runs`: JSON list for experiments; default drapes every chart size."""
     import numpy as np
@@ -223,6 +243,12 @@ def main(
         raise SystemExit(f"Body is not {MHR_TOPOLOGY_VERSION}.")
     lod1 = np.asarray(body_result["vertex_positions"], dtype=np.float64).reshape(-1, 3) / 100.0
     faces = np.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "body", "mhr_lod1_faces.npy"))
+
+    if sweep:
+        chart = [entry for entry in CREWNECK_CHART if entry["sizeCode"] == "M"]
+        for row in sew_sweep.remote(CREWNECK_TEXT, json.dumps(chart), "tee", json.loads(sweep)):
+            print(json.dumps(row))
+        return
 
     started = time.perf_counter()
     result = sew_and_drape.remote(

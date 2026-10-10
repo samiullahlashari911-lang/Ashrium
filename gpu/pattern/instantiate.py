@@ -51,6 +51,9 @@ def _apply_style(design: dict[str, Any], style: dict[str, Any]) -> None:
     design["sleeve"]["sleeveless"]["v"] = bool(style["sleeveless"])
     design["sleeve"]["length"]["v"] = float(style["sleeve_length"])
     design["sleeve"]["sleeve_angle"]["v"] = int(style["sleeve_angle"])
+    for key, param in (("collar_width", "width"), ("collar_fc_depth", "fc_depth"), ("collar_bc_depth", "bc_depth")):
+        if style.get(key) is not None:
+            design["collar"][param]["v"] = float(style[key])
     design["left"]["enable_asym"]["v"] = False
     design["pants"]["cuff"]["type"]["v"] = None
     design["pants"]["flare"]["v"] = 1.0

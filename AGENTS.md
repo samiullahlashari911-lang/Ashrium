@@ -290,7 +290,7 @@ patterns to replicate, not copy pixel-for-pixel:
   dashboard sandbox / gallery debug. A tried top, bottom or dress replaces
   what the shopper wore; outerwear layers over it (Q12); suits become two
   linked pieces (Q11, next). Avatar and garment centered with generous
-  negative space; rotate/zoom only in v1, at most 65 degrees each side of front (the back was never photographed).
+  negative space; rotate/zoom only in v1. Owner decision (2026-10-10): the shopper turns the avatar a full 360 degrees (drag, touch); the draped garment is simulated all round, while the never-photographed back of the head and limbs shows the fill colour, not a photo.
   **Clearance heatmap** (loose = blue) is a **toggle**, not always-on over
   the product texture. Legend sits at the edge, not overlapping the model.
   Strain is not a verdict.

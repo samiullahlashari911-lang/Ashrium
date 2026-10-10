@@ -16,6 +16,12 @@ from typing import Any
 # places the sleeve at (mean body arm_pose_angle 45.5) and real tee caps.
 SLEEVE_ANGLE_DEG = 45
 
+# A crewneck's cut neckline: ~49.6 cm round and ~9.6 cm deep at the front on
+# a size M (before the rib band). GarmentCode's t-shirt template neckline was a
+# 70 cm, 15.7 cm deep scoop (owner Q30, 2026-10-10). Style, not a chart size.
+CREWNECK_COLLAR = {"collar_width": -0.3, "collar_fc_depth": 0.06}
+_CREWNECK = re.compile(r"\bcrew[-\s]?neck|\bcrew\b", re.I)
+
 SUPPORTED_CATEGORIES = frozenset({"tee", "pant", "dress", "outerwear"})
 
 _HOOD = re.compile(r"\b(hood|hoodie|hooded)\b", re.I)
@@ -82,4 +88,5 @@ def parse_style(category: str, product_text: str) -> dict[str, Any]:
         "category": category,
         "elastic_waist": bool(_ELASTIC_WAIST.search(text)),
         "sleeve_angle": SLEEVE_ANGLE_DEG,
+        **(CREWNECK_COLLAR if upper and _CREWNECK.search(text) else {}),
     }
