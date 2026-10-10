@@ -1,8 +1,9 @@
 """ISO 8559-1 girths: plane slice + 2D convex hull. Horizontal torso; arm filter.
 
-Chest / waist / hip search windows come from stable native MHR torso joints
-(root, uplegs, lumbar–thoracic spine, clavicles), not from stature fractions.
-Canonical-pose plane slicing, convex hulls, and arm exclusion stay.
+Chest, waist and hip are measured from the canonical mesh alone: the armpit
+scan sets the chest band, torso clusters (arms and hands dropped) give the
+waist and hip. Joint windows remain only as the fallback when the arms touch
+the torso all the way down.
 """
 
 from __future__ import annotations
@@ -52,6 +53,13 @@ ARMPIT_SCAN_BOTTOM_FRAC = 0.55
 # and measure over a band just below it (bust and pectorals live there).
 ARMPIT_CLEARANCE_CM = 2.5
 CHEST_BAND_STATURE_FRAC = 0.05
+# Waist / hip (mesh-only). Torso and thigh clusters sit near the midline;
+# A-pose arms and hands sit far out (> 25 cm on a heavy body).
+TORSO_CLUSTER_RADIUS_CM = 20.0
+# The seat is searched from just above mid-thigh up through the lower part of
+# the torso (fractions of stature / of the span up to the chest band).
+HIP_SCAN_BOTTOM_FRAC = 0.40
+HIP_SCAN_SHARE = 0.55
 
 
 def _cross2(origin: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
@@ -364,15 +372,104 @@ def _chest_girth_cm(
     return float(max(values)) if values else None
 
 
+def _torso_slice_points(
+    vertices: np.ndarray,
+    up_axis: int,
+    plane_up: float,
+    midline: float,
+) -> np.ndarray | None:
+    """2D slice points of the torso (or both thighs) at `plane_up`; arms and hands dropped.
+
+    Single-linkage clusters at ARM_GAP_CM: A-pose arms and hands are separate
+    clusters well off the midline. No lateral cut: the old joint-span limit
+    (MHR clavicle / upleg joints sit close to the midline) sliced the sides
+    off real torsos and read a 88 cm waist as 74 cm.
+    """
+    near = np.abs(vertices[:, up_axis] - plane_up) <= SLICE_HALF_THICKNESS_CM
+    axis_a, axis_b = _horizontal_axes(up_axis)
+    points = vertices[near][:, [axis_a, axis_b]]
+    if points.shape[0] < 12:
+        return None
+    linked = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=2) <= ARM_GAP_CM
+    labels = np.full(points.shape[0], -1, dtype=np.int64)
+    for seed in range(points.shape[0]):
+        if labels[seed] >= 0:
+            continue
+        labels[seed] = seed
+        stack = [seed]
+        while stack:
+            current = stack.pop()
+            for neighbour in np.flatnonzero(linked[current] & (labels < 0)):
+                labels[neighbour] = seed
+                stack.append(int(neighbour))
+    keep = np.zeros(points.shape[0], dtype=bool)
+    for label in np.unique(labels):
+        member = labels == label
+        lateral = points[member, 0] - midline
+        spans_midline = float(lateral.min()) <= 0.0 <= float(lateral.max())
+        if spans_midline or abs(float(lateral.mean())) < TORSO_CLUSTER_RADIUS_CM:
+            keep |= member
+    return points[keep] if int(keep.sum()) >= 12 else None
+
+
+def _torso_girth_profile(
+    vertices: np.ndarray,
+    up_axis: int,
+    lo: float,
+    hi: float,
+    midline: float,
+) -> list[tuple[float, float]]:
+    """(plane, convex-hull girth) for torso slices from `lo` up to `hi`."""
+    profile: list[tuple[float, float]] = []
+    for plane in np.arange(lo, hi + 1e-6, ARMPIT_SCAN_STEP_CM):
+        points = _torso_slice_points(vertices, up_axis, float(plane), midline)
+        if points is None:
+            continue
+        try:
+            profile.append((float(plane), hull_perimeter(convex_hull_2d(points))))
+        except RuntimeError:
+            continue
+    return profile
+
+
+def _waist_hip_girth_cm(
+    vertices: np.ndarray,
+    up_axis: int,
+    y_min: float,
+    stature: float,
+) -> tuple[float, float] | None:
+    """Mesh-only hip (max, lower torso) and waist (min, hip to chest band); like the chest.
+
+    None when the arms touch the torso all the way down (no armpit found).
+    """
+    midline = body_midline(vertices, up_axis, y_min, stature)
+    armpit = find_armpit(vertices, up_axis, y_min, stature, midline)
+    if armpit is None:
+        return None
+    chest_bottom = armpit - ARMPIT_CLEARANCE_CM - CHEST_BAND_STATURE_FRAC * stature
+    hip_lo = y_min + HIP_SCAN_BOTTOM_FRAC * stature
+    hip_hi = hip_lo + HIP_SCAN_SHARE * (chest_bottom - hip_lo)
+    hip_profile = _torso_girth_profile(vertices, up_axis, hip_lo, hip_hi, midline)
+    if not hip_profile:
+        return None
+    hip_plane, hip = max(hip_profile, key=lambda row: row[1])
+    waist_profile = _torso_girth_profile(vertices, up_axis, hip_plane, chest_bottom, midline)
+    if not waist_profile:
+        return None
+    waist = min(girth for _plane, girth in waist_profile)
+    return waist, hip
+
+
 def measure_chest_waist_hip_cm(
     vertices: np.ndarray,
     joints_cm: np.ndarray | None = None,
 ) -> dict[str, float]:
     """vertices: (V, 3) canonical-pose MHR LOD 1, centimetres.
 
-    When `joints_cm` is (127, 3), chest/waist/hip planes are taken from native
-    torso joints. Bust and hip take the max girth in that window; waist takes
-    the min (natural indentation).
+    Chest, waist and hip are mesh-only (armpit scan + torso clusters), so a
+    replay of the mesh equals production. Bust and hip take the max girth,
+    waist the min (natural indentation). `joints_cm` windows are the fallback
+    only when the arms touch the torso all the way down.
     """
     if vertices.ndim != 2 or vertices.shape[1] != 3:
         raise RuntimeError("Canonical mesh must be (V, 3).")
@@ -417,24 +514,28 @@ def measure_chest_waist_hip_cm(
             lateral["chest_mid"],
             lateral["chest_half"],
         )
-    waist = _search_girth_cm(
-        vertices,
-        up_axis,
-        windows["waist"],
-        0.48,
-        "min",
-        lateral["waist_mid"],
-        lateral["waist_half"],
-    )
-    hip = _search_girth_cm(
-        vertices,
-        up_axis,
-        windows["hip"],
-        0.58,
-        "max",
-        lateral["hip_mid"],
-        lateral["hip_half"],
-    )
+    waist_hip = _waist_hip_girth_cm(vertices, up_axis, y_min, stature)
+    if waist_hip is not None:
+        waist, hip = waist_hip
+    else:
+        waist = _search_girth_cm(
+            vertices,
+            up_axis,
+            windows["waist"],
+            0.48,
+            "min",
+            lateral["waist_mid"],
+            lateral["waist_half"],
+        )
+        hip = _search_girth_cm(
+            vertices,
+            up_axis,
+            windows["hip"],
+            0.58,
+            "max",
+            lateral["hip_mid"],
+            lateral["hip_half"],
+        )
     return {
         "chest_cm": float(chest),
         "waist_cm": float(waist),

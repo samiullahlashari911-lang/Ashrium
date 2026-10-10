@@ -153,6 +153,37 @@ class GirthGeometryTests(unittest.TestCase):
             chest = measure_chest_waist_hip_cm(shouldered, odd)["chest_cm"]
             self.assertAlmostEqual(chest, reference, places=6)
 
+    def test_waist_and_hip_are_not_cut_by_the_joint_span(self) -> None:
+        # Owner fit (2026-10-10, 173 cm male): MHR clavicle and upleg joints sit
+        # close to the midline, so the joint-span lateral limit cut the sides
+        # off the torso and read an 88 cm waist as 74 cm, a 109 cm hip as 87 cm.
+        bare, joints = _standing_torso(include_arms=False)
+        narrow = joints.copy()
+        narrow[MHR_JOINT_L_CLAVICLE, 0] = -3.0
+        narrow[MHR_JOINT_R_CLAVICLE, 0] = 3.0
+        narrow[MHR_JOINT_L_UPLEG, 0] = -9.0
+        narrow[MHR_JOINT_R_UPLEG, 0] = 9.0
+        girths = measure_chest_waist_hip_cm(self._shouldered_torso(), narrow)
+        waist_ring = 2.0 * np.pi * np.sqrt((11.0**2 + 9.0**2) / 2.0)
+        hip_ring = 2.0 * np.pi * np.sqrt((18.0**2 + 14.0**2) / 2.0)
+        self.assertAlmostEqual(girths["waist_cm"], waist_ring, delta=1.5)
+        self.assertAlmostEqual(girths["hip_cm"], hip_ring, delta=1.5)
+        self.assertEqual(girths, measure_chest_waist_hip_cm(self._shouldered_torso(), joints))
+
+    def test_waist_and_hip_ignore_hands_beside_the_hips(self) -> None:
+        shouldered = self._shouldered_torso()
+        rings = [shouldered]
+        for y in np.arange(84.0, 100.0, 1.0):
+            for side in (-1.0, 1.0):
+                hand = _ellipse_ring(float(y), 3.0, 5.0, count=24)
+                hand[:, 0] += side * 30.0
+                rings.append(hand)
+        _bare, joints = _standing_torso(include_arms=False)
+        with_hands = measure_chest_waist_hip_cm(np.vstack(rings), joints)
+        without = measure_chest_waist_hip_cm(shouldered, joints)
+        self.assertAlmostEqual(with_hands["hip_cm"], without["hip_cm"], places=3)
+        self.assertAlmostEqual(with_hands["waist_cm"], without["waist_cm"], places=3)
+
     @staticmethod
     def _shouldered_torso() -> np.ndarray:
         bare, _joints = _standing_torso(include_arms=False)
