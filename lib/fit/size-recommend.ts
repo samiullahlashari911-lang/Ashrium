@@ -123,9 +123,11 @@ function variantFits(
 function toRecommendation(
   variant: StorefrontSizeVariant,
   source: SizeRecommendation['source'],
+  fits: boolean,
 ): SizeRecommendation {
   return {
     sizeCode: variant.sizeCode,
+    fits,
     source,
     variantId: variant.id,
     chestCm: variant.chestCm,
@@ -151,7 +153,9 @@ function pickSmallestFitting(
   });
 
   const fitting = ordered.find((variant) => variantFits(variant, needed, category));
-  return toRecommendation(fitting ?? ordered[ordered.length - 1], source);
+  return fitting
+    ? toRecommendation(fitting, source, true)
+    : toRecommendation(ordered[ordered.length - 1], source, false);
 }
 
 /**

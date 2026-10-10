@@ -80,6 +80,12 @@ export type SizeRecommendSource = 'variant' | 'ease_chart';
 
 export interface SizeRecommendation {
   sizeCode: string;
+  /**
+   * The size meets the body's girths plus wearing ease. False: no size in the
+   * chart does, and `sizeCode` is the largest, named so the shopper can still
+   * look, never claimed as a fit.
+   */
+  fits: boolean;
   source: SizeRecommendSource;
   variantId: string | null;
   chestCm: number;

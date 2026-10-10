@@ -98,8 +98,15 @@ export interface AnnyCanvasProps {
    * for a retake instead of ever showing the fallback mannequin (spec Q9).
    */
   onPaintUnavailable?: (reason: PaintUnavailableReason) => void;
+  /**
+   * Fixed camera on the shopper's front or side (owner, 2026-10-10): no orbit,
+   * no sway; switching views glides the camera. Unset keeps the orbit.
+   */
+  view?: AvatarView | null;
   className?: string;
 }
+
+export type AvatarView = 'front' | 'side';
 
 interface LoadedAlbedo {
   qa: PrintQaResult;
@@ -131,6 +138,17 @@ interface SceneHandles {
   bodyRevealed: boolean;
   /** Opacity of the body's reveal fade, shared with a garment added before it ends. */
   revealOpacity: number;
+  camera: THREE.PerspectiveCamera;
+  controls: OrbitControls;
+  /** Where the camera looks and from how far, once the body is framed. */
+  framing: { target: THREE.Vector3; distance: number; eyeY: number } | null;
+}
+
+/** Camera position for a fixed view: straight on, or from the body's left (+x). */
+function viewPosition(framing: NonNullable<SceneHandles['framing']>, view: AvatarView): THREE.Vector3 {
+  return view === 'side'
+    ? new THREE.Vector3(framing.distance, framing.eyeY, 0)
+    : new THREE.Vector3(0, framing.eyeY, framing.distance);
 }
 
 let bodyPartsRequest: Promise<Uint8Array> | null = null;
@@ -156,6 +174,7 @@ const ORBIT_LIMIT_RAD = (65 * Math.PI) / 180;
 /** First-reveal sway: +-30 deg and back to front. */
 const SWAY_RAD = (30 * Math.PI) / 180;
 const SWAY_MS = 6000;
+const VIEW_SWITCH_MS = 700;
 
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -251,6 +270,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   onBodyError,
   revealed = true,
   photos = null,
+  view = null,
   className = 'h-[560px] w-full overflow-hidden rounded-xl',
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -266,6 +286,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
   const startRevealRef = useRef<(() => void) | null>(null);
   const heatmapRef = useRef(showClearanceHeatmap);
   const turntableRef = useRef(turntable);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   printQaFailRef.current = onPrintQaFail;
   bodyReadyRef.current = onBodyReady;
   bodyErrorRef.current = onBodyError;
@@ -324,6 +346,8 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
     // the back, which no photo saw.
     controls.minAzimuthAngle = -ORBIT_LIMIT_RAD;
     controls.maxAzimuthAngle = ORBIT_LIMIT_RAD;
+    // Fixed front / side views: the camera moves only when the view changes.
+    controls.enabled = viewRef.current === null;
     controls.update();
 
     let swaying = false;
@@ -368,6 +392,9 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       skinColor: null,
       bodyRevealed: false,
       revealOpacity: 0,
+      camera,
+      controls,
+      framing: null,
     };
     handlesRef.current = handles;
 
@@ -459,7 +486,10 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
 
       const target = new THREE.Vector3(0, size.y * 0.5, 0);
       const restDistance = Math.max(2.6, size.y * 1.95);
-      const restPosition = new THREE.Vector3(0, size.y * 0.56, restDistance);
+      handles.framing = { target, distance: restDistance, eyeY: size.y * 0.56 };
+      const restPosition = viewRef.current
+        ? viewPosition(handles.framing, viewRef.current)
+        : new THREE.Vector3(0, size.y * 0.56, restDistance);
       const startPosition = new THREE.Vector3(0.35, size.y * 0.62, restDistance * 1.45);
       controls.target.copy(target);
       camera.position.copy(startPosition);
@@ -509,7 +539,7 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
                 material.needsUpdate = true;
               }
             });
-            if (turntableRef.current) {
+            if (turntableRef.current && !viewRef.current) {
               // A slow sway to each side and back, within what the photos saw.
               const offset = camera.position.clone().sub(controls.target);
               const radius = Math.hypot(offset.x, offset.z);
@@ -621,6 +651,33 @@ export const AnnyCanvas: FC<AnnyCanvasProps> = ({
       startRevealRef.current = null;
     }
   }, [bodyVersion, revealed]);
+
+  // Front / side switch: glide the fixed camera to the other view.
+  useEffect(() => {
+    const handles = handlesRef.current;
+    if (!handles || !handles.framing || !view || !handles.bodyRevealed) {
+      return;
+    }
+    const from = handles.camera.position.clone();
+    const to = viewPosition(handles.framing, view);
+    const target = handles.framing.target;
+    const fromAngle = Math.atan2(from.x - target.x, from.z - target.z);
+    const toAngle = Math.atan2(to.x - target.x, to.z - target.z);
+    const radius = Math.hypot(to.x - target.x, to.z - target.z);
+    handles.tweens.push({
+      startedAt: performance.now(),
+      durationMs: VIEW_SWITCH_MS,
+      update: (eased) => {
+        // Around the body, not through it.
+        const angle = fromAngle + (toAngle - fromAngle) * eased;
+        handles.camera.position.set(
+          target.x + radius * Math.sin(angle),
+          from.y + (to.y - from.y) * eased,
+          target.z + radius * Math.cos(angle),
+        );
+      },
+    });
+  }, [view]);
 
   // Layer 2 — the garment. Rebuilds on drape / size / albedo changes without
   // touching the body. The first drape fades in with the body, so the shopper

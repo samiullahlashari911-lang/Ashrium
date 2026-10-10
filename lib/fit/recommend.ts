@@ -37,7 +37,8 @@ export function recommendFit(input: RecommendFitInput): FitRecommendation {
 
   return {
     size,
-    gate,
+    // No size in the chart fits: never a hard size claim, whatever else passed.
+    gate: size.fits ? gate : { ...gate, highConfidence: false },
     category: input.category,
     ease: categoryEase(input.category),
   };

@@ -119,6 +119,7 @@ export async function POST(request: Request): Promise<Response> {
   return Response.json({
     size: {
       code: recommendation.size.sizeCode,
+      fits: recommendation.size.fits,
       source: recommendation.size.source,
       variantId: recommendation.size.variantId,
       chestCm: recommendation.size.chestCm,

@@ -5,27 +5,6 @@ interface ConfidenceBadgeProps {
   gate: ConfidenceGateResult | null;
 }
 
-/** Plain-language reasons the AND-gate did not pass (AGENTS.md §7). */
-export function approximateReasons(gate: ConfidenceGateResult): string[] {
-  const reasons: string[] = [];
-  if (!gate.drapePassed) {
-    reasons.push('Waiting for the cloth simulation');
-  }
-  if (!gate.capturePassed) {
-    reasons.push('A photo check did not fully pass');
-  }
-  if (!gate.ingestPassed) {
-    reasons.push('This product’s size details are incomplete');
-  }
-  if (!gate.residualPassed) {
-    reasons.push('Clothing may be hiding your shape');
-  }
-  if (!gate.printPassed) {
-    reasons.push('Product image could not be verified');
-  }
-  return reasons;
-}
-
 /**
  * Solid badge = every AND-gate check passed (a real size claim). Outlined =
  * approximate, always with the reason, so it can never be mistaken for the

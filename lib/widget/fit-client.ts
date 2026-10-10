@@ -369,6 +369,8 @@ export async function abortShopperGpu(
 export interface FitRecommendResponse {
   size: {
     code: string;
+    /** False: no size fits; `code` is the largest. Older servers omit it (treated as fitting). */
+    fits?: boolean;
     source: 'variant' | 'ease_chart';
     variantId: string | null;
     chestCm: number;
