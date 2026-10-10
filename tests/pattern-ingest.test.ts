@@ -119,15 +119,39 @@ test('parsePatternPredictionOutput accepts GarmentCode rest-length meshes and re
     restLengths: [0.1, 0.2, 0.224, 0.1],
   };
 
+  const garmentMesh = {
+    schema: 'ashrium.garment_mesh.v1',
+    category: 'tee',
+    size_code: 'M',
+    pattern_girths: { chestCm: 104, waistCm: 92, hipCm: 0, lengthCm: 70 },
+    elastic_waist: false,
+    chart_waist_cm: null,
+    vertex_count: 3,
+    positions: [0, 1, 0, 0.1, 1, 0, 0, 1.1, 0],
+    uv: [0, 0, 0.1, 0, 0, 0.1],
+    triangles: [0, 1, 2],
+    stitches: [],
+  };
+
   const parsed = parsePatternPredictionOutput({
     task: 'pattern',
     status: 'ok',
     unsupported_reason: null,
-    meshes: [mesh],
+    meshes: [{ ...mesh, garment_mesh: garmentMesh }],
   });
   assert.equal(parsed.status, 'ok');
   assert.equal(parsed.meshes.length, 1);
   assert.equal(parsed.meshes[0]?.sizeCode, 'M');
+  assert.equal(parsed.garments.get('M')?.category, 'tee');
+  assert.equal(parsed.garments.get('M')?.vertexCount, 3);
+
+  // Every graded size must carry its sewn garment: the shopper drape needs it.
+  assert.throws(() => parsePatternPredictionOutput({
+    task: 'pattern',
+    status: 'ok',
+    unsupported_reason: null,
+    meshes: [mesh],
+  }), /no sewn ashrium\.garment_mesh\.v1/);
 
   const rejected = parsePatternPredictionOutput({
     task: 'pattern',

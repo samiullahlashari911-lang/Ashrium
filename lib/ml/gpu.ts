@@ -19,7 +19,13 @@ import {
   type CaptureSex,
   type MhrParametricVector,
 } from '@/types/hmr';
-import { readRestLengthMesh, type GarmentCategory, type RestLengthMesh } from '@/types/garment';
+import {
+  readRestLengthMesh,
+  readSewnGarmentMesh,
+  type GarmentCategory,
+  type RestLengthMesh,
+  type SewnGarmentMesh,
+} from '@/types/garment';
 import type { SimDrapeMesh } from '@/types/graphics';
 
 export interface RunBodyInput {
@@ -33,15 +39,30 @@ export interface RunBodyInput {
 }
 
 export interface RunDrapeInput {
-  colliderPositions: number[];
-  colliderIndices: number[];
-  garmentRestMesh: RestLengthMesh;
+  /** The shopper's fitted MHR LOD 1 body, canonical pose, centimetres (parametric_result.vertex_positions). */
+  bodyPositionsCm: number[];
+  garment: SewnGarmentMesh;
+  bodyGirths: Pick<AnnyDerivedMeasurements, 'chest_cm' | 'waist_cm' | 'hip_cm'>;
   tensileStiffness: number;
   bendingRigidity: number;
   shearStiffness: number;
   areaDensity: number;
-  originY: number;
 }
+
+export interface DrapeProblem {
+  level: 'fail' | 'warn';
+  code: string;
+  detail: string;
+}
+
+/**
+ * Modal `task=drape` outcome. `too_small`: the size has under 2% ease over this
+ * body where it closes, too tight to show, so nothing was simulated. `problem`: the drape ran
+ * but failed a quality check (cloth inside the body, torn or floating cloth).
+ */
+export type DrapePrediction =
+  | { status: 'too_small'; reason: string }
+  | { status: 'ok' | 'problem'; mesh: SimDrapeMesh; problems: DrapeProblem[] };
 
 export interface RunPatternSizeInput {
   sizeCode: string;
@@ -68,6 +89,8 @@ export interface PatternIngestResult {
   status: PatternIngestStatus;
   unsupportedReason: string | null;
   meshes: RestLengthMesh[];
+  /** The sewn 3D garment for each size the drape uses, keyed by size code. */
+  garments: Map<string, SewnGarmentMesh>;
 }
 
 export interface GpuPredictionSnapshot {
@@ -466,16 +489,41 @@ function requireJsonNumberArray(value: unknown, label: string, expectedLength?: 
   return flattened;
 }
 
-export function parseDrapeSimOutput(output: unknown): SimDrapeMesh {
+function readDrapeProblems(value: unknown): DrapeProblem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) =>
+    isRecord(entry)
+    && (entry.level === 'fail' || entry.level === 'warn')
+    && typeof entry.code === 'string'
+      ? [{ level: entry.level, code: entry.code, detail: typeof entry.detail === 'string' ? entry.detail : '' }]
+      : [],
+  );
+}
+
+export function parseDrapeSimOutput(output: unknown): DrapePrediction {
   const unwrapped = unwrapPredictionOutput(output);
   if (!isRecord(unwrapped)) {
-    throw new Error('Drape Cog output must be an object');
+    throw new Error('Drape output must be an object');
   }
 
   if (unwrapped.topology_version !== MHR_TOPOLOGY_VERSION) {
     throw new Error(
       `Drape topology_version must be ${MHR_TOPOLOGY_VERSION}; got ${String(unwrapped.topology_version)}`,
     );
+  }
+
+  if (unwrapped.status === 'too_small') {
+    return {
+      status: 'too_small',
+      reason: typeof unwrapped.reason === 'string'
+        ? unwrapped.reason
+        : 'This size is too small to close around the body.',
+    };
+  }
+  if (unwrapped.status !== 'ok' && unwrapped.status !== 'problem') {
+    throw new Error(`Drape status must be ok, problem or too_small; got ${String(unwrapped.status)}`);
   }
 
   const vertexCountValue = unwrapped.vertex_count;
@@ -491,22 +539,31 @@ export function parseDrapeSimOutput(output: unknown): SimDrapeMesh {
   const clearanceCm = new Float32Array(
     requireJsonNumberArray(unwrapped.clearance_cm, 'clearance_cm', vertexCount),
   );
+  const uv = new Float32Array(requireJsonNumberArray(unwrapped.uv, 'uv', vertexCount * 2));
   const indexValues = requireJsonNumberArray(unwrapped.indices, 'indices');
   if (indexValues.length < 3 || indexValues.length % 3 !== 0) {
     throw new Error('Drape indices must be triangle faces');
+  }
+  if (indexValues.some((value) => value < 0 || value >= vertexCount)) {
+    throw new Error('Drape indices reference missing vertices');
   }
 
   const meanStrain = isFiniteNumber(unwrapped.mean_strain) ? unwrapped.mean_strain : 0;
 
   return {
-    restPositions,
-    delta,
-    strain,
-    clearanceCm,
-    indices: Uint32Array.from(indexValues, (value) => Math.trunc(value)),
-    vertexCount,
-    topologyVersion: MHR_TOPOLOGY_VERSION,
-    meanStrain,
+    status: unwrapped.status,
+    problems: readDrapeProblems(unwrapped.problems),
+    mesh: {
+      restPositions,
+      delta,
+      strain,
+      clearanceCm,
+      uv,
+      indices: Uint32Array.from(indexValues, (value) => Math.trunc(value)),
+      vertexCount,
+      topologyVersion: MHR_TOPOLOGY_VERSION,
+      meanStrain,
+    },
   };
 }
 
@@ -533,7 +590,7 @@ export function parsePatternPredictionOutput(output: unknown): PatternIngestResu
         : null;
 
     if (status !== 'ok') {
-      return { status, unsupportedReason: reason, meshes: [] };
+      return { status, unsupportedReason: reason, meshes: [], garments: new Map() };
     }
 
     if (!Array.isArray(unwrapped.meshes) || unwrapped.meshes.length === 0) {
@@ -541,15 +598,21 @@ export function parsePatternPredictionOutput(output: unknown): PatternIngestResu
     }
 
     const meshes: RestLengthMesh[] = [];
+    const garments = new Map<string, SewnGarmentMesh>();
     for (const entry of unwrapped.meshes) {
       const mesh = readRestLengthMesh(entry);
       if (!mesh) {
         throw new Error('Pattern Cog mesh is not a valid ashrium.rest_length.v1 panel.');
       }
       meshes.push(mesh);
+      const sewn = isRecord(entry) ? readSewnGarmentMesh(entry.garment_mesh) : null;
+      if (!sewn) {
+        throw new Error(`Pattern size ${mesh.sizeCode} has no sewn ashrium.garment_mesh.v1 garment.`);
+      }
+      garments.set(mesh.sizeCode, sewn);
     }
 
-    return { status: 'ok', unsupportedReason: null, meshes };
+    return { status: 'ok', unsupportedReason: null, meshes, garments };
   }
 
   if (isPatternCogBodyOutput(unwrapped)) {
@@ -764,18 +827,20 @@ export async function runBodyPrediction(
 export async function runDrapePrediction(
   input: RunDrapeInput,
   options?: { timeoutMs?: number },
-): Promise<SimDrapeMesh> {
+): Promise<DrapePrediction> {
+  if (input.bodyPositionsCm.length !== MHR_VERTEX_COUNT * 3) {
+    throw new Error('task=drape needs the fitted MHR LOD 1 body. Refusing a dummy hull.');
+  }
   const output = await modalJson(
     '/drape',
     {
-      collider_positions: JSON.stringify(input.colliderPositions),
-      collider_indices: JSON.stringify(input.colliderIndices),
-      garment_rest_mesh: JSON.stringify(input.garmentRestMesh),
+      body_positions: JSON.stringify(input.bodyPositionsCm),
+      garment_mesh: JSON.stringify(input.garment.json),
+      body_girths: JSON.stringify(input.bodyGirths),
       tensile_stiffness: input.tensileStiffness,
       bending_rigidity: input.bendingRigidity,
       shear_stiffness: input.shearStiffness,
       area_density: input.areaDensity,
-      origin_y: input.originY,
     },
     options?.timeoutMs ?? 120_000,
   );
@@ -794,7 +859,8 @@ export async function runPatternPrediction(input: RunPatternInput): Promise<Patt
       size_chart: JSON.stringify(input.sizeVariants),
       garment_category: input.category,
     },
-    180_000,
+    // Sewing every size (~9 s each) on Modal CPU: a 6-size chart takes about a minute.
+    300_000,
   );
   return parsePatternPredictionOutput(output);
 }

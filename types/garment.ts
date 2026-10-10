@@ -305,3 +305,49 @@ export function readRestLengthMesh(value: unknown): RestLengthMesh | null {
     restLengths: value.restLengths.slice(),
   };
 }
+
+export const GARMENT_MESH_SCHEMA = 'ashrium.garment_mesh.v1' as const;
+
+/**
+ * One size of a sewn GarmentCode garment (gpu/pattern/sew.py), stored at ingest
+ * and forwarded to Modal `task=drape` unchanged. It carries its own drape
+ * metadata (category, pattern girths, elastic waist); the app only checks it is
+ * one and keeps the geometry opaque.
+ */
+export interface SewnGarmentMesh {
+  sizeCode: string;
+  category: GarmentCategory;
+  vertexCount: number;
+  /** The GPU's garment JSON, as stored. */
+  json: Record<string, unknown>;
+}
+
+export function readSewnGarmentMesh(value: unknown): SewnGarmentMesh | null {
+  if (!isRecord(value) || value.schema !== GARMENT_MESH_SCHEMA) {
+    return null;
+  }
+
+  const category = readGarmentCategory(value.category);
+  if (
+    !category
+    || typeof value.size_code !== 'string'
+    || value.size_code.length === 0
+    || !isRecord(value.pattern_girths)
+    || typeof value.elastic_waist !== 'boolean'
+    || !isFiniteNumber(value.vertex_count)
+    || value.vertex_count < 3
+    || !Array.isArray(value.positions)
+    || !Array.isArray(value.triangles)
+    || !Array.isArray(value.uv)
+    || !Array.isArray(value.stitches)
+  ) {
+    return null;
+  }
+
+  return {
+    sizeCode: value.size_code,
+    category,
+    vertexCount: Math.trunc(value.vertex_count),
+    json: value,
+  };
+}

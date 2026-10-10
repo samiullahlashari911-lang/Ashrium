@@ -60,6 +60,7 @@ export async function POST(request: Request): Promise<Response> {
       topologyVersion: result.topologyVersion || MHR_TOPOLOGY_VERSION,
       meanStrain: result.meanStrain,
       payloadBase64: result.payloadBase64,
+      unavailableReason: result.unavailableReason,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Drape resolve failed.';

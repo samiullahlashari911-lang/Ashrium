@@ -52,6 +52,8 @@ export interface SimDrapeMesh {
    * fit colouring; see `lib/graphics/radial-heatmap.ts` for why strain does not.
    */
   clearanceCm: Float32Array;
+  /** 2D pattern position of each vertex in metres (GarmentCode panel space): texture coordinates. */
+  uv: Float32Array;
   indices: Uint32Array;
   vertexCount: number;
   topologyVersion: string;
@@ -60,6 +62,14 @@ export interface SimDrapeMesh {
 
 export type FitDrapeSource = 'cache' | 'xpbd' | 'unavailable';
 
+/**
+ * Why no drape came back when one was asked for: the size has under 2% ease
+ * over this body where it closes (`too_small`, too tight for the cloth model to
+ * show), or the drape failed a quality check (`drape_quality`). Null for every
+ * other unavailable case.
+ */
+export type FitDrapeUnavailableReason = 'too_small' | 'drape_quality';
+
 export interface FitDrapeResolve {
   source: FitDrapeSource;
   similarity: number | null;
@@ -67,6 +77,7 @@ export interface FitDrapeResolve {
   topologyVersion: string;
   meanStrain: number | null;
   payloadBase64: string | null;
+  unavailableReason: FitDrapeUnavailableReason | null;
 }
 
 export type PbdMechanicalProperties = GarmentMechanicalProperties;

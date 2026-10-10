@@ -7,6 +7,7 @@
  *   deltaPositions f32[vertexCount*3]
  *   strains f32[vertexCount]
  *   clearancesCm f32[vertexCount]   (v2+)
+ *   uv f32[vertexCount*2]           (v3+)
  *   indices u32[indexCount]
  *
  * "meshopt" here means a tightly packed, GPU-ready delta blob suitable for
@@ -14,15 +15,17 @@
  *
  * v2 added the clearance channel. v1 blobs carry no clearance and therefore
  * cannot be coloured for fit, so they are rejected rather than rendered with a
- * fabricated channel; callers re-simulate instead.
+ * fabricated channel; callers re-simulate instead. v3 is the sewn GarmentCode
+ * drape: each vertex carries its 2D pattern position (texture space). v2 blobs
+ * are the retired tube drape and are rejected the same way.
  */
 
 import { ANNY_TOPOLOGY_VERSION, MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 import type { SimDrapeMesh } from '@/types/graphics';
 
 export const SIM_DELTA_MAGIC = 0x4d495341; // 'ASIM' LE
-export const SIM_DELTA_VERSION = 2;
-export const SIM_DELTA_SCHEMA = 'ashrium.sim_delta.v2' as const;
+export const SIM_DELTA_VERSION = 3;
+export const SIM_DELTA_SCHEMA = 'ashrium.sim_delta.v3' as const;
 
 const HEADER_BYTES = 4 + 2 + 2 + 4 + 4 + 4 + 4;
 
@@ -58,6 +61,7 @@ export function encodeSimDelta(mesh: SimDrapeMesh): Uint8Array {
     || mesh.delta.length !== mesh.vertexCount * 3
     || mesh.strain.length !== mesh.vertexCount
     || mesh.clearanceCm.length !== mesh.vertexCount
+    || mesh.uv.length !== mesh.vertexCount * 2
   ) {
     throw new Error('Sim delta vertex arrays do not match vertexCount.');
   }
@@ -72,6 +76,7 @@ export function encodeSimDelta(mesh: SimDrapeMesh): Uint8Array {
     + mesh.delta.byteLength
     + mesh.strain.byteLength
     + mesh.clearanceCm.byteLength
+    + mesh.uv.byteLength
     + mesh.indices.byteLength;
   const buffer = new ArrayBuffer(byteLength);
   const view = new DataView(buffer);
@@ -104,6 +109,8 @@ export function encodeSimDelta(mesh: SimDrapeMesh): Uint8Array {
     offset,
   );
   offset += mesh.clearanceCm.byteLength;
+  bytes.set(new Uint8Array(mesh.uv.buffer, mesh.uv.byteOffset, mesh.uv.byteLength), offset);
+  offset += mesh.uv.byteLength;
   bytes.set(new Uint8Array(mesh.indices.buffer, mesh.indices.byteOffset, mesh.indices.byteLength), offset);
 
   return bytes;
@@ -144,9 +151,10 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
   const deltaBytes = vertexCount * 3 * 4;
   const strainBytes = vertexCount * 4;
   const clearanceBytes = vertexCount * 4;
+  const uvBytes = vertexCount * 2 * 4;
   const indexBytes = indexCount * 4;
   const expected =
-    HEADER_BYTES + restBytes + deltaBytes + strainBytes + clearanceBytes + indexBytes;
+    HEADER_BYTES + restBytes + deltaBytes + strainBytes + clearanceBytes + uvBytes + indexBytes;
   if (bytes.byteLength < expected) {
     throw new Error('Sim delta blob truncated.');
   }
@@ -155,6 +163,7 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
   const delta = new Float32Array(vertexCount * 3);
   const strain = new Float32Array(vertexCount);
   const clearanceCm = new Float32Array(vertexCount);
+  const uv = new Float32Array(vertexCount * 2);
   const indices = new Uint32Array(indexCount);
 
   restPositions.set(new Float32Array(bytes.buffer, bytes.byteOffset + offset, vertexCount * 3));
@@ -165,6 +174,8 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
   offset += strainBytes;
   clearanceCm.set(new Float32Array(bytes.buffer, bytes.byteOffset + offset, vertexCount));
   offset += clearanceBytes;
+  uv.set(new Float32Array(bytes.buffer, bytes.byteOffset + offset, vertexCount * 2));
+  offset += uvBytes;
   indices.set(new Uint32Array(bytes.buffer, bytes.byteOffset + offset, indexCount));
 
   return {
@@ -172,6 +183,7 @@ export function decodeSimDelta(bytes: Uint8Array): SimDrapeMesh {
     delta,
     strain,
     clearanceCm,
+    uv,
     indices,
     vertexCount,
     topologyVersion,

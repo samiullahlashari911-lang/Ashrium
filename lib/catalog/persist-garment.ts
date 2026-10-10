@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { patternProductText, shouldDispatchPattern } from '@/lib/catalog/pattern-ingest';
 import { evaluatePrintAlbedoUrl } from '@/lib/catalog/print-qa';
-import { writeRestLengthMesh } from '@/lib/catalog/rest-length-store';
+import { writeRestLengthMesh, writeSewnGarmentMesh } from '@/lib/catalog/rest-length-store';
 import { detectUnsupportedGeometry } from '@/lib/catalog/unsupported-geometry';
 import {
   runPatternPrediction,
@@ -12,7 +12,7 @@ import {
   type PatternIngestResult,
 } from '@/lib/ml/gpu';
 import type { Database, GarmentCadProfileInsert, Json } from '@/types/database';
-import type { CatalogGarmentDraft, RestLengthMesh } from '@/types/garment';
+import type { CatalogGarmentDraft, RestLengthMesh, SewnGarmentMesh } from '@/types/garment';
 
 function compositionJson(draft: CatalogGarmentDraft): Json | null {
   if (!draft.composition) {
@@ -66,6 +66,7 @@ function gradeOncePerPattern(
 
 async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
   meshes: RestLengthMesh[];
+  garments: Map<string, SewnGarmentMesh>;
   approximateFit: boolean;
 }> {
   const unsupported = detectUnsupportedGeometry({
@@ -75,7 +76,7 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
     composition: draft.composition,
   });
   if (unsupported || !shouldDispatchPattern(draft)) {
-    return { meshes: [], approximateFit: true };
+    return { meshes: [], garments: new Map(), approximateFit: true };
   }
 
   const request = {
@@ -98,16 +99,16 @@ async function gradeWithGarmentCode(draft: CatalogGarmentDraft): Promise<{
   }
 
   if (result.status !== 'ok' || result.meshes.length === 0) {
-    return { meshes: [], approximateFit: true };
+    return { meshes: [], garments: new Map(), approximateFit: true };
   }
 
   const byCode = new Map(result.meshes.map((mesh) => [mesh.sizeCode, mesh]));
   const complete = draft.sizeVariants.every((variant) => byCode.has(variant.sizeCode));
   if (!complete) {
-    return { meshes: [], approximateFit: true };
+    return { meshes: [], garments: new Map(), approximateFit: true };
   }
 
-  return { meshes: result.meshes, approximateFit: draft.approximateFit };
+  return { meshes: result.meshes, garments: result.garments, approximateFit: draft.approximateFit };
 }
 
 function publishedGirthOrNull(value: number | null | undefined): number | null {
@@ -196,6 +197,11 @@ async function attachGarmentCodePattern(
   const restPaths = new Map<string, string>();
   for (const mesh of graded.meshes) {
     const path = await writeRestLengthMesh(tenantId, garmentId, mesh);
+    const sewn = graded.garments.get(mesh.sizeCode);
+    if (sewn) {
+      // Before the variant points at this size: a drape reads both files.
+      await writeSewnGarmentMesh(path, sewn);
+    }
     restPaths.set(mesh.sizeCode, path);
   }
 

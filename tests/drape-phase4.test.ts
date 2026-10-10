@@ -25,32 +25,46 @@ test('MHR cache vectors are length 6 and change with girths', () => {
   assert.notDeepEqual(slim, broad);
 });
 
-test('parseDrapeSimOutput requires MHR topology and matching array lengths', () => {
-  const parsed = parseDrapeSimOutput({
+test('parseDrapeSimOutput requires MHR topology, matching arrays and the pattern uv', () => {
+  const output = {
     task: 'drape',
+    status: 'ok',
     topology_version: MHR_TOPOLOGY_VERSION,
     vertex_count: 3,
     rest_positions: [0, 1, 0, 0.1, 1, 0, 0, 1, 0.1],
     delta: [0, -0.01, 0, 0, -0.01, 0, 0, -0.02, 0],
     strain: [0.01, 0.02, 0.01],
     clearance_cm: [4, 8, 12],
+    uv: [0, 0, 0.1, 0, 0, 0.1],
     indices: [0, 1, 2],
     mean_strain: 0.013,
+    problems: [{ level: 'warn', code: 'not_settled', detail: 'cloth still moving' }],
+  };
+  const parsed = parseDrapeSimOutput(output);
+  if (parsed.status === 'too_small') {
+    assert.fail('expected a drape');
+  }
+  assert.equal(parsed.status, 'ok');
+  assert.equal(parsed.mesh.topologyVersion, MHR_TOPOLOGY_VERSION);
+  assert.equal(parsed.mesh.vertexCount, 3);
+  assert.equal(parsed.mesh.clearanceCm[2], 12);
+  assert.ok(Math.abs(parsed.mesh.uv[2] - 0.1) < 1e-6);
+  assert.deepEqual(parsed.problems.map((problem) => problem.code), ['not_settled']);
+
+  assert.throws(() => parseDrapeSimOutput({ ...output, topology_version: 'anny-13380-104' }));
+  assert.throws(() => parseDrapeSimOutput({ ...output, uv: [0, 0] }));
+  assert.throws(() => parseDrapeSimOutput({ ...output, indices: [0, 1, 3] }));
+  assert.throws(() => parseDrapeSimOutput({ ...output, status: undefined }));
+});
+
+test('parseDrapeSimOutput reports a size too small to close around the body', () => {
+  const parsed = parseDrapeSimOutput({
+    task: 'drape',
+    status: 'too_small',
+    reason: 'chest 96 cm stretches to 106 cm, body 118 cm',
+    topology_version: MHR_TOPOLOGY_VERSION,
   });
-
-  assert.equal(parsed.topologyVersion, MHR_TOPOLOGY_VERSION);
-  assert.equal(parsed.vertexCount, 3);
-  assert.equal(parsed.clearanceCm[2], 12);
-
-  assert.throws(() => parseDrapeSimOutput({
-    topology_version: 'anny-13380-104',
-    vertex_count: 3,
-    rest_positions: [0, 1, 0, 0.1, 1, 0, 0, 1, 0.1],
-    delta: [0, 0, 0, 0, 0, 0, 0, 0, 0],
-    strain: [0, 0, 0],
-    clearance_cm: [1, 1, 1],
-    indices: [0, 1, 2],
-  }));
+  assert.deepEqual(parsed, { status: 'too_small', reason: 'chest 96 cm stretches to 106 cm, body 118 cm' });
 });
 
 test('LOD 3 decimation stays inside the collider vertex band', () => {

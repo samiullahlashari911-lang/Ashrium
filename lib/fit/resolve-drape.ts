@@ -1,22 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { GARMENT_CAD_BUCKET } from '@/lib/catalog/rest-length-store';
+import { GARMENT_CAD_BUCKET, sewnGarmentObjectPath } from '@/lib/catalog/rest-length-store';
 import { mhrSimulationCacheVector } from '@/lib/fit/mhr-cache-vector';
 import { matchSimulationCache } from '@/lib/fit/simulation-match';
 import { recommendSize } from '@/lib/fit/size-recommend';
-import { vertexBufferToMeters } from '@/lib/graphics/anny-hull';
-import {
-  buildHullCollisionField,
-  loadMhrHullGeometry,
-} from '@/lib/graphics/anny-hull-server';
-import { decimateToMhrLod3 } from '@/lib/graphics/mhr-lod3';
 import {
   encodeSimDelta,
   isCurrentSimDelta,
   simDeltaToBase64,
 } from '@/lib/graphics/meshopt-delta';
-import { garmentOriginY } from '@/lib/graphics/xpbd-cloth';
-import { runDrapePrediction } from '@/lib/ml/gpu';
+import { runDrapePrediction, type DrapePrediction } from '@/lib/ml/gpu';
 import { DRAPE_MIN_REMAINING_MS, gpuHoldMsUntilDeadline } from '@/lib/ml/session-gpu';
 import {
   holdGpuForFitJob,
@@ -26,12 +19,11 @@ import {
 } from '@/lib/server/session-gpu';
 import { toStorefrontGarment } from '@/lib/supabase/garment-profiles';
 import type { Database } from '@/types/database';
-import type { FitDrapeResolve, SimDrapeMesh } from '@/types/graphics';
+import type { FitDrapeResolve, FitDrapeUnavailableReason, SimDrapeMesh } from '@/types/graphics';
 import {
-  readGarmentCategory,
-  readRestLengthMesh,
+  readSewnGarmentMesh,
   type GarmentMechanicalProperties,
-  type RestLengthMesh,
+  type SewnGarmentMesh,
 } from '@/types/garment';
 import {
   ANNY_TOPOLOGY_VERSION,
@@ -63,6 +55,7 @@ export interface ResolveFitDrapeInput {
 function unavailable(
   topologyVersion: string,
   similarity: number | null = null,
+  unavailableReason: FitDrapeUnavailableReason | null = null,
 ): FitDrapeResolve {
   return {
     source: 'unavailable',
@@ -71,6 +64,7 @@ function unavailable(
     topologyVersion,
     meanStrain: null,
     payloadBase64: null,
+    unavailableReason,
   };
 }
 
@@ -149,28 +143,27 @@ async function downloadDeltaBytes(
   return new Uint8Array(buffer);
 }
 
-async function loadRestLengthMesh(
+/** The sewn GarmentCode garment stored at ingest beside the size's rest mesh. */
+async function loadSewnGarment(
   supabase: SupabaseClient<Database, 'public'>,
-  path: string | null,
-): Promise<ReturnType<typeof readRestLengthMesh>> {
-  if (!path) {
+  restLengthPath: string | null,
+): Promise<SewnGarmentMesh | null> {
+  if (!restLengthPath) {
     return null;
   }
 
-  const { data, error } = await supabase.storage.from(GARMENT_CAD_BUCKET).download(path);
+  const { data, error } = await supabase.storage
+    .from(GARMENT_CAD_BUCKET)
+    .download(sewnGarmentObjectPath(restLengthPath));
   if (error || !data) {
     return null;
   }
 
-  const text = await data.text();
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    return readSewnGarmentMesh(JSON.parse(await data.text()));
   } catch {
     return null;
   }
-
-  return readRestLengthMesh(parsed);
 }
 
 async function insertCacheRow(options: {
@@ -312,6 +305,7 @@ async function resolveCacheHit(options: {
         topologyVersion: cacheHit.row.topologyVersion,
         meanStrain: cacheHit.row.meanStrain,
         payloadBase64: simDeltaToBase64(bytes),
+        unavailableReason: null,
       };
     }
   }
@@ -339,10 +333,9 @@ async function runNewtonDrape(options: {
   jobId: string;
   remainingMs: number;
   parametric: MhrParametricVector;
-  restMesh: RestLengthMesh;
+  garment: SewnGarmentMesh;
   mechanical: GarmentMechanicalProperties;
-  category: RestLengthMesh['category'];
-}): Promise<SimDrapeMesh> {
+}): Promise<DrapePrediction> {
   if (!options.parametric.vertex_positions) {
     throw new Error('MHR vertex_positions are required for Newton drape. Refusing a dummy hull.');
   }
@@ -350,12 +343,6 @@ async function runNewtonDrape(options: {
   if (options.parametric.vertex_positions.length !== MHR_VERTEX_COUNT * 3) {
     throw new Error('MHR vertex_positions do not match LOD 1.');
   }
-
-  const hull = await loadMhrHullGeometry();
-  const lod1 = vertexBufferToMeters(options.parametric.vertex_positions);
-  const lod3 = decimateToMhrLod3(lod1, hull.indices);
-  const body = buildHullCollisionField(lod3.positions, options.parametric.derived_measurements);
-  const originY = garmentOriginY(body, options.category);
 
   await holdGpuForFitJob(options.jobId, options.remainingMs);
 
@@ -367,14 +354,13 @@ async function runNewtonDrape(options: {
 
   try {
     return await runDrapePrediction({
-      colliderPositions: toNumberArray(lod3.positions),
-      colliderIndices: toNumberArray(lod3.indices),
-      garmentRestMesh: options.restMesh,
+      bodyPositionsCm: Array.from(options.parametric.vertex_positions),
+      garment: options.garment,
+      bodyGirths: options.parametric.derived_measurements,
       tensileStiffness: options.mechanical.tensileStiffness,
       bendingRigidity: options.mechanical.bendingRigidity,
       shearStiffness: options.mechanical.shearStiffness,
       areaDensity: options.mechanical.areaDensity,
-      originY,
     }, { timeoutMs: options.remainingMs });
   } finally {
     await releaseGpuAfterDrape(options.jobId);
@@ -382,9 +368,11 @@ async function runNewtonDrape(options: {
 }
 
 /**
- * Drape resolution: cache hit → signed delta; miss → Cog task=drape (Newton XPBD)
- * on MHR LOD 3 → meshopt upload → cache insert. Does not block task=body.
- * JS XPBD is not on this path.
+ * Drape resolution: cache hit → signed delta; miss → Modal task=drape (the sewn
+ * GarmentCode garment, Newton Style3D, the fitted LOD 1 body as a hard border)
+ * → meshopt upload → cache insert. Does not block task=body. A size too small
+ * to close around the body, or a drape that fails its quality checks, comes
+ * back unavailable with the reason. JS XPBD is not on this path.
  */
 export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitDrapeResolve> {
   const allowNewton = input.allowXpbd ?? true;
@@ -468,23 +456,25 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
     }
 
     const variantRow = (variants ?? []).find((row) => row.id === size.variantId);
-    const restMesh = await loadRestLengthMesh(
-      input.supabase,
-      variantRow?.rest_length_path ?? null,
-    );
-    if (!restMesh) {
+    const sewn = await loadSewnGarment(input.supabase, variantRow?.rest_length_path ?? null);
+    if (!sewn) {
       return unavailable(MHR_TOPOLOGY_VERSION);
     }
 
-    const category = readGarmentCategory(garment.category) ?? restMesh.category;
-    const mesh = await runNewtonDrape({
+    const drape = await runNewtonDrape({
       jobId: input.jobId,
       remainingMs,
       parametric: mhr,
-      restMesh,
+      garment: sewn,
       mechanical: mechanicalFromProfile(garment),
-      category,
     });
+    if (drape.status === 'too_small') {
+      return unavailable(MHR_TOPOLOGY_VERSION, null, 'too_small');
+    }
+    if (drape.status === 'problem') {
+      return unavailable(MHR_TOPOLOGY_VERSION, null, 'drape_quality');
+    }
+    const mesh = drape.mesh;
     const payloadBase64 = await persistSimDelta({
       supabase: input.supabase,
       tenantId: input.tenantId,
@@ -501,6 +491,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
       topologyVersion: MHR_TOPOLOGY_VERSION,
       meanStrain: mesh.meanStrain,
       payloadBase64,
+      unavailableReason: null,
     };
   }
 

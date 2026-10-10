@@ -20,6 +20,7 @@ function simDrapeFixture(clearanceCm: Float32Array): SimDrapeMesh {
     delta: new Float32Array(vertexCount * 3).fill(0.01),
     strain: new Float32Array(vertexCount).fill(0),
     clearanceCm,
+    uv: new Float32Array(vertexCount * 2),
     indices: new Uint32Array([0, 1, 2]),
     vertexCount,
     topologyVersion: ANNY_TOPOLOGY_VERSION,

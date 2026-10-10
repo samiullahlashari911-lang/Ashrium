@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { AshriumWordmark } from '@/components/brand/ashrium-logo';
 import { AnnyCanvas, type PaintUnavailableReason } from '@/components/vfr/anny-canvas';
+import { MirrorView } from '@/components/vfr/mirror-view';
 import { ConfidenceBadge, approximateReasons } from '@/components/vfr/confidence-badge';
 import {
   GuidedCapture,
@@ -94,6 +95,8 @@ export function StorefrontViewport({
   // Q9: photos that cannot paint the avatar mean a retake, never the mannequin.
   const [paintFailure, setPaintFailure] = useState<PaintUnavailableReason | null>(null);
   const [captureAttempt, setCaptureAttempt] = useState(0);
+  // Sandbox only: the 3D avatar as a drape debug view (owner Q15). Shoppers see the mirror view.
+  const [debug3d, setDebug3d] = useState(false);
 
   const activeGarment = garments.find((garment) => garment.sku === activeSku) ?? garments[0] ?? null;
 
@@ -366,15 +369,18 @@ export function StorefrontViewport({
     ? approximateReasons(recommendation.gate)
     : [];
 
+  const unavailableReason = typeof activeDrapeEntry === 'object' ? activeDrapeEntry.unavailableReason : null;
   const statusChip = !printQaPassed
-    ? 'Showing your body; garment preview is off for this product'
+    ? 'Showing your photo; garment preview is off for this product'
     : draping
       ? `Dressing you in size ${activeSize ?? ''}…`
       : drapePayloadBase64
-        ? `Size ${activeSize ?? ''} on your avatar`
-        : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64) || holdExpired
-          ? `Couldn't dress you in size ${activeSize ?? ''}`
-          : 'Building your fitting';
+        ? `Size ${activeSize ?? ''} on you`
+        : unavailableReason === 'too_small'
+          ? `Size ${activeSize ?? ''} is too tight to show on you`
+          : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64) || holdExpired
+            ? `Couldn't dress you in size ${activeSize ?? ''}`
+            : 'Building your fitting';
 
   return (
     <main
@@ -390,21 +396,36 @@ export function StorefrontViewport({
           aria-hidden={!revealed}
           className="ash-page-in mx-auto grid w-full max-w-5xl gap-4 p-3 md:min-h-[100dvh] md:grid-cols-[minmax(0,1fr)_340px] md:gap-6 md:p-6">
           <section className="relative overflow-hidden rounded-[28px] bg-[radial-gradient(120%_80%_at_50%_15%,#ffffff_0%,#f4f1ec_70%)] shadow-card">
-            <AnnyCanvas
-              parametric={result.parametric}
-              heightCm={result.session.heightCm}
-              garment={canvasGarment}
-              drapePayloadBase64={drapePayloadBase64}
-              showClearanceHeatmap={showHeatmap && heatmapAvailable}
-              photos={result.photos}
-              revealed={revealed}
-              onBodyReady={() => setBodySettled(true)}
-              onBodyError={() => setBodySettled(true)}
-              onPrintQaFail={() => setClientPrintQaPassed(false)}
-              onFitSummary={setFitLine}
-              onPaintUnavailable={setPaintFailure}
-              className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
-            />
+            {debug3d ? (
+              <AnnyCanvas
+                parametric={result.parametric}
+                heightCm={result.session.heightCm}
+                garment={canvasGarment}
+                drapePayloadBase64={drapePayloadBase64}
+                showClearanceHeatmap={showHeatmap && heatmapAvailable}
+                photos={result.photos}
+                revealed={revealed}
+                onBodyReady={() => setBodySettled(true)}
+                onBodyError={() => setBodySettled(true)}
+                onPrintQaFail={() => setClientPrintQaPassed(false)}
+                onFitSummary={setFitLine}
+                className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
+              />
+            ) : (
+              <MirrorView
+                parametric={result.parametric}
+                photos={result.photos}
+                garment={canvasGarment}
+                drapePayloadBase64={drapePayloadBase64}
+                showClearanceHeatmap={showHeatmap && heatmapAvailable}
+                revealed={revealed}
+                onBodyReady={() => setBodySettled(true)}
+                onPrintQaFail={() => setClientPrintQaPassed(false)}
+                onFitSummary={setFitLine}
+                onPaintUnavailable={setPaintFailure}
+                className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
+              />
+            )}
             <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
               <AshriumWordmark
                 markClassName="h-5 w-5 shrink-0 text-ash-accent"
@@ -421,9 +442,20 @@ export function StorefrontViewport({
                 <span className="truncate">{statusChip}</span>
               </span>
             </div>
-            <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/70 px-3 py-1 text-[11px] text-ash-muted">
-              Drag to turn · pinch to zoom
-            </p>
+            {debug3d ? (
+              <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-white/70 px-3 py-1 text-[11px] text-ash-muted">
+                Drag to turn · pinch to zoom
+              </p>
+            ) : null}
+            {allowGallery ? (
+              <button
+                type="button"
+                onClick={() => setDebug3d((on) => !on)}
+                className="absolute right-4 top-14 rounded-full bg-white/85 px-3 py-1 text-[11px] font-semibold text-ash-muted shadow-card hover:text-ash-ink"
+              >
+                {debug3d ? 'Photo view' : '3D (debug)'}
+              </button>
+            ) : null}
           </section>
 
           <aside className="ash-card flex flex-col gap-5 p-5 md:self-start">
@@ -461,7 +493,9 @@ export function StorefrontViewport({
               {fitLine && drapePayloadBase64 ? (
                 <p className="text-sm font-medium text-ash-ink">{fitLine}</p>
               ) : null}
-              <p className="text-[11px] text-ash-subtle">3D simulation of you from your measurements</p>
+              <p className="text-[11px] text-ash-subtle">
+                Your own photo, with this size simulated on your measured body. It stays on this device.
+              </p>
             </div>
 
             {sizeOptions.length > 1 ? (

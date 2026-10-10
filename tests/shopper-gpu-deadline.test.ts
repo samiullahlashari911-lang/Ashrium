@@ -218,5 +218,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   );
   assert.match(pipeline, /max_side: int = 640/);
   assert.doesNotMatch(pipeline, /^from drape\./m);
-  assert.match(pipeline, /from drape\.newton_xpbd import drape_newton_xpbd/);
+  // Shopper drape: the sewn GarmentCode garment through drape/sewn.py (not the retired tube).
+  assert.match(pipeline, /from drape\.sewn import body_collider, drape_sewn_size, sim_output, too_small/);
+  assert.doesNotMatch(pipeline, /newton_xpbd/);
 });

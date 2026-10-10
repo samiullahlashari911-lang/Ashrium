@@ -451,6 +451,8 @@ export interface FitResolveResponse {
   topologyVersion: string;
   meanStrain: number | null;
   payloadBase64: string | null;
+  /** Why the requested size has no drape (too small for this body, failed a quality check). */
+  unavailableReason: 'too_small' | 'drape_quality' | null;
 }
 
 function isFitResolveResponse(value: unknown): value is FitResolveResponse {
@@ -465,6 +467,9 @@ function isFitResolveResponse(value: unknown): value is FitResolveResponse {
     && typeof value.topologyVersion === 'string'
     && (value.meanStrain === null || typeof value.meanStrain === 'number')
     && (value.payloadBase64 === null || typeof value.payloadBase64 === 'string')
+    && (value.unavailableReason === null
+      || value.unavailableReason === 'too_small'
+      || value.unavailableReason === 'drape_quality')
   );
 }
 

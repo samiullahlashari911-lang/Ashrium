@@ -373,6 +373,8 @@ export function runXpbdOnHull(input: XpbdRunInput): XpbdRunResult {
       delta,
       strain,
       clearanceCm: computeClearancesCm(cloth.positions, input.body, vertexCount),
+      // Debug tube: no sewn pattern, so no texture space.
+      uv: new Float32Array(vertexCount * 2),
       indices: cloth.faceIndices,
       vertexCount,
       topologyVersion: ANNY_TOPOLOGY_VERSION,

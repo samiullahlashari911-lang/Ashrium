@@ -1,4 +1,4 @@
-import type { RestLengthMesh } from '@/types/garment';
+import type { RestLengthMesh, SewnGarmentMesh } from '@/types/garment';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const GARMENT_CAD_BUCKET = 'garment-cad';
@@ -14,6 +14,29 @@ export function restLengthObjectPath(
   sizeCode: string,
 ): string {
   return `${tenantId}/${garmentId}/${sanitizeSizeCodeForPath(sizeCode)}.json`;
+}
+
+/** The sewn garment for a size sits beside its rest mesh: `{SIZE}.json` → `{SIZE}.garment.json`. */
+export function sewnGarmentObjectPath(restLengthPath: string): string {
+  return restLengthPath.replace(/\.json$/, '') + '.garment.json';
+}
+
+export async function writeSewnGarmentMesh(restLengthPath: string, garment: SewnGarmentMesh): Promise<string> {
+  const path = sewnGarmentObjectPath(restLengthPath);
+  const serviceClient = createServiceClient();
+  const { error } = await serviceClient.storage
+    .from(GARMENT_CAD_BUCKET)
+    .upload(path, JSON.stringify(garment.json), {
+      upsert: true,
+      contentType: 'application/json',
+      cacheControl: 'no-store',
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return path;
 }
 
 export async function writeRestLengthMesh(
