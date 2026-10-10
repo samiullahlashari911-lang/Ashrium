@@ -609,30 +609,11 @@ export function CaptureViewport({
             </svg>
           </button>
           <h1 className="text-base font-semibold tracking-tight">{title}</h1>
-          {voiceAvailable ? (
-            <button
-              type="button"
-              onClick={toggleMuted}
-              aria-label={muted ? 'Turn spoken guidance on' : 'Mute spoken guidance'}
-              aria-pressed={muted}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-ash-line bg-ash-surface text-ash-ink transition hover:border-ash-subtle active:scale-95"
-            >
-              <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-                <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-                {muted ? (
-                  <path d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                ) : (
-                  <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                )}
-              </svg>
-            </button>
-          ) : (
-            <span className="h-10 w-10" />
-          )}
+          <span className="h-10 w-10" />
         </div>
         <CaptureFlowMeter step={flowStep} />
         <p className="text-[13px] leading-relaxed text-ash-muted">{hint}</p>
-        <ul className="flex flex-col gap-1 text-[12px] leading-snug text-ash-subtle">
+        <ul className="flex flex-col gap-1 text-[12px] leading-snug text-ash-subtle [@media(max-height:760px)]:hidden">
           <li>{CAPTURE_CLOTHING_TIP}</li>
           <li>{CAPTURE_PRIVACY_NOTE}</li>
         </ul>
@@ -640,7 +621,7 @@ export function CaptureViewport({
 
       <div
         ref={stageRef}
-        className="relative mx-4 mb-2 mt-4 min-h-[360px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift"
+        className="relative mx-4 mb-2 mt-4 min-h-[240px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift"
       >
         {pending ? (
           <ReviewPhoto pending={pending} view={view} />
@@ -696,11 +677,50 @@ export function CaptureViewport({
                   : gateStatusCopy(gate, view)}
           </span>
         </div>
+        {(cameraError && source === 'live') || encodeError ? (
+          <div className="absolute inset-x-0 top-[4.25rem] flex justify-center px-4">
+            <p role="alert" className="max-w-full rounded-2xl bg-white/92 px-4 py-2 text-center text-[13px] font-medium leading-snug text-ash-tension shadow-card">
+              {encodeError ?? cameraError}
+            </p>
+          </div>
+        ) : null}
+        {pending ? (
+          <div className="absolute inset-x-0 bottom-0 grid grid-cols-[1fr_1.4fr] gap-3 bg-gradient-to-t from-black/55 to-transparent p-4 pt-10">
+            <button type="button" className="ash-cta-secondary py-4" onClick={retake}>
+              Retake
+            </button>
+            <button
+              type="button"
+              className="ash-cta py-4"
+              onClick={() => {
+                voiceRef.current.stop();
+                onCaptured(pending.blob, pending.gate, pending.photo);
+              }}
+            >
+              Use this photo
+            </button>
+          </div>
+        ) : voiceAvailable ? (
+          <button
+            type="button"
+            onClick={toggleMuted}
+            aria-label={muted ? 'Turn spoken guidance on' : 'Mute spoken guidance'}
+            aria-pressed={muted}
+            className="absolute bottom-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/92 text-ash-ink shadow-card transition active:scale-95"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                {muted ? (
+                  <path d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                ) : (
+                  <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                )}
+              </svg>
+          </button>
+        ) : null}
       </div>
 
       <div className="flex shrink-0 flex-col gap-3 px-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3">
-        {cameraError && source === 'live' ? <p className="text-sm text-ash-tension">{cameraError}</p> : null}
-        {encodeError ? <p className="text-sm text-ash-tension">{encodeError}</p> : null}
         {galleryError ? <p className="text-sm text-ash-tension">{galleryError}</p> : null}
         {poseError ? (
           <p className="text-[13px] text-ash-muted">
@@ -754,24 +774,6 @@ export function CaptureViewport({
               className="sr-only"
               onChange={(event) => void handleGalleryFile(event)}
             />
-          </div>
-        ) : null}
-
-        {pending ? (
-          <div className="grid grid-cols-[1fr_1.4fr] gap-3">
-            <button type="button" className="ash-cta-secondary py-4" onClick={retake}>
-              Retake
-            </button>
-            <button
-              type="button"
-              className="ash-cta py-4"
-              onClick={() => {
-                voiceRef.current.stop();
-                onCaptured(pending.blob, pending.gate, pending.photo);
-              }}
-            >
-              Use this photo
-            </button>
           </div>
         ) : null}
       </div>
