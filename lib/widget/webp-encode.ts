@@ -103,12 +103,15 @@ export function bodyKeepBox(
     return headless;
   }
 
+  // Centred on the torso, not on body + arms: in the side photo the arms
+  // reach forward, and the GPU looks for the person around the middle.
   const xs = body.map((p) => p.x * imageWidth);
-  const centre = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const width = Math.min(
-    imageWidth,
-    Math.max(Math.max(...xs) - Math.min(...xs) + 2 * margin, MIN_BODY_ASPECT * height),
-  );
+  const torso = [11, 12, 23, 24].map((index) => visible(index, 0.3)).filter((p) => p !== null);
+  const centre = torso.length > 0
+    ? (torso.reduce((sum, p) => sum + p.x, 0) / torso.length) * imageWidth
+    : (Math.min(...xs) + Math.max(...xs)) / 2;
+  const reach = Math.max(...xs.map((x) => Math.abs(x - centre)));
+  const width = Math.min(imageWidth, Math.max(2 * (reach + margin), MIN_BODY_ASPECT * height));
   const x = Math.round(Math.min(Math.max(centre - width / 2, 0), imageWidth - width));
   return { x, y: headless.y, width: Math.round(width), height };
 }
