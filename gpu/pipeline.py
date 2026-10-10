@@ -83,6 +83,19 @@ class AshriumPipeline:
             raise RuntimeError(f"GPU setup failed on live weights: {error}") from error
 
         self.setup_ms = elapsed_ms(setup_started)
+        # Compile the cloth kernels now, off the shopper's clock: the first drape
+        # in a new container otherwise spends ~18 s compiling. Holds the drape
+        # lock, so a drape that arrives early waits for it instead of racing it.
+        threading.Thread(target=self._warm_up_drape, name="drape-warm-up", daemon=True).start()
+
+    def _warm_up_drape(self) -> None:
+        try:
+            with self._drape_lock:
+                from drape.newton_style3d import warm_up
+
+                print(f"Drape warm-up: {warm_up()}", flush=True)
+        except Exception as error:  # a failed warm-up only means the first drape compiles
+            print(f"Drape warm-up failed: {type(error).__name__}: {error}", flush=True)
 
     def predict_body(
         self,
@@ -153,39 +166,61 @@ class AshriumPipeline:
 
     def _predict_drape(
         self,
-        collider_positions: str,
-        collider_indices: str,
-        garment_rest_mesh: str,
+        body_positions: str,
+        garment_mesh: str,
+        body_girths: str,
         tensile_stiffness: float,
         bending_rigidity: float,
         shear_stiffness: float,
         area_density: float,
-        origin_y: float,
     ) -> dict:
-        from drape.collider import downsample_to_lod3, parse_collider_mesh
-        from drape.garment import build_cloth_from_rest_mesh, parse_rest_length_mesh
-        from drape.newton_xpbd import drape_newton_xpbd
+        """One size of a sewn garment on the shopper's fitted body (drape/sewn.py)."""
+        from body.girths import torso_landmarks_cm
+        from body.photo_uv import mhr_lod1_faces
+        from body.topology import MHR_VERTEX_COUNT
+        from drape.sewn import body_collider, drape_sewn_size, sim_output, too_small
 
-        positions, indices = parse_collider_mesh(
-            _parse_json(collider_positions, "collider_positions"),
-            _parse_json(collider_indices, "collider_indices"),
+        started = time.perf_counter()
+        body_cm = np.asarray(_parse_json(body_positions, "body_positions"), dtype=np.float64).reshape(-1, 3)
+        if body_cm.shape[0] != MHR_VERTEX_COUNT or not np.isfinite(body_cm).all():
+            raise RuntimeError(f"body_positions must be the {MHR_VERTEX_COUNT}-vertex MHR LOD 1 body in cm.")
+        mesh = _parse_json(garment_mesh, "garment_mesh")
+        if not isinstance(mesh, dict) or mesh.get("schema") != "ashrium.garment_mesh.v1":
+            raise RuntimeError("garment_mesh must be an ashrium.garment_mesh.v1 sewn garment (re-ingest the SKU).")
+        category = str(mesh.get("category") or "")
+        if category not in ("tee", "pant", "dress", "outerwear"):
+            raise RuntimeError("garment_mesh has no category (re-ingest the SKU).")
+        reason = too_small(
+            category,
+            mesh.get("pattern_girths") or {},
+            _parse_json(body_girths, "body_girths"),
+            bool(mesh.get("elastic_waist")),
         )
-        collider_verts, collider_faces = downsample_to_lod3(positions, indices)
-        rest = parse_rest_length_mesh(_parse_json(garment_rest_mesh, "garment_rest_mesh"))
-        cloth_rest, cloth_indices, pin_mask = build_cloth_from_rest_mesh(rest, float(origin_y))
-        draped = drape_newton_xpbd(
-            cloth_rest=cloth_rest,
-            cloth_indices=cloth_indices,
-            pin_mask=pin_mask,
-            collider_positions=collider_verts,
-            collider_indices=collider_faces,
-            mechanical={
+        if reason:
+            return {"task": "drape", "status": "too_small", "reason": reason, "topology_version": MHR_TOPOLOGY_VERSION}
+
+        faces = mhr_lod1_faces()
+        body_m = body_cm / 100.0
+        landmarks = torso_landmarks_cm(body_cm)
+        if category == "pant" and landmarks is None:
+            raise RuntimeError("No waist found on the fitted body; cannot place bottoms.")
+        collider_positions, collider_faces, _inflate = body_collider(body_m, faces)
+        result = drape_sewn_size(
+            mesh,
+            category,
+            body_m,
+            faces,
+            (collider_positions, collider_faces),
+            {
                 "tensile_stiffness": float(tensile_stiffness),
                 "bending_rigidity": float(bending_rigidity),
                 "shear_stiffness": float(shear_stiffness),
                 "area_density": float(area_density),
             },
+            waist_y=None if landmarks is None else landmarks["waist_y"] / 100.0,
         )
-        draped["task"] = "drape"
-        draped["topology_version"] = MHR_TOPOLOGY_VERSION
-        return draped
+        out = sim_output(result, mesh)
+        out["task"] = "drape"
+        out["topology_version"] = MHR_TOPOLOGY_VERSION
+        out["timings_ms"] = {**out["timings_ms"], "request_ms": elapsed_ms(started)}
+        return out

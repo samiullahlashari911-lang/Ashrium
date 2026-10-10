@@ -134,7 +134,7 @@ GIRTH_KEYS = ("chestCm", "waistCm", "hipCm")
 # Owner Q23 (2026-10-09): the sewn pattern must match the published chart, not
 # just pass the cross-check: the drape shows the real size.
 CALIBRATE_TOL_CM = 1.0
-CALIBRATE_MAX_ITERATIONS = 8
+CALIBRATE_MAX_ITERATIONS = 12
 
 
 class CalibrationError(RuntimeError):
@@ -161,6 +161,7 @@ def calibrate_to_chart(
     """
     proxy = {key: value for key, value in target.items()}
     girths: dict[str, float] = {}
+    previous: dict[str, float] = {}
     for iteration in range(1, CALIBRATE_MAX_ITERATIONS + 1):
         girths = build(dict(proxy))
         errors = {key: float(target[key]) - float(girths[key]) for key in keys}
@@ -169,7 +170,13 @@ def calibrate_to_chart(
         for key in keys:
             if girths[key] <= 0:
                 raise CalibrationError(f"pattern {key} is empty")
-            proxy[key] = float(proxy[key]) * float(target[key]) / float(girths[key])
+            ratio = float(target[key]) / float(girths[key])
+            # An input held at one of GarmentCode's clamps (a trouser length
+            # ratio caps at 0.9) does not move the pattern at all: step twice
+            # as far until it leaves the clamp instead of creeping out of it.
+            stuck = key in previous and abs(float(girths[key]) - previous[key]) < 1e-6
+            proxy[key] = float(proxy[key]) * (ratio * ratio if stuck else ratio)
+        previous = {key: float(girths[key]) for key in keys}
     worst = {key: round(float(girths[key]) - float(target[key]), 1) for key in keys}
     raise CalibrationError(f"pattern cannot match the chart within {CALIBRATE_TOL_CM} cm: off by {worst}")
 
@@ -317,7 +324,16 @@ def instantiate_patterns(
         if sew:
             from pattern.sew import sew_garment
 
-            mesh["garment_mesh"] = sew_garment(garment)
+            sewn = sew_garment(garment)
+            # Everything the drape needs travels with the sewn garment
+            # (drape/sewn.py): stored at ingest, read back unchanged.
+            sewn["category"] = category
+            sewn["size_code"] = str(size["sizeCode"])
+            sewn["pattern_girths"] = pattern_girths
+            sewn["elastic_waist"] = bool(style.get("elastic_waist"))
+            # The chart's waist is the relaxed elastic; the sewn waist is wider.
+            sewn["chart_waist_cm"] = float(size["waistCm"]) if "waistCm" in size["published"] else None
+            mesh["garment_mesh"] = sewn
         meshes.append(mesh)
 
     return {

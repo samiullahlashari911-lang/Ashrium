@@ -146,6 +146,5 @@ class SolverPrepTests(unittest.TestCase):
         areas = 0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1)
         self.assertGreater(float(areas.min()), 1e-7)
 
-
 if __name__ == "__main__":
     unittest.main()

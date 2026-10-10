@@ -56,10 +56,18 @@ CHEST_BAND_STATURE_FRAC = 0.05
 # Waist / hip (mesh-only). Torso and thigh clusters sit near the midline;
 # A-pose arms and hands sit far out (> 25 cm on a heavy body).
 TORSO_CLUSTER_RADIUS_CM = 20.0
-# The seat is searched from just above mid-thigh up through the lower part of
-# the torso (fractions of stature / of the span up to the chest band).
-HIP_SCAN_BOTTOM_FRAC = 0.40
-HIP_SCAN_SHARE = 0.55
+# Landmarks from the crotch up (fractions of stature). The crotch is the lowest
+# vertex on the body's centre line in the lower body (the legs are apart below
+# it). The seat (hip) is the widest slice just above it; the waist the
+# narrowest slice between the seat and the ribs (under the armpit). A fixed
+# 40%-of-stature start measured a short man's thighs as his hips (owner grid,
+# 2026-10-10) and a waist run up to the chest band found the under-bust.
+CROTCH_SCAN_FRAC = (0.30, 0.60)
+CENTRE_LINE_CM = 1.0
+# The seat sits 5-10% of stature above the crotch; higher, a belly is wider than the seat.
+HIP_ABOVE_CROTCH_FRAC = (0.02, 0.10)
+WAIST_ABOVE_HIP_FRAC = 0.04
+WAIST_BELOW_ARMPIT_FRAC = 0.10
 
 
 def _cross2(origin: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
@@ -430,32 +438,53 @@ def _torso_girth_profile(
     return profile
 
 
-def _waist_hip_girth_cm(
-    vertices: np.ndarray,
-    up_axis: int,
-    y_min: float,
-    stature: float,
-) -> tuple[float, float] | None:
-    """Mesh-only hip (max, lower torso) and waist (min, hip to chest band); like the chest.
+def torso_landmarks_cm(vertices: np.ndarray) -> dict[str, float] | None:
+    """Mesh-only torso landmarks of a canonical body (cm, up axis = the longest span).
 
-    None when the arms touch the torso all the way down (no armpit found).
+    Heights (`*_y`) of the armpit, the crotch, the seat (widest slice just above
+    the crotch) and the waist (narrowest slice between the seat and the ribs),
+    plus the waist and hip girths there. The drape anchors bottoms at `waist_y`. None
+    when the arms touch the torso all the way down (no armpit found).
     """
+    up_axis = _up_axis(vertices)
+    up = vertices[:, up_axis]
+    y_min = float(up.min())
+    stature = float(up.max() - y_min)
     midline = body_midline(vertices, up_axis, y_min, stature)
     armpit = find_armpit(vertices, up_axis, y_min, stature, midline)
     if armpit is None:
         return None
-    chest_bottom = armpit - ARMPIT_CLEARANCE_CM - CHEST_BAND_STATURE_FRAC * stature
-    hip_lo = y_min + HIP_SCAN_BOTTOM_FRAC * stature
-    hip_hi = hip_lo + HIP_SCAN_SHARE * (chest_bottom - hip_lo)
-    hip_profile = _torso_girth_profile(vertices, up_axis, hip_lo, hip_hi, midline)
+    horiz, _ = _horizontal_axes(up_axis)
+    lower = (up >= y_min + CROTCH_SCAN_FRAC[0] * stature) & (up <= y_min + CROTCH_SCAN_FRAC[1] * stature)
+    centre = lower & (np.abs(vertices[:, horiz] - midline) <= CENTRE_LINE_CM)
+    if not centre.any():
+        return None
+    crotch = float(up[centre].min())
+    hip_profile = _torso_girth_profile(
+        vertices,
+        up_axis,
+        crotch + HIP_ABOVE_CROTCH_FRAC[0] * stature,
+        crotch + HIP_ABOVE_CROTCH_FRAC[1] * stature,
+        midline,
+    )
     if not hip_profile:
         return None
     hip_plane, hip = max(hip_profile, key=lambda row: row[1])
-    waist_profile = _torso_girth_profile(vertices, up_axis, hip_plane, chest_bottom, midline)
+    waist_hi = armpit - WAIST_BELOW_ARMPIT_FRAC * stature
+    waist_lo = min(hip_plane + WAIST_ABOVE_HIP_FRAC * stature, waist_hi - SLICE_HALF_THICKNESS_CM)
+    waist_profile = _torso_girth_profile(vertices, up_axis, waist_lo, waist_hi, midline)
     if not waist_profile:
         return None
-    waist = min(girth for _plane, girth in waist_profile)
-    return waist, hip
+    waist_plane, waist = min(waist_profile, key=lambda row: row[1])
+    return {
+        "armpit_y": float(armpit),
+        "crotch_y": crotch,
+        "waist_y": float(waist_plane),
+        "hip_y": float(hip_plane),
+        "waist_cm": float(waist),
+        "hip_cm": float(hip),
+        "midline": float(midline),
+    }
 
 
 def measure_chest_waist_hip_cm(
@@ -479,61 +508,36 @@ def measure_chest_waist_hip_cm(
     if stature < 50:
         raise RuntimeError("Canonical mesh stature is implausible for a centimetre MHR mesh.")
 
-    if joints_cm is None:
-        chest = _slice_girth_cm(
-            vertices, up_axis, y_min + CHEST_STATURE_FRACTION * stature, 0.42
-        )
-        waist = _slice_girth_cm(
-            vertices, up_axis, y_min + WAIST_STATURE_FRACTION * stature, 0.48
-        )
-        hip = _slice_girth_cm(
-            vertices, up_axis, y_min + HIP_STATURE_FRACTION * stature, 0.58
-        )
-        return {
-            "chest_cm": float(chest),
-            "waist_cm": float(waist),
-            "hip_cm": float(hip),
-        }
-
-    windows = torso_search_windows(joints_cm, up_axis)
-    windows["chest"] = _clamp_window(windows["chest"], y_min, y_min + stature)
-    windows["waist"] = _clamp_window(windows["waist"], y_min, y_min + stature)
-    windows["hip"] = _clamp_window(windows["hip"], y_min, y_min + stature)
-    lateral = windows["lateral"]
     chest = _chest_girth_cm(vertices, up_axis, y_min, stature)
     chest_from_armpit = chest is not None
-    if chest is None:
-        chest = _search_girth_cm(
-            vertices,
-            up_axis,
-            windows["chest"],
-            0.42,
-            "max",
-            lateral["chest_mid"],
-            lateral["chest_half"],
-        )
-    waist_hip = _waist_hip_girth_cm(vertices, up_axis, y_min, stature)
-    if waist_hip is not None:
-        waist, hip = waist_hip
+    landmarks = torso_landmarks_cm(vertices)
+    if chest is not None and landmarks is not None:
+        waist, hip = landmarks["waist_cm"], landmarks["hip_cm"]
+    elif joints_cm is None:
+        # No armpit and no joints (tests / debug only): stature fractions.
+        if chest is None:
+            chest = _slice_girth_cm(vertices, up_axis, y_min + CHEST_STATURE_FRACTION * stature, 0.42)
+        waist = _slice_girth_cm(vertices, up_axis, y_min + WAIST_STATURE_FRACTION * stature, 0.48)
+        hip = _slice_girth_cm(vertices, up_axis, y_min + HIP_STATURE_FRACTION * stature, 0.58)
     else:
-        waist = _search_girth_cm(
-            vertices,
-            up_axis,
-            windows["waist"],
-            0.48,
-            "min",
-            lateral["waist_mid"],
-            lateral["waist_half"],
-        )
-        hip = _search_girth_cm(
-            vertices,
-            up_axis,
-            windows["hip"],
-            0.58,
-            "max",
-            lateral["hip_mid"],
-            lateral["hip_half"],
-        )
+        windows = torso_search_windows(joints_cm, up_axis)
+        windows["chest"] = _clamp_window(windows["chest"], y_min, y_min + stature)
+        windows["waist"] = _clamp_window(windows["waist"], y_min, y_min + stature)
+        windows["hip"] = _clamp_window(windows["hip"], y_min, y_min + stature)
+        lateral = windows["lateral"]
+        if chest is None:
+            chest = _search_girth_cm(
+                vertices, up_axis, windows["chest"], 0.42, "max", lateral["chest_mid"], lateral["chest_half"]
+            )
+        if landmarks is not None:
+            waist, hip = landmarks["waist_cm"], landmarks["hip_cm"]
+        else:
+            waist = _search_girth_cm(
+                vertices, up_axis, windows["waist"], 0.48, "min", lateral["waist_mid"], lateral["waist_half"]
+            )
+            hip = _search_girth_cm(
+                vertices, up_axis, windows["hip"], 0.58, "max", lateral["hip_mid"], lateral["hip_half"]
+            )
     return {
         "chest_cm": float(chest),
         "waist_cm": float(waist),

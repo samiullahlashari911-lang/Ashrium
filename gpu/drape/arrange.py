@@ -2,8 +2,9 @@
 
 GarmentCode positions panels around its own mean body. The shopper's body is
 taller/shorter and sits elsewhere, so the garment is moved (never scaled: the
-size is the size) so its torso centres on the shopper's chest and its shoulder
-line rests just above theirs; then every panel is slid out along its normal
+size is the size): a top centres on the shopper's chest with its shoulder line
+just above theirs; a bottom centres on their seat with its top edge at their
+natural waist. Then every panel is slid out along its normal
 until it clears the skin, the seams are welded, and any welded vertex still
 inside the body is pushed out. Distances are exact (closest point on the
 watertight LOD 1 body): a nearest-vertex sign on the simplified collider
@@ -26,6 +27,12 @@ SHOULDER_BAND_M = (0.12, 0.17)
 SHOULDER_LIFT_M = 0.015
 MAX_PUSH_M = 0.15
 MAX_PUSH_STEP_M = 0.02
+# A clear panel is pulled in until its nearest point is this far from the skin.
+HUG_M = 0.02
+# Bottoms: the seat band sits this far below the waist; hands hang beside it in
+# A-pose (> 0.3 m off the midline), the torso stays inside this half-width.
+SEAT_BELOW_WAIST_M = 0.08
+SEAT_HALF_WIDTH_M = 0.28
 
 
 def body_normals(positions: np.ndarray, faces: np.ndarray) -> np.ndarray:
@@ -219,16 +226,13 @@ def orient_panels(
     return welded_out, panel_out, [int(index) for index in np.nonzero(flip)[0]]
 
 
-def arrange_on_body(
-    garment: dict[str, Any],
+def _anchor_top(
+    positions: np.ndarray,
+    panel_of_vertex: np.ndarray,
+    names: list[str],
     body_positions: np.ndarray,
-    body_faces: np.ndarray,
-) -> dict[str, Any]:
-    """`body_positions`/`body_faces`: the watertight LOD 1 body (not the collider)."""
-    body = Body(body_positions, body_faces)
-    positions = np.asarray(garment["positions"], dtype=np.float64).reshape(-1, 3)
-    panel_of_vertex = np.asarray(garment["panel_of_vertex"], dtype=np.int64)
-    names: list[str] = list(garment["panels"])
+) -> tuple[np.ndarray, float]:
+    """Centre a top on the chest and rest its shoulder line on the shopper's."""
     torso_panels = [index for index, name in enumerate(names) if _is_torso(name)]
     if not torso_panels:
         raise RuntimeError(f"No torso panels among {names}.")
@@ -253,6 +257,44 @@ def arrange_on_body(
         positions[torso], body_cx
     )
     positions[:, 1] += lift
+    return positions, float(lift)
+
+
+def _anchor_bottom(positions: np.ndarray, body_positions: np.ndarray, waist_y: float) -> tuple[np.ndarray, float]:
+    """Centre a bottom on the seat and put its top edge at the natural waist."""
+    seat_y = waist_y - SEAT_BELOW_WAIST_M
+    band = body_positions[np.abs(body_positions[:, 1] - seat_y) < 0.03]
+    central = band[np.abs(band[:, 0] - np.median(band[:, 0])) < SEAT_HALF_WIDTH_M]
+    if central.shape[0] < 8:
+        raise RuntimeError("No seat band on the body below the waist.")
+    body_cx = float(np.median(central[:, 0]))
+    body_cz = 0.5 * float(central[:, 2].min() + central[:, 2].max())
+    garment_cx = 0.5 * float(positions[:, 0].min() + positions[:, 0].max())
+    garment_cz = 0.5 * float(positions[:, 2].min() + positions[:, 2].max())
+    lift = waist_y - float(positions[:, 1].max())
+    return positions + np.array([body_cx - garment_cx, lift, body_cz - garment_cz]), float(lift)
+
+
+def arrange_on_body(
+    garment: dict[str, Any],
+    body_positions: np.ndarray,
+    body_faces: np.ndarray,
+    waist_y: float | None = None,
+    hug: bool = True,
+) -> dict[str, Any]:
+    """`body_positions`/`body_faces`: the watertight LOD 1 body (not the collider).
+
+    `waist_y` (metres) places a bottom with its top edge at the shopper's
+    natural waist; without it the garment is a top, hung from the shoulders.
+    """
+    body = Body(body_positions, body_faces)
+    positions = np.asarray(garment["positions"], dtype=np.float64).reshape(-1, 3)
+    panel_of_vertex = np.asarray(garment["panel_of_vertex"], dtype=np.int64)
+    names: list[str] = list(garment["panels"])
+    if waist_y is None:
+        positions, lift = _anchor_top(positions, panel_of_vertex, names, body_positions)
+    else:
+        positions, lift = _anchor_bottom(positions, body_positions, float(waist_y))
 
     pushes: dict[str, float] = {}
     for panel_index, name in enumerate(names):
@@ -269,6 +311,22 @@ def arrange_on_body(
             step = float(np.clip(CLEAR_M - float(distance.min()), 0.005, MAX_PUSH_STEP_M))
             panel = panel + outward * step
             travelled += step
+        if hug and travelled == 0.0:
+            # GarmentCode spaces its front and back sheets ~55 cm apart; welded
+            # as they are, a seam lands mid-way and its 30 cm edges cut through
+            # a broad shoulder or a thick arm, and the cloth stays caught there
+            # (torn sleeve caps on an average man). Slide each clear sheet in
+            # along its normal until it hugs the body: no point can come closer
+            # than the distance moved, so one step keeps HUG_M everywhere.
+            # Drape grid, 23 drapes: explosions 6 -> 1, p99 stretch 1.26 -> 1.18.
+            # Splitting the long seam edges instead made it worse (12
+            # explosions): the new points start far from their tiny rest length.
+            # Sliding sleeves across the arm to centre them did too (29 vs 17).
+            distance, _ = body.distance(panel)
+            pull = float(distance.min()) - HUG_M
+            if pull > 0.0:
+                panel = panel - outward * pull
+                travelled = -pull
         positions[mask] = panel
         pushes[name] = round(travelled, 4)
 
@@ -298,19 +356,21 @@ def arrange_on_body(
         welded,
         body,
     )
-    rest_uv, mirrored = solver_rest_uv(
-        np.asarray(garment["uv"], dtype=np.float64).reshape(-1, 2), panel_oriented, panel_of_vertex
-    )
+    texture_uv = np.asarray(garment["uv"], dtype=np.float64).reshape(-1, 2)
+    rest_uv, mirrored = solver_rest_uv(texture_uv, panel_oriented, panel_of_vertex)
     return {
         "rest_uv": rest_uv,
+        # The pattern position of every panel vertex: texture space.
+        "texture_uv": texture_uv,
+        "panel_of_vertex": panel_of_vertex,
         "welded_positions": welded,
         "welded_triangles": oriented,
         "panel_triangles": panel_oriented,
         "welded_id": welded_id,
         "placed_positions": positions,
         "diagnostics": {
-            "shift_m": [round(float(v), 4) for v in shift],
-            "shoulder_lift_m": round(float(lift), 4),
+            "anchor": "shoulders" if waist_y is None else "waist",
+            "lift_m": round(float(lift), 4),
             "panel_push_m": pushes,
             "pushed_after_weld": int(inside.sum()),
             "welded_vertex_count": welded_count,

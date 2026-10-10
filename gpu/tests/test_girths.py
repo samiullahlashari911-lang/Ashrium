@@ -14,7 +14,7 @@ if str(COG_ROOT) not in sys.path:
     sys.path.insert(0, str(COG_ROOT))
 
 from body.diagnostics import StageClock, merge_fit_diagnostics  # noqa: E402
-from body.girths import measure_chest_waist_hip_cm, torso_search_windows  # noqa: E402
+from body.girths import measure_chest_waist_hip_cm, torso_landmarks_cm, torso_search_windows  # noqa: E402
 from body.pins import PINNED_GIT_SHAS  # noqa: E402
 from body.topology import (  # noqa: E402
     MHR_JOINT_C_NECK,
@@ -42,8 +42,13 @@ def _standing_torso(include_arms: bool) -> tuple[np.ndarray, np.ndarray]:
     rings: list[np.ndarray] = []
     for y in np.arange(0.0, 181.0, 2.0):
         if y < 78:
-            rx, rz = 7.0, 6.0
-        elif y < 98:
+            # Two legs, apart below the crotch at 78 cm.
+            for side in (-1.0, 1.0):
+                leg = _ellipse_ring(float(y), 6.0, 6.0)
+                leg[:, 0] += side * 9.0
+                rings.append(leg)
+            continue
+        if y < 98:
             rx, rz = 18.0, 14.0
         elif y < 116:
             rx, rz = 11.0, 9.0
@@ -169,6 +174,17 @@ class GirthGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(girths["waist_cm"], waist_ring, delta=1.5)
         self.assertAlmostEqual(girths["hip_cm"], hip_ring, delta=1.5)
         self.assertEqual(girths, measure_chest_waist_hip_cm(self._shouldered_torso(), joints))
+
+    def test_hip_is_the_seat_above_the_crotch_not_the_thighs(self) -> None:
+        # Owner grid (2026-10-10): a fixed 40%-of-stature start measured a short
+        # man's thighs as his hips (and anchored his trousers there).
+        landmarks = torso_landmarks_cm(self._shouldered_torso())
+        self.assertIsNotNone(landmarks)
+        assert landmarks is not None
+        self.assertAlmostEqual(landmarks["crotch_y"], 78.0, delta=1.0)
+        self.assertGreater(landmarks["hip_y"], landmarks["crotch_y"])
+        self.assertGreater(landmarks["waist_y"], landmarks["hip_y"])
+        self.assertLess(landmarks["waist_y"], landmarks["armpit_y"])
 
     def test_waist_and_hip_ignore_hands_beside_the_hips(self) -> None:
         shouldered = self._shouldered_torso()

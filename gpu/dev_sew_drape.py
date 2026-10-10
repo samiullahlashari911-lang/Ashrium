@@ -153,7 +153,7 @@ def sew_and_drape(
         timings["border_ms"] = _ms(step)
         # Sleeve sag: gap below the arm vs on top of it (cloth hanging = small on top, large below).
         welded_panel = np.zeros(int(arranged["welded_id"].max()) + 1, dtype=np.int64)
-        welded_panel[arranged["welded_id"]] = np.asarray(garment["panel_of_vertex"])
+        welded_panel[arranged["welded_id"]] = arranged["panel_of_vertex"]
         sleeve = np.isin(welded_panel, [i for i, n in enumerate(garment["panels"]) if "sleeve" in n])
         _gap, surface = signed_distance_to_mesh(bordered[sleeve], body, faces)
         up = normals[nearest_vertices(surface, body, 1)[:, 0]][:, 1]

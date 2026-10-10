@@ -110,6 +110,19 @@ class CalibrationTests(unittest.TestCase):
         with self.assertRaises(CalibrationError):
             calibrate_to_chart({"chestCm": 100.0, "lengthCm": 70.0}, ["chestCm", "lengthCm"], stuck)
 
+    def test_a_clamped_input_is_stepped_out_of_its_clamp(self) -> None:
+        # Live (joggers XL): GarmentCode caps a trouser's length ratio at 0.9, so
+        # the first proxies all gave the same 102.6 cm and the plain update crept
+        # out of the clamp too slowly to converge in the iteration budget.
+        def garmentcode(proxy: dict) -> dict:
+            ratio = min(proxy["lengthCm"] / 80.0, 0.9)
+            return {"hipCm": proxy["hipCm"] * 1.116, "lengthCm": 114.0 * ratio}
+
+        target = {"sizeCode": "XL", "hipCm": 108.2, "lengthCm": 98.0, "published": {"hipCm", "lengthCm"}}
+        girths, iterations = calibrate_to_chart(target, ["hipCm", "lengthCm"], garmentcode)
+        self.assertLessEqual(abs(girths["lengthCm"] - 98.0), 1.0)
+        self.assertLessEqual(iterations, 8)
+
     def test_keys_are_the_published_values_plus_length(self) -> None:
         self.assertEqual(calibration_keys("tee", {"chestCm", "lengthCm"}, False), ["chestCm", "lengthCm"])
         self.assertEqual(

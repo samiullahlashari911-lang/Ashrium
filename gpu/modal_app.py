@@ -174,6 +174,8 @@ class AshriumGpu:
         _package_on_path()
         os.environ["ASHRIUM_WEIGHTS_ROOT"] = WEIGHTS_MOUNT
         os.environ["GARMENTCODE_ROOT"] = GARMENTCODE_ROOT
+        # Compiled Warp/Newton kernels persist on the weights Volume across containers.
+        os.environ.setdefault("ASHRIUM_WARP_CACHE", f"{WEIGHTS_MOUNT}/warp-cache")
         from pipeline import AshriumPipeline
 
         self.pipeline = AshriumPipeline()
@@ -211,40 +213,40 @@ class AshriumGpu:
     @modal.method()
     def drape(
         self,
-        collider_positions: str,
-        collider_indices: str,
-        garment_rest_mesh: str,
+        body_positions: str,
+        garment_mesh: str,
+        body_girths: str,
         tensile_stiffness: float,
         bending_rigidity: float,
         shear_stiffness: float,
         area_density: float,
-        origin_y: float,
     ) -> dict:
         return self.pipeline.predict_drape(
-            collider_positions=collider_positions,
-            collider_indices=collider_indices,
-            garment_rest_mesh=garment_rest_mesh,
+            body_positions=body_positions,
+            garment_mesh=garment_mesh,
+            body_girths=body_girths,
             tensile_stiffness=float(tensile_stiffness),
             bending_rigidity=float(bending_rigidity),
             shear_stiffness=float(shear_stiffness),
             area_density=float(area_density),
-            origin_y=float(origin_y),
         )
 
 
 # GarmentCode 2D instantiation is CPU work: grading a catalog must not pay for
 # an A100 (and its 35 s model load) or take shopper GPU slots.
-@app.function(image=image, cpu=4.0, memory=8192, timeout=300, max_containers=8)
+@app.function(image=image, cpu=4.0, memory=8192, timeout=600, max_containers=8)
 def pattern_task(product_text: str, size_chart: str, garment_category: str) -> dict:
     _package_on_path()
     from body.topology import MHR_TOPOLOGY_VERSION
     from pattern.instantiate import instantiate_patterns
 
     text = product_text if isinstance(product_text, str) else ""
+    # sew=True: each size also carries its sewn 3D garment for the shopper drape.
     result = instantiate_patterns(
         category=garment_category,
         product_text=text[:16_000],
         size_chart_json=size_chart,
+        sew=True,
     )
     result["task"] = "pattern"
     result["topology_version"] = MHR_TOPOLOGY_VERSION
@@ -341,14 +343,13 @@ def api():
         payload = read_json(raw)
         gpu = AshriumGpu()
         result = await gpu.drape.remote.aio(
-            collider_positions=str(payload.get("collider_positions") or ""),
-            collider_indices=str(payload.get("collider_indices") or ""),
-            garment_rest_mesh=str(payload.get("garment_rest_mesh") or ""),
+            body_positions=str(payload.get("body_positions") or ""),
+            garment_mesh=str(payload.get("garment_mesh") or ""),
+            body_girths=str(payload.get("body_girths") or "{}"),
             tensile_stiffness=float(payload.get("tensile_stiffness") or 75),
             bending_rigidity=float(payload.get("bending_rigidity") or 0.03),
             shear_stiffness=float(payload.get("shear_stiffness") or 45),
             area_density=float(payload.get("area_density") or 0.18),
-            origin_y=float(payload.get("origin_y") or 0),
         )
         return JSONResponse(result)
 

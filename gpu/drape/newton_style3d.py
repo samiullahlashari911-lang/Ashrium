@@ -250,3 +250,47 @@ def drape_style3d(
             "min_settle_frames": min_settle_frames, "max_settle_frames": max_settle_frames,
         },
     }
+
+
+def warm_up() -> dict[str, Any]:
+    """Compile every Style3D kernel on a tiny cloth so the first shopper's drape does not.
+
+    A 10 x 10 sheet dropped on a box runs the same solver, collision and
+    CUDA-graph path as a garment (kernels compile per module, not per size).
+    Runs while the shopper is still on the capture screens.
+    """
+    n = 10
+    xs = np.linspace(-0.15, 0.15, n)
+    grid_x, grid_z = np.meshgrid(xs, xs)
+    flat = np.column_stack([grid_x.ravel(), grid_z.ravel()])
+    sheet = np.column_stack([flat[:, 0], np.full(n * n, 1.05), flat[:, 1]])
+    triangles = []
+    for row in range(n - 1):
+        for col in range(n - 1):
+            a, b, c, d = row * n + col, row * n + col + 1, (row + 1) * n + col, (row + 1) * n + col + 1
+            triangles += [[a, c, b], [b, c, d]]
+    tri = np.asarray(triangles, dtype=np.int64)
+    corners = flat[tri]
+    signed = (corners[:, 1, 0] - corners[:, 0, 0]) * (corners[:, 2, 1] - corners[:, 0, 1]) - (
+        corners[:, 1, 1] - corners[:, 0, 1]
+    ) * (corners[:, 2, 0] - corners[:, 0, 0])
+    if (signed < 0).all():
+        tri = tri[:, [0, 2, 1]]
+    box = np.array([[x, y, z] for x in (-0.2, 0.2) for y in (0.8, 1.0) for z in (-0.2, 0.2)], dtype=np.float64)
+    box_faces = np.array([
+        [0, 1, 3], [0, 3, 2], [4, 6, 7], [4, 7, 5], [0, 4, 5], [0, 5, 1],
+        [2, 3, 7], [2, 7, 6], [0, 2, 6], [0, 6, 4], [1, 5, 7], [1, 7, 3],
+    ], dtype=np.int64)
+    result = drape_style3d(
+        welded_positions=sheet,
+        welded_triangles=tri,
+        panel_uv=flat,
+        panel_triangles=tri,
+        collider_positions=box,
+        collider_indices=box_faces,
+        mechanical={"tensile_stiffness": 80.0, "bending_rigidity": 0.04, "shear_stiffness": 40.0, "area_density": 0.18},
+        sew_frames=2,
+        min_settle_frames=1,
+        max_settle_frames=2,
+    )
+    return {"warm_up_ms": result["timings_ms"]["total_ms"]}
