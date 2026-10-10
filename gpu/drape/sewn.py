@@ -24,9 +24,14 @@ from drape.newton_style3d import drape_style3d
 # fits overstretched or sank into the body (8 of 11 under -4%). The cloth model
 # cannot show a body-hugging fit, so those sizes are "too tight to show".
 MIN_EASE = 0.02
-# Elastic / drawstring waist: the top band of each panel is gathered to the
-# chart's relaxed waist, so it grips the body like the real waistband.
+# Elastic / drawstring waist: the top band of each panel is gathered so it
+# grips the body like the real waistband with its drawstring tied.
 WAIST_BAND_M = 0.04
+# Band rest width as a share of the chart's relaxed waist. 0.78 is the gather
+# the drape grid validated (g5: joggers M-4XL gathered 0.775-0.81 when the
+# sewn waist was still mis-measured at the hip); the pattern now sews the waist
+# at the relaxed chart value, so the grip is stated directly.
+DRAWSTRING_GRIP = 0.78
 
 # Quality limits (the drape grid's pass/fail). Edge ratio = drawn / pattern length.
 # Healthy drapes: p99 1.10-1.27, single seam edges up to ~2.2. Explosions: p99 > 1.4.
@@ -172,7 +177,9 @@ def drape_sewn_size(
     sewn_waist = (garment_mesh.get("pattern_girths") or {}).get("waistCm")
     if category == "pant" and garment_mesh.get("elastic_waist") and relaxed and sewn_waist:
         solver_uv = arranged["rest_uv"].copy()
-        gather = gather_elastic_waist(solver_uv, arranged["panel_of_vertex"], float(sewn_waist), float(relaxed))
+        gather = gather_elastic_waist(
+            solver_uv, arranged["panel_of_vertex"], float(sewn_waist), DRAWSTRING_GRIP * float(relaxed)
+        )
     collider_positions, collider_faces = collider
     drape = drape_style3d(
         welded_positions=arranged["welded_positions"],

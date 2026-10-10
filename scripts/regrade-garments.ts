@@ -34,7 +34,7 @@ const supabase = createServiceClient();
 
 const { data: profiles, error } = await supabase
   .from('garment_cad_profiles')
-  .select('id, name, category')
+  .select('id, name, category, mode, print_qa_passed')
   .eq('tenant_id', tenantId);
 if (error || !profiles) {
   throw new Error(error?.message ?? 'No garment profiles.');
@@ -85,6 +85,17 @@ for (const profile of profiles) {
     graded.set(key, result);
   }
   if (result.status !== 'ok') {
+    // No 3D for this product now: drop any garment an older grade left behind.
+    await supabase
+      .from('garment_size_variants')
+      .update({ rest_length_path: null })
+      .eq('tenant_id', tenantId)
+      .eq('garment_id', profile.id);
+    await supabase
+      .from('garment_cad_profiles')
+      .update({ approximate_fit: true })
+      .eq('tenant_id', tenantId)
+      .eq('id', profile.id);
     console.log(`fail  ${profile.name}: ${result.status} ${result.unsupportedReason ?? ''}`);
     continue;
   }
@@ -107,6 +118,12 @@ for (const profile of profiles) {
     }
     written += 1;
   }
+  // Graded and sewn: Approximate only for what ingest would still flag (Mode C, failed print QA).
+  await supabase
+    .from('garment_cad_profiles')
+    .update({ approximate_fit: profile.mode === 'C' || !profile.print_qa_passed })
+    .eq('tenant_id', tenantId)
+    .eq('id', profile.id);
   console.log(`ok    ${profile.name}: ${result.meshes.map((mesh) => mesh.sizeCode).join(' ')}`);
 }
 console.log(`${written} sizes written`);

@@ -1,7 +1,11 @@
 """HTML / product-text parse → GarmentCode design flags.
 
 Qwen3-VL is not used: an 8B VL stack on the trial A100 would starve body/drape.
-Unsupported geometry (hoods, lapels, cargo, knits) fails closed — Approximate / no 3D.
+Unsupported geometry (hoods, lapels, cardigans, jumpsuits, long sleeves) fails
+closed — Approximate / no 3D. Cargo trousers sew as plain trousers (pockets are
+not drawn), owner 2026-10-10. Long sleeves tore at the cap on every body of the
+drape grid (g6: 43 of 43 sweater drapes); swinging the sleeve onto the arm made
+it worse (s1), so they stay off until the drape handles them.
 """
 
 from __future__ import annotations
@@ -26,11 +30,11 @@ SUPPORTED_CATEGORIES = frozenset({"tee", "pant", "dress", "outerwear"})
 
 _HOOD = re.compile(r"\b(hood|hoodie|hooded)\b", re.I)
 _LAPEL = re.compile(r"\b(lapel|blazer|suit\s+jacket|notch\s+collar|double[-\s]?breasted)\b", re.I)
-_CARGO = re.compile(r"\b(cargo)\b", re.I)
-_KNIT = re.compile(
-    r"\b(sweater|jumper|cardigan|knitwear|cable[-\s]?knit|ribbed\s+knit|wool\s+knit|merino\s+knit)\b",
-    re.I,
-)
+# An open-front knit drawn as a closed top would misstate the garment.
+_CARDIGAN = re.compile(r"\b(cardigans?)\b", re.I)
+# Pullovers have long sleeves even when the title does not say so; until long
+# sleeves drape (see above) they are unsupported rather than drawn short.
+_PULLOVER = re.compile(r"\b(sweaters?|jumpers?|pullovers?|sweatshirts?|quarter[-\s]?zip)\b", re.I)
 _JUMPSUIT = re.compile(r"\b(jumpsuit|romper|overall)\b", re.I)
 _SLEEVELESS = re.compile(r"\b(sleeveless|tank\s+top|\btank\b|vest)\b", re.I)
 _LONG_SLEEVE = re.compile(r"\b(long[-\s]?sleeve|full[-\s]?sleeve)\b", re.I)
@@ -53,10 +57,10 @@ def detect_unsupported(category: str, product_text: str) -> str | None:
         return "hood"
     if _LAPEL.search(text):
         return "lapel"
-    if _CARGO.search(text):
-        return "cargo"
-    if _KNIT.search(text):
+    if _CARDIGAN.search(text):
         return "knit"
+    if category == "outerwear" or _LONG_SLEEVE.search(text) or _PULLOVER.search(text):
+        return "long sleeve"
     if _JUMPSUIT.search(text):
         return "jumpsuit"
     return None
@@ -69,7 +73,7 @@ def parse_style(category: str, product_text: str) -> dict[str, Any]:
     sleeve_length = 0.3
     if sleeveless:
         sleeve_length = 0.1
-    elif _LONG_SLEEVE.search(text) or category == "outerwear":
+    elif _LONG_SLEEVE.search(text) or _PULLOVER.search(text) or category == "outerwear":
         sleeve_length = 0.95
     elif _THREE_QUARTER.search(text):
         sleeve_length = 0.6

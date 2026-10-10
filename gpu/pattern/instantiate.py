@@ -20,6 +20,7 @@ from pattern.style import parse_style
 CHART_ABS_TOL_CM = 8.0
 CHART_REL_TOL = 0.22
 LENGTH_REL_TOL = 0.28
+PANTS_LENGTH_MAX = 1.05
 
 
 def _ensure_garmentcode_path() -> None:
@@ -84,7 +85,9 @@ def _scale_body(body: Any, measurements: dict[str, float]) -> None:
 def _apply_garment_length(body: Any, design: dict[str, Any], category: str, length_cm: float) -> None:
     if category == "pant":
         leg = max(float(body["_leg_length"]), 1.0)
-        design["pants"]["length"]["v"] = _clamp(length_cm / leg, 0.2, 0.9)
+        # 0.9 is GarmentCode's sampling range, not a limit of the pattern: a
+        # floor-length wide-leg XL (103.9 cm outseam) needs a little more.
+        design["pants"]["length"]["v"] = _clamp(length_cm / leg, 0.2, PANTS_LENGTH_MAX)
         design["pants"]["rise"]["v"] = 1.0
         return
     waist_line = max(float(body["waist_line"]), 1.0)

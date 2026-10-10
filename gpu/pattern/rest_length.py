@@ -183,7 +183,38 @@ def sample_quarter_widths_m(
         (t, girth_cm_at_world_y(panels, ymin + t * span))
         for t in (step / (PROFILE_SAMPLES - 1) for step in range(PROFILE_SAMPLES))
     ]
-    return widths_m, pattern_girths_from_profile(profile, category, span)
+    girths = pattern_girths_from_profile(profile, category, span)
+    if category == "pant":
+        sewn = sewn_pant_girths_cm(panels)
+        if sewn is not None:
+            waist, hip = sewn
+            girths.update(waistCm=waist, hipCm=hip, chestCm=hip)
+    return widths_m, girths
+
+
+def sewn_pant_girths_cm(panels: list[Any]) -> tuple[float, float] | None:
+    """(waist, seat) as sewn, from the GarmentCode pant panels' own edges.
+
+    The width profile cannot see darts (a V notch does not shorten the span) or
+    tell the seat from the crotch extension: a 70 cm chart waist read as 100 and
+    the 0.7 station sat below the crotch, so calibration shrank darted waists
+    until GarmentCode could not cut the dart (wide-leg pants) and sewed joggers
+    ~12 cm narrower at the seat than their chart. Waist = the top interface
+    (dart sides excluded); seat = each panel's width at the hip line (outside
+    seam to the crotch seam's top), summed over the four panels.
+    """
+    waist = 0.0
+    hip = 0.0
+    for panel in panels:
+        interfaces = getattr(panel, "interfaces", None) or {}
+        top, outside, crotch = interfaces.get("top"), interfaces.get("outside"), interfaces.get("crotch")
+        if top is None or outside is None or crotch is None:
+            return None
+        waist += float(sum(edge.length() for edge in top.edges))
+        hip += abs(float(crotch.edges[0].end[0]) - float(outside.edges[0].end[0]))
+    if waist <= 0 or hip <= 0:
+        return None
+    return waist, hip
 
 
 PROFILE_SAMPLES = 41

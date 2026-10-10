@@ -49,11 +49,13 @@ function teeDraft(overrides: Partial<CatalogGarmentDraft> = {}): CatalogGarmentD
   };
 }
 
-test('hoods, lapels, cargo, and knitwear are unsupported for 3D', () => {
+test('hoods, lapels, cardigans, and long sleeves are unsupported for 3D; cargo is not', () => {
   assert.equal(detectUnsupportedGeometry({ category: 'outerwear', title: 'Zip Hoodie' }), 'hood');
   assert.equal(detectUnsupportedGeometry({ category: 'outerwear', title: 'Wool Blazer' }), 'lapel');
-  assert.equal(detectUnsupportedGeometry({ category: 'pant', title: 'Cargo Pant' }), 'cargo');
-  assert.equal(detectUnsupportedGeometry({ category: 'tee', title: 'Merino Knit Sweater' }), 'knit');
+  assert.equal(detectUnsupportedGeometry({ category: 'outerwear', title: 'Button-Down Knit Cardigan' }), 'knit');
+  assert.equal(detectUnsupportedGeometry({ category: 'pant', title: 'Cargo Pant' }), null);
+  assert.equal(detectUnsupportedGeometry({ category: 'tee', title: 'Merino Knit Sweater' }), 'long sleeve');
+  assert.equal(detectUnsupportedGeometry({ category: 'tee', title: "Men's Long Sleeve Polo Shirt" }), 'long sleeve');
   assert.equal(detectUnsupportedGeometry({ category: 'other', title: 'Belt' }), 'unsupported category');
   assert.equal(detectUnsupportedGeometry({ category: 'tee', title: 'Essential Cotton Tee' }), null);
 });

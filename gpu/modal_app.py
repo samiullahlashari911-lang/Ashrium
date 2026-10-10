@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import modal
+import modal.experimental
 
 # Pinned git SHAs — keep in sync with gpu/body/pins.py. Do not float on main.
 SAM3D_BODY_GIT_SHA = "b5c765a0d89d789985e186d396315e7590887b94"
@@ -152,6 +153,21 @@ def prefetch_weights() -> dict:
     return {"ok": True, "repos": [SAM2_HF_ID, MOGE_HF_REPO, SAM3D_HF_REPO]}
 
 
+def _is_cuda_fault(error: BaseException) -> bool:
+    return "CUDA error" in str(error) or "CUDA_ERROR" in str(error)
+
+
+def _retire_if_cuda_fault(error: BaseException) -> None:
+    """A CUDA fault poisons the container's GPU context (2026-10-10: a capture
+    clash, then SIGABRT): stop taking inputs so Modal replaces it."""
+    if _is_cuda_fault(error):
+        print(f"CUDA fault, retiring this container: {error}", flush=True)
+        try:
+            modal.experimental.stop_fetching_inputs()
+        except Exception as stop_error:  # still raise the original error
+            print(f"stop_fetching_inputs failed: {stop_error}", flush=True)
+
+
 @app.cls(
     image=image,
     # A100-80GB first; fall back when Modal has none free (a ~160 s queue was
@@ -201,14 +217,18 @@ class AshriumGpu:
         with tempfile.TemporaryDirectory() as tmp:
             front = _write_b64_image(front_image_b64, Path(tmp) / "front.webp")
             side = _write_b64_image(side_image_b64, Path(tmp) / "side.webp")
-            return self.pipeline.predict_body(
-                front_image=front,
-                side_image=side,
-                height_cm=float(height_cm),
-                sex=sex,
-                weight_kg=float(weight_kg or 0),
-                on_stage=make_stage_reporter(progress),
-            )
+            try:
+                return self.pipeline.predict_body(
+                    front_image=front,
+                    side_image=side,
+                    height_cm=float(height_cm),
+                    sex=sex,
+                    weight_kg=float(weight_kg or 0),
+                    on_stage=make_stage_reporter(progress),
+                )
+            except Exception as error:
+                _retire_if_cuda_fault(error)
+                raise
 
     @modal.method()
     def drape(
@@ -221,15 +241,19 @@ class AshriumGpu:
         shear_stiffness: float,
         area_density: float,
     ) -> dict:
-        return self.pipeline.predict_drape(
-            body_positions=body_positions,
-            garment_mesh=garment_mesh,
-            body_girths=body_girths,
-            tensile_stiffness=float(tensile_stiffness),
-            bending_rigidity=float(bending_rigidity),
-            shear_stiffness=float(shear_stiffness),
-            area_density=float(area_density),
-        )
+        try:
+            return self.pipeline.predict_drape(
+                body_positions=body_positions,
+                garment_mesh=garment_mesh,
+                body_girths=body_girths,
+                tensile_stiffness=float(tensile_stiffness),
+                bending_rigidity=float(bending_rigidity),
+                shear_stiffness=float(shear_stiffness),
+                area_density=float(area_density),
+            )
+        except Exception as error:
+            _retire_if_cuda_fault(error)
+            raise
 
 
 # GarmentCode 2D instantiation is CPU work: grading a catalog must not pay for
@@ -326,7 +350,7 @@ def api():
         authorize(request, raw)
         payload = read_json(raw)
         gpu = AshriumGpu()
-        result = await gpu.body.remote.aio(
+        arguments = dict(
             front_image_b64=str(payload.get("front_image_b64") or ""),
             side_image_b64=str(payload.get("side_image_b64") or ""),
             height_cm=float(payload.get("height_cm") or 0),
@@ -334,6 +358,14 @@ def api():
             weight_kg=float(payload.get("weight_kg") or 0),
             progress=payload.get("progress") if isinstance(payload.get("progress"), dict) else None,
         )
+        try:
+            result = await gpu.body.remote.aio(**arguments)
+        except Exception as error:
+            if not _is_cuda_fault(error):
+                raise
+            # The faulted container retired itself; one retry lands on a fresh one.
+            print(f"/body CUDA fault, retrying once on another container: {error}", flush=True)
+            result = await gpu.body.remote.aio(**arguments)
         return JSONResponse(result)
 
     @web.post("/drape")

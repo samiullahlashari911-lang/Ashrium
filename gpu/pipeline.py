@@ -22,6 +22,7 @@ from body.initializer import Sam3dAccessError, load_sam3d_estimator, initialize_
 from body.mhr_fit import fit_two_view_mhr
 from body.silhouettes import load_sam2_predictor, segment_person
 from body.topology import MHR_TOPOLOGY_VERSION
+from cuda_gate import torch_work
 from progress import StageReporter
 
 
@@ -97,7 +98,12 @@ class AshriumPipeline:
         except Exception as error:  # a failed warm-up only means the first drape compiles
             print(f"Drape warm-up failed: {type(error).__name__}: {error}", flush=True)
 
-    def predict_body(
+    def predict_body(self, *args: Any, **kwargs: Any) -> dict:
+        # Never overlaps a Warp CUDA-graph capture (cuda_gate.py).
+        with torch_work():
+            return self._predict_body(*args, **kwargs)
+
+    def _predict_body(
         self,
         front_image: Path,
         side_image: Path,

@@ -143,3 +143,36 @@ class NecklineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SewnPantGirthTests(unittest.TestCase):
+    def test_waist_skips_dart_sides_and_seat_skips_the_crotch_extension(self) -> None:
+        from types import SimpleNamespace
+
+        from pattern.rest_length import sewn_pant_girths_cm
+
+        class FakeEdge:
+            def __init__(self, length: float, end: tuple[float, float] = (0.0, 0.0)) -> None:
+                self._length = length
+                self.end = end
+
+            def length(self) -> float:
+                return self._length
+
+        def panel(waist_parts: list[float], hip: float) -> SimpleNamespace:
+            return SimpleNamespace(interfaces={
+                "top": SimpleNamespace(edges=[FakeEdge(part) for part in waist_parts]),
+                "outside": SimpleNamespace(edges=[FakeEdge(60.0, (0.0, 60.0))]),
+                "crotch": SimpleNamespace(edges=[FakeEdge(10.0, (-hip, 70.0)), FakeEdge(12.0)]),
+            })
+
+        # A darted 70 cm waist on a 104 cm seat, four panels (a mirrored half has x < 0).
+        panels = [panel([8.0, 9.5], 26.0), panel([8.0, 9.5], 26.0), panel([5.0, 6.0, 6.5], 26.0), panel([5.0, 6.0, 6.5], 26.0)]
+        self.assertEqual(sewn_pant_girths_cm(panels), (70.0, 104.0))
+
+    def test_no_interfaces_falls_back_to_the_profile(self) -> None:
+        from types import SimpleNamespace
+
+        from pattern.rest_length import sewn_pant_girths_cm
+
+        self.assertIsNone(sewn_pant_girths_cm([SimpleNamespace(interfaces={})]))

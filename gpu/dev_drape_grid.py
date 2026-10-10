@@ -326,8 +326,10 @@ def main(
     }
     sewn = pattern_fingerprints.remote()
     missing = [garment for garment in garment_list if sewn.get(garment["key"]) != fingerprint[garment["key"]]]
-    for summary in make_pattern.starmap([(garment, fingerprint[garment["key"]]) for garment in missing]):
-        print("sewn", summary, flush=True)
+    # An empty starmap never returns (Modal 1.5): only call it with work to do.
+    if missing:
+        for summary in make_pattern.starmap([(garment, fingerprint[garment["key"]]) for garment in missing]):
+            print("sewn", summary, flush=True)
 
     # One variant (a JSON object) or several ([{"name": ..., "arrange": ..., "solver": ...}]):
     # every body x variant is its own container in this one app.

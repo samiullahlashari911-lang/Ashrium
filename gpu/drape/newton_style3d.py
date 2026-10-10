@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 import numpy as np
 
+from cuda_gate import exclusive_capture
+
 FPS = 60
 SUBSTEPS = 4
 ITERATIONS = 10
@@ -26,6 +28,8 @@ MAX_SETTLE_FRAMES = 240
 # mean let a still torso hide sleeves that were still dropping.
 SETTLE_EPS_M = 2.0e-4
 DIVERGED_M = 3.0
+# How long a drape waits for a running body before it skips the CUDA graph.
+CAPTURE_WAIT_S = 2.0
 GRAVITY = -9.81
 COLLISION_RADIUS_M = 3.5e-3
 SOFT_CONTACT_KE = 5.0e3
@@ -169,17 +173,25 @@ def drape_style3d(
             solver.step(states[0], states[1], control, contacts, dt)
             states[0], states[1] = states[1], states[0]
 
+    def capture_frame() -> Any:
+        # One frame recorded once and replayed: no per-kernel Python launch cost.
+        # Recorded after frame 0 ran plainly, so every kernel module is already
+        # loaded and the capture lasts milliseconds; never while PyTorch runs
+        # a shopper's body in this container (cuda_gate.py).
+        with exclusive_capture(CAPTURE_WAIT_S) as granted:
+            if not granted:
+                print("Style3D: a body is running on this GPU, drape runs uncaptured.", flush=True)
+                return None
+            try:
+                with wp.ScopedCapture() as capture:
+                    simulate()
+                return capture.graph
+            except Exception as error:  # fall back to plain launches, still correct
+                print(f"Style3D CUDA graph capture failed, running uncaptured: {error}", flush=True)
+                return None
+
     set_gravity(0.0)
     graph = None
-    if use_graph:
-        # One frame recorded once and replayed: no per-kernel Python launch cost.
-        try:
-            with wp.ScopedCapture() as capture:
-                simulate()
-            graph = capture.graph
-        except Exception as error:  # fall back to plain launches, still correct
-            print(f"Style3D CUDA graph capture failed, running uncaptured: {error}", flush=True)
-            graph = None
     timings["build_ms"] = (time.perf_counter() - started) * 1000.0
 
     frames: list[str] = []
@@ -202,6 +214,8 @@ def drape_style3d(
             phase_started = time.perf_counter()
             set_gravity(GRAVITY)
         # substeps is even, so states[0] holds the latest positions after each frame.
+        if use_graph and frame == 1:
+            graph = capture_frame()
         if graph is not None:
             wp.capture_launch(graph)
         else:
