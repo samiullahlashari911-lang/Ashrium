@@ -7,7 +7,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { AnnyCanvasGarment, PaintUnavailableReason } from '@/components/vfr/anny-canvas';
 import { fitSummaryLine, summarizeFit } from '@/lib/fit/fit-summary';
 import { findMhrHullMesh, vertexBufferToMeters } from '@/lib/graphics/anny-hull';
-import { loadBodyParts } from '@/lib/graphics/body-parts';
+import { bodyHeights, loadBodyParts, replacedClothes, vertexFillZones } from '@/lib/graphics/body-parts';
+import { FILL_ZONE, removeReplacedClothes } from '@/lib/graphics/clothes-removal';
 import { foldOcclusion, seamSmoothNormals } from '@/lib/graphics/cloth-shading';
 import { compositeSimPositions, decodeSimDelta, simDeltaFromBase64 } from '@/lib/graphics/meshopt-delta';
 import {
@@ -19,16 +20,18 @@ import {
 } from '@/lib/graphics/mirror-projection';
 import { evaluatePrintQaFromImage, type PrintQaResult } from '@/lib/graphics/print-qa';
 import { DEFAULT_EASE_CM, mapRadialClearanceToColor } from '@/lib/graphics/radial-heatmap';
-import type { OnDevicePhotos } from '@/lib/widget/webp-encode';
+import { preloadClothesSegmenter, resizeMask, segmentPerson, type PersonMasks } from '@/lib/widget/clothes-segmenter';
+import type { OnDevicePhoto, OnDevicePhotos } from '@/lib/widget/webp-encode';
 import type { SimDrapeMesh } from '@/types/graphics';
 import { MHR_HULL_GLB_PUBLIC_PATH, MHR_VERTEX_COUNT, type FitParametricVector } from '@/types/hmr';
 
 /**
  * The shopper's result: their own photo (front or side), the garment they
- * chose drawn in where Newton draped it on their fitted body. Nothing in the
- * photo is erased or invented (owner Q16, 2026-10-10): where the new garment
- * covers less than what they wore, their own clothes show. The photos never
- * leave this device; everything here runs in the browser.
+ * chose drawn in where Newton draped it on their fitted body. Where the new
+ * garment covers less than what they wore, their own clothes are taken out
+ * and filled from their own skin, trousers and background (owner 2026-10-11,
+ * replaces Q16; `lib/graphics/clothes-removal.ts`). The photos never leave
+ * this device; everything here runs in the browser.
  */
 export interface MirrorViewProps {
   parametric: FitParametricVector;
@@ -57,6 +60,161 @@ interface BodyAssets {
   triangles: Uint32Array;
   normals: Float32Array;
   parts: Uint8Array | null;
+  /** `FILL_ZONE` per vertex; null without part labels (no clothes removal). */
+  zones: Uint8Array | null;
+}
+
+interface PhotoCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Longest edge the clothes masks are computed at (masks are smooth; the fill runs at full size). */
+const SEGMENT_MAX_EDGE_PX = 1024;
+
+/** The shopper (their projected body) with a margin, from the top of the frame, inside the frame. */
+function photoCrop(pixels: Float32Array, frame: HTMLCanvasElement): PhotoCrop | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < pixels.length; i += 2) {
+    minX = Math.min(minX, pixels[i]);
+    maxX = Math.max(maxX, pixels[i]);
+    minY = Math.min(minY, pixels[i + 1]);
+    maxY = Math.max(maxY, pixels[i + 1]);
+  }
+  const margin = CROP_MARGIN * (maxY - minY);
+  const crop = {
+    x: Math.max(0, Math.floor(minX - margin)),
+    // From the top of the frame: the shopper's whole head and face stay in
+    // their photo (the fitted body is measured from the headless copy, so
+    // cropping to it cut the head off). On this device only.
+    y: 0,
+    w: 0,
+    h: 0,
+  };
+  crop.w = Math.min(frame.width, Math.ceil(maxX + margin)) - crop.x;
+  crop.h = Math.min(frame.height, Math.ceil(maxY + margin)) - crop.y;
+  return crop.w > 0 && crop.h > 0 ? crop : null;
+}
+
+/** Mean crop row of the body vertices at a canonical height (± 1.5 cm). */
+function rowAtHeight(body: BodyAssets, pixels: Float32Array, y: number, cropY: number): number {
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < body.positions.length / 3; i += 1) {
+    if (Math.abs(body.positions[i * 3 + 1] - y) <= 0.015 && body.zones?.[i] !== FILL_ZONE.keep) {
+      sum += pixels[i * 2 + 1];
+      count += 1;
+    }
+  }
+  return count > 0 ? sum / count - cropY : NaN;
+}
+
+/** Segment the cropped photo at a bounded size, then bring the masks back to the crop's size. */
+async function segmentCrop(photo: OnDevicePhoto, crop: PhotoCrop): Promise<PersonMasks> {
+  const scale = Math.min(1, SEGMENT_MAX_EDGE_PX / Math.max(crop.w, crop.h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(crop.w * scale));
+  canvas.height = Math.max(1, Math.round(crop.h * scale));
+  try {
+    canvas.getContext('2d')?.drawImage(photo.frame, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height);
+    const masks = await segmentPerson(canvas);
+    return {
+      width: crop.w,
+      height: crop.h,
+      clothes: resizeMask(masks.clothes, masks.width, masks.height, crop.w, crop.h),
+      background: resizeMask(masks.background, masks.width, masks.height, crop.w, crop.h),
+      skin: resizeMask(masks.skin, masks.width, masks.height, crop.w, crop.h),
+    };
+  } finally {
+    canvas.width = 0;
+  }
+}
+
+/**
+ * The fitted body drawn into the photo: one `FILL_ZONE` per pixel (off the
+ * body → outside) and how squarely the body faces the camera there. Zones are
+ * flat per triangle, so they never blend into a third one; a triangle keeps
+ * the photo only when all its corners do, so a collar or cuff at the edge of
+ * the face or a foot can still go.
+ */
+function renderBodyZones(
+  renderer: THREE.WebGLRenderer,
+  camera: THREE.Camera,
+  occluderPositions: Float32Array,
+  triangles: Uint32Array,
+  zones: Uint8Array,
+  facingPerVertex: Float32Array,
+  crop: PhotoCrop,
+): { zone: Uint8Array; facing: Float32Array } {
+  const corners = triangles.length;
+  const positions = new Float32Array(corners * 3);
+  const colours = new Float32Array(corners * 3);
+  for (let t = 0; t < corners; t += 3) {
+    const corner = [zones[triangles[t]], zones[triangles[t + 1]], zones[triangles[t + 2]]];
+    const open = corner.filter((value) => value !== FILL_ZONE.keep);
+    const zone = open.length === 0 ? FILL_ZONE.keep : Math.max(...open);
+    for (let k = 0; k < 3; k += 1) {
+      const vertex = triangles[t + k];
+      positions.set(occluderPositions.subarray(vertex * 3, vertex * 3 + 3), (t + k) * 3);
+      colours[(t + k) * 3] = (zone + 1) / 8;
+      colours[(t + k) * 3 + 1] = facingPerVertex[vertex];
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  const material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const scene = new THREE.Scene();
+  scene.add(new THREE.Mesh(geometry, material));
+  const target = new THREE.WebGLRenderTarget(crop.w, crop.h);
+  const read = new Uint8Array(crop.w * crop.h * 4);
+  try {
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.readRenderTargetPixels(target, 0, 0, crop.w, crop.h, read);
+  } finally {
+    renderer.setRenderTarget(null);
+    target.dispose();
+    geometry.dispose();
+    material.dispose();
+  }
+  const zone = new Uint8Array(crop.w * crop.h);
+  const facing = new Float32Array(crop.w * crop.h);
+  for (let y = 0; y < crop.h; y += 1) {
+    // Render targets read bottom row first.
+    const source = (crop.h - 1 - y) * crop.w;
+    for (let x = 0; x < crop.w; x += 1) {
+      const red = read[(source + x) * 4];
+      zone[y * crop.w + x] = red === 0 ? FILL_ZONE.outside : Math.max(0, Math.round((red / 255) * 8) - 1);
+      facing[y * crop.w + x] = read[(source + x) * 4 + 1] / 255;
+    }
+  }
+  return { zone, facing };
+}
+
+/** Alpha channel of a drawn canvas (the garment's coverage), one byte per pixel. */
+function canvasAlpha(source: HTMLCanvasElement, width: number, height: number): Uint8Array {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  context?.drawImage(source, 0, 0);
+  const data = context?.getImageData(0, 0, width, height).data;
+  canvas.width = 0;
+  const alpha = new Uint8Array(width * height);
+  if (data) {
+    for (let i = 0; i < alpha.length; i += 1) {
+      alpha[i] = data[i * 4 + 3];
+    }
+  }
+  return alpha;
 }
 
 /** A network blip must not send the shopper back to the camera: retry the static assets. */
@@ -221,6 +379,10 @@ export const MirrorView: FC<MirrorViewProps> = ({
   const [view, setView] = useState<MirrorViewName>('front');
   const [body, setBody] = useState<BodyAssets | null>(null);
   const [albedo, setAlbedo] = useState<PrintQaResult | null>(null);
+  /** Clothes / skin / background masks per view; 'failed' when the segmenter could not run. */
+  const [personMasks, setPersonMasks] = useState<Partial<Record<MirrorViewName, PersonMasks | 'failed'>>>({});
+  /** The shopper's own clothes could not be taken out cleanly: one tip, never a smeared photo. */
+  const [clothesTip, setClothesTip] = useState(false);
   const callbacks = useRef({ onBodyReady, onPrintQaFail, onFitSummary, onPaintUnavailable, onGarmentShown });
   callbacks.current = { onBodyReady, onPrintQaFail, onFitSummary, onPaintUnavailable, onGarmentShown };
   const readySent = useRef(false);
@@ -259,7 +421,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
         geometry.computeVertexNormals();
         const normals = Float32Array.from(geometry.getAttribute('normal').array as ArrayLike<number>);
         geometry.dispose();
-        setBody({ positions, triangles, normals, parts });
+        setBody({ positions, triangles, normals, parts, zones: parts ? vertexFillZones(positions, parts) : null });
       })
       .catch(() => {
         if (!cancelled) {
@@ -319,6 +481,42 @@ export const MirrorView: FC<MirrorViewProps> = ({
     })));
   }, [drape, body, garment?.category, garment?.easeCm]);
 
+  // The clothes mask of each photo, on this device, while the loader is still up.
+  const removesClothes = replacedClothes(garment?.category) !== null;
+  useEffect(() => {
+    if (!removesClothes || !body?.zones || !photoUv || !photos) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      for (const name of ['front', 'side'] as const) {
+        const photo = name === 'front' ? photos.front : photos.side;
+        const uv = name === 'front' ? photoUv.front_uv : photoUv.side_uv;
+        if (!photo || !uv || photo.frame.width === 0) {
+          continue;
+        }
+        const crop = photoCrop(bodyFramePixels(uv, photo.keepBox, photo.frame.width, photo.frame.height), photo.frame);
+        if (!crop) {
+          continue;
+        }
+        let result: PersonMasks | 'failed';
+        try {
+          result = await segmentCrop(photo, crop);
+        } catch (error) {
+          console.warn('Clothes mask unavailable; showing the photo as taken', error);
+          result = 'failed';
+        }
+        if (cancelled) {
+          return;
+        }
+        setPersonMasks((current) => ({ ...current, [name]: result }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [removesClothes, body, photoUv, photos]);
+
   // Composite: photo, then the garment drawn into it.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -330,31 +528,8 @@ export const MirrorView: FC<MirrorViewProps> = ({
     const frame = photo.frame;
     const pixels = bodyFramePixels(uv, photo.keepBox, frame.width, frame.height);
     const sign = sideCameraSign(body.positions, photoUv.side_weight);
-
-    // Crop to the shopper (their projected body) with a margin, inside the frame.
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (let i = 0; i < pixels.length; i += 2) {
-      minX = Math.min(minX, pixels[i]);
-      maxX = Math.max(maxX, pixels[i]);
-      minY = Math.min(minY, pixels[i + 1]);
-      maxY = Math.max(maxY, pixels[i + 1]);
-    }
-    const margin = CROP_MARGIN * (maxY - minY);
-    const crop = {
-      x: Math.max(0, Math.floor(minX - margin)),
-      // From the top of the frame: the shopper's whole head and face stay in
-      // their photo (the fitted body is measured from the headless copy, so
-      // cropping to it cut the head off). On this device only.
-      y: 0,
-      w: 0,
-      h: 0,
-    };
-    crop.w = Math.min(frame.width, Math.ceil(maxX + margin)) - crop.x;
-    crop.h = Math.min(frame.height, Math.ceil(maxY + margin)) - crop.y;
-    if (crop.w <= 0 || crop.h <= 0) {
+    const crop = photoCrop(pixels, frame);
+    if (!crop) {
       callbacks.current.onPaintUnavailable?.('not_painted');
       return;
     }
@@ -468,6 +643,43 @@ export const MirrorView: FC<MirrorViewProps> = ({
       scene.add(new THREE.Mesh(garmentGeometry, garmentMaterial));
 
       renderer.render(scene, camera);
+
+      // The shopper's own clothes, out where the new garment replaces them.
+      const masks = personMasks[view];
+      const replace = replacedClothes(garment?.category);
+      if (replace && body.zones && masks && masks !== 'failed' && masks.width === crop.w && masks.height === crop.h) {
+        const facingPerVertex = new Float32Array(bodyCount);
+        for (let i = 0; i < bodyCount; i += 1) {
+          const [, , towardCamera] = viewNormal(view, sign, body.normals[i * 3], body.normals[i * 3 + 1], body.normals[i * 3 + 2]);
+          facingPerVertex[i] = Math.max(0, towardCamera);
+        }
+        const { zone, facing } = renderBodyZones(
+          renderer, camera, occluderPositions, body.triangles, body.zones, facingPerVertex, crop,
+        );
+        const heights = bodyHeights(body.positions);
+        const photoPixels = context.getImageData(0, 0, crop.w, crop.h);
+        const removal = removeReplacedClothes({
+          width: crop.w,
+          height: crop.h,
+          photo: photoPixels.data,
+          clothes: masks.clothes,
+          background: masks.background,
+          skin: masks.skin,
+          garment: canvasAlpha(renderer.domElement, crop.w, crop.h),
+          zone,
+          facing,
+          waistRow: rowAtHeight(body, pixels, heights.naturalWaistY, crop.y),
+          crotchRow: rowAtHeight(body, pixels, heights.crotchY, crop.y),
+          replace,
+        });
+        if (removal.pixels) {
+          photoPixels.data.set(removal.pixels);
+          context.putImageData(photoPixels, 0, 0);
+        }
+        setClothesTip(removal.unsure);
+      } else if (replace && masks === 'failed') {
+        setClothesTip(true);
+      }
       // Contact shadow: a soft, slightly lowered dark copy of the garment under
       // it, so the hem, sleeves and collar sit on the body instead of floating.
       const shade = document.createElement('canvas');
@@ -501,7 +713,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
       renderer?.forceContextLoss();
       callbacks.current.onGarmentShown?.(false);
     }
-  }, [albedo, body, drape, garment?.colorHex, garment?.easeCm, photoUv, photos, showClearanceHeatmap, view]);
+  }, [albedo, body, drape, garment?.category, garment?.colorHex, garment?.easeCm, personMasks, photoUv, photos, showClearanceHeatmap, view]);
 
   const hasSide = Boolean(photos?.side && photoUv);
 
@@ -512,6 +724,11 @@ export const MirrorView: FC<MirrorViewProps> = ({
         aria-label={view === 'front' ? 'You, front view, wearing the selected size' : 'You, side view, wearing the selected size'}
         className={`h-full w-full object-contain transition-opacity duration-700 ${revealed ? 'opacity-100' : 'opacity-0'}`}
       />
+      {clothesTip && drape && revealed ? (
+        <p className="pointer-events-none absolute inset-x-4 bottom-16 mx-auto w-fit max-w-[90%] rounded-full bg-white/85 px-3 py-1 text-center text-[11px] font-medium text-ash-ink shadow-card">
+          Tip: wear a fitted T-shirt for the cleanest look
+        </p>
+      ) : null}
       {hasSide ? (
         <div
           role="radiogroup"

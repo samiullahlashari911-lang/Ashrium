@@ -483,7 +483,7 @@ export function StorefrontViewport({
               onGarmentShown={handleGarmentShown}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
             />
-            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-4">
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between gap-3 p-4 pr-16">
               <AshriumWordmark
                 markClassName="h-5 w-5 shrink-0 text-ash-accent"
                 wordClassName="text-xs font-semibold tracking-[0.02em] text-ash-ink"

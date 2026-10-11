@@ -39,7 +39,7 @@ export const CONSENT_BULLETS: ReadonlyArray<{ title: string; body: string }> = [
  */
 export const LOOK_ON_DEVICE_BULLET = {
   title: 'Your photo stays on your phone',
-  body: 'You see yourself in your own photo with the size you pick drawn on, on this phone only. The full photos are never uploaded and are gone when you close Try On.',
+  body: 'You see yourself in your own photo wearing the size you pick, on this phone only: where it replaces what you wore, your own clothes are swapped out using your own skin and background colours. The full photos are never uploaded and are gone when you close Try On.',
 } as const;
 
 /**
@@ -92,7 +92,7 @@ export const PRIVACY_SECTIONS: ReadonlyArray<{ title: string; body: string }> = 
   },
   {
     title: 'Your photo with the garment',
-    body: 'Your result is your own front and side photo, with the garment you try drawn in where a cloth simulation placed it on your measured body. This happens on your device only: the full photos stay in your browser memory, are never uploaded to Ashrium or the store, and are wiped when you close Try On. Ashrium servers receive only the two photos with the head removed, to measure your body, and send back body shape and geometry (where each point of your body sits in each photo), never images. Nothing in your photo is erased or invented: where the garment you try covers less than what you wore, your own clothes still show.',
+    body: 'Your result is your own front and side photo, with the garment you try drawn in where a cloth simulation placed it on your measured body. This happens on your device only: the full photos stay in your browser memory, are never uploaded to Ashrium or the store, and are wiped when you close Try On. Ashrium servers receive only the two photos with the head removed, to measure your body, and send back body shape and geometry (where each point of your body sits in each photo), never images. Where the garment you try replaces what you wore (a top for your top, trousers for your trousers), your own clothes are taken out of the photo on your device and filled from your own skin, trousers and background nearby; your face and everything else stay as photographed. Nothing about this leaves your device or is stored.',
   },
   {
     title: 'Size recommendations',

@@ -10,6 +10,7 @@ import {
   estimateSoleY,
   evaluatePoseGate,
   gateStatusCopy,
+  RELAX_AFTER_MS,
   toView,
   type OutlineFrame,
   type PoseGateContext,
@@ -150,16 +151,28 @@ test('green only when the body matches the drawn outline', () => {
   assert.equal(front(shift(standing(), 0.02, 0.02)), 'aligned');
   assert.equal(front(scale(standing(), 1.15)), 'too_close');
   assert.equal(front(scale(standing(), 0.85)), 'too_far');
+  // 7% off is green since the 2026-10-11 relaxation (was 6%).
+  assert.equal(front(shift(standing(), 0, -0.07)), 'aligned');
   // Right size, but the phone points too high or low.
-  assert.equal(front(shift(standing(), 0, -0.07)), 'fit_outline');
+  assert.equal(front(shift(standing(), 0, -0.12)), 'fit_outline');
   assert.equal(front(shift(standing(), 0.1, 0)), 'off_center');
   assert.match(gateStatusCopy('fit_outline', 'front'), /outline/);
 });
 
 test('a lock holds through small drift that would not start one', () => {
-  const drifted = shift(standing(), 0, -0.07);
-  assert.equal(front(drifted), 'fit_outline');
+  const drifted = shift(standing(), 0.1, 0);
+  assert.equal(front(drifted), 'off_center');
   assert.equal(front(drifted, {}, 'aligned'), 'aligned');
+});
+
+test('after a long search the gate starts at its looser hold limits, never past them', () => {
+  const drifted = shift(standing(), 0.1, 0);
+  assert.equal(front(drifted, { relaxed: true }), 'aligned');
+  assert.equal(front(shift(standing(), 0.2, 0), { relaxed: true }), 'off_center');
+  // The whole head must still be in the picture.
+  assert.equal(front(shift(standing(), 0, -0.09), { relaxed: true }), 'show_head');
+  assert.equal(front(scale(standing(), 1.25), { relaxed: true }), 'too_close');
+  assert.ok(RELAX_AFTER_MS >= 10_000);
 });
 
 test('bending, leaning and squatting are never green', () => {

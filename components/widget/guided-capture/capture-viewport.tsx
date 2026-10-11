@@ -20,6 +20,7 @@ import {
 import { FRAME_QUALITY_COPY, assessCanvasQuality } from '@/lib/widget/frame-quality';
 import {
   evaluatePoseGate,
+  RELAX_AFTER_MS,
   gateStatusCopy,
   type OutlineFrame,
   type PoseLandmarkSample,
@@ -166,6 +167,8 @@ export function CaptureViewport({
   const lastVideoTimeRef = useRef(-1);
   const lastDetectAtRef = useRef(0);
   const lastRawGateRef = useRef<PoseGateStatus>('not_detected');
+  /** When this photo's search for the outline began (`RELAX_AFTER_MS`). */
+  const searchStartRef = useRef<number | null>(null);
   const lastHoldBucketRef = useRef(-1);
   const sourceRef = useRef<CaptureSource>('live');
   const viewportActiveRef = useRef(false);
@@ -256,6 +259,7 @@ export function CaptureViewport({
 
   useEffect(() => {
     capturingRef.current = false;
+    searchStartRef.current = null;
     lastVideoTimeRef.current = -1;
     lastDetectAtRef.current = 0;
     resetHold();
@@ -396,6 +400,7 @@ export function CaptureViewport({
       if (rawPose) {
         const { landmarks: smoothed, motion } = smootherRef.current.push(rawPose);
         const box = stage.getBoundingClientRect();
+        searchStartRef.current ??= now;
         rawGate = evaluatePoseGate(smoothed, view, lastRawGateRef.current, {
           mapping: {
             videoWidth: video.videoWidth,
@@ -406,6 +411,7 @@ export function CaptureViewport({
           },
           outline: outlineFrameRef.current ?? undefined,
           motion,
+          relaxed: now - searchStartRef.current > RELAX_AFTER_MS,
         });
         if (view === 'side') {
           const facing = sideFacingRawRight(smoothed);
@@ -514,6 +520,7 @@ export function CaptureViewport({
       setPending(null);
     }
     capturingRef.current = false;
+    searchStartRef.current = null;
     resetHold();
     setGalleryError(null);
     setEncodeError(null);

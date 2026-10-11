@@ -57,6 +57,8 @@ export interface PoseGateContext {
   outline?: OutlineFrame;
   /** Smoothed landmark motion per detection, as a fraction of body height. */
   motion?: number;
+  /** Red for `RELAX_AFTER_MS`: enter at the looser hold thresholds. */
+  relaxed?: boolean;
 }
 
 /**
@@ -80,24 +82,31 @@ interface GateThresholds {
 }
 
 export const GATE_ENTER: GateThresholds = {
-  scale: 0.08,
-  edge: 0.06,
-  center: 0.06,
-  torsoTiltDeg: 15,
-  kneeMinDeg: 155,
-  torsoLegMin: 0.45,
-  motion: 0.012,
-};
-
-export const GATE_HOLD: GateThresholds = {
   scale: 0.12,
   edge: 0.1,
   center: 0.1,
   torsoTiltDeg: 20,
-  kneeMinDeg: 148,
+  kneeMinDeg: 145,
+  torsoLegMin: 0.43,
+  motion: 0.012,
+};
+
+export const GATE_HOLD: GateThresholds = {
+  scale: 0.16,
+  edge: 0.14,
+  center: 0.14,
+  torsoTiltDeg: 25,
+  kneeMinDeg: 138,
   torsoLegMin: 0.4,
   motion: 0.02,
 };
+
+/**
+ * Red this long and the gate starts at its hold thresholds instead: nobody is
+ * stuck fiddling, while the head, feet, upright and still checks the body fit
+ * needs stay (owner, 2026-10-11).
+ */
+export const RELAX_AFTER_MS = 15_000;
 
 /** Crown above the eyes, as a fraction of the eye-to-shoulder drop (adult anthropometry ~0.65). */
 const CROWN_ABOVE_EYES = 0.65;
@@ -215,7 +224,7 @@ export function evaluatePoseGate(
   previous?: PoseGateStatus,
   context?: PoseGateContext,
 ): PoseGateStatus {
-  const limits = previous === 'aligned' ? GATE_HOLD : GATE_ENTER;
+  const limits = previous === 'aligned' || context?.relaxed ? GATE_HOLD : GATE_ENTER;
   const required = view === 'front'
     ? FRONT_REQUIRED
     : [LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP];
