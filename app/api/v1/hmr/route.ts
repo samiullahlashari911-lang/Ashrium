@@ -20,9 +20,9 @@ import {
   FittingRoomAtCapacityError,
   readShopperGpuOccupancy,
   scaleShopperGpuToOccupancy,
-  settleWarmReplicaIfNeeded,
   sleepGpuIfNoActiveFitJobs,
 } from '@/lib/server/session-gpu';
+import { recordBodyStageTimings } from '@/lib/server/try-on-outcome';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const runtime = 'nodejs';
@@ -149,7 +149,6 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     await scaleShopperGpuToOccupancy();
-    await settleWarmReplicaIfNeeded(convertedLease);
   } catch (error) {
     if (error instanceof FittingRoomAtCapacityError) {
       await serviceClient.from('fit_jobs').delete().eq('id', job.id);
@@ -248,6 +247,7 @@ export async function POST(request: Request): Promise<Response> {
           jobRow,
         );
         await recordFitJobTiming(job.id, tenantId, { completed_at: new Date().toISOString() });
+        await recordBodyStageTimings(job.id, tenantId, output);
       } catch (error) {
         const message = error instanceof Error
           ? error.message

@@ -4,7 +4,7 @@ One entry point for production `task=drape`, the dev harness and the drape
 grid, so what the grid proves is what shoppers get. Steps: too-small check
 (the size cannot close around this body) → placement (`arrange.py`) →
 Newton Style3D on the inflated LOD 3 collider → hard border on the exact
-LOD 1 body → quality checks. Metres, Y-up. The size verdict is never
+LOD 1 body → over-stretched edges relaxed → quality checks. Metres, Y-up. The size verdict is never
 decided here: that is girths + the published chart.
 """
 
@@ -15,7 +15,13 @@ from typing import Any
 import numpy as np
 
 from drape.arrange import arrange_on_body, body_normals
-from drape.border import enforce_border, inflate_collider, nearest_vertices, signed_distance_to_mesh
+from drape.border import (
+    enforce_border,
+    inflate_collider,
+    nearest_vertices,
+    relax_overstretched,
+    signed_distance_to_mesh,
+)
 from drape.collider import downsample_to_lod3
 from drape.newton_style3d import drape_style3d
 
@@ -95,6 +101,15 @@ def body_collider(body_m: np.ndarray, body_faces: np.ndarray) -> tuple[np.ndarra
     lod3_faces = lod3_faces.reshape(-1, 3).astype(np.int64)
     collider, inflate_m = inflate_collider(lod3.astype(np.float64), lod3_faces, body_m, body_faces)
     return collider, lod3_faces, inflate_m
+
+
+def _rest_lengths(arranged: dict[str, Any]) -> np.ndarray:
+    """(T, 3) pattern length of each welded triangle's corner pairs (0,1), (1,2), (2,0)."""
+    uv = arranged["rest_uv"]
+    panel = arranged["panel_triangles"]
+    return np.stack(
+        [np.linalg.norm(uv[panel[:, a]] - uv[panel[:, b]], axis=1) for a, b in ((0, 1), (1, 2), (2, 0))], axis=1
+    )
 
 
 def _edge_ratios(positions: np.ndarray, rest_uv: np.ndarray, welded: np.ndarray, panel: np.ndarray) -> np.ndarray:
@@ -195,11 +210,15 @@ def drape_sewn_size(
     draped = drape["positions"].astype(np.float64)
     before, _ = signed_distance_to_mesh(draped, body_m, body_faces)
     bordered, moved = enforce_border(draped, body_m, body_faces)
+    bordered, relaxed = relax_overstretched(
+        bordered, arranged["welded_triangles"], _rest_lengths(arranged), body_m, body_faces
+    )
     after, _ = signed_distance_to_mesh(bordered, body_m, body_faces)
     border = {
         "inside_before": int((before < 0).sum()),
         "deepest_before_mm": round(float(before.min()) * 1000.0, 1),
         "moved": moved,
+        "relaxed": relaxed,
         "inside_after": int((after < 0).sum()),
         "closest_after_mm": round(float(after.min()) * 1000.0, 2),
     }

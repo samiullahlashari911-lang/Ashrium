@@ -5,6 +5,7 @@ import { GARMENT_CAD_BUCKET, sewnGarmentObjectPath } from '@/lib/catalog/rest-le
 import { mhrSimulationCacheVector } from '@/lib/fit/mhr-cache-vector';
 import { matchSimulationCache } from '@/lib/fit/simulation-match';
 import { recommendSize } from '@/lib/fit/size-recommend';
+import { sewnSizeTooSmall } from '@/lib/fit/too-small';
 import {
   encodeSimDelta,
   isCurrentSimDelta,
@@ -377,7 +378,8 @@ async function runNewtonDrape(options: {
  * back unavailable with the reason. JS XPBD is not on this path.
  */
 export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitDrapeResolve> {
-  const trace: DrapeTrace = { size: null };
+  const started = Date.now();
+  const trace: DrapeTrace = { size: null, startedAt: started, ms: {} };
   try {
     const result = await resolveFitDrapeFor(input, trace);
     await recordTryOnOutcome(input.jobId, input.tenantId, {
@@ -389,6 +391,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
         : result.source === 'cache'
           ? 'cache'
           : result.unavailableReason ?? 'unavailable',
+      ms: { ...trace.ms, total: Date.now() - started },
     });
     return result;
   } catch (error) {
@@ -397,30 +400,37 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
       sku: input.sku,
       size: trace.size,
       drape: 'error',
+      ms: { ...trace.ms, total: Date.now() - started },
     });
     throw error;
   }
 }
 
-/** The size being draped, once known, for the job's outcome log. */
+/** The size being draped and where the time went, for the job's outcome log. */
 interface DrapeTrace {
   size: string | null;
+  startedAt: number;
+  ms: Record<string, number>;
 }
 
 async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace): Promise<FitDrapeResolve> {
   const allowNewton = input.allowXpbd ?? true;
-  const { data: job, error: jobError } = await input.supabase
-    .from('fit_jobs')
-    .select('id, status, height_cm, parametric_result, created_at, gpu_hold_until')
-    .eq('id', input.jobId)
-    .eq('tenant_id', input.tenantId)
-    .maybeSingle();
+  // Independent reads run together; the cache sweep finishes before the cache is matched.
+  const sweep = sweepExpiredSimulationCache(input.supabase, input.tenantId).catch(() => undefined);
+  const [{ data: job, error: jobError }, garment] = await Promise.all([
+    input.supabase
+      .from('fit_jobs')
+      .select('id, status, height_cm, parametric_result, created_at, gpu_hold_until')
+      .eq('id', input.jobId)
+      .eq('tenant_id', input.tenantId)
+      .maybeSingle(),
+    lookupGarment(input.supabase, input.tenantId, input.sku),
+  ]);
 
   if (jobError || !job || job.status !== 'completed') {
     return unavailable(MHR_TOPOLOGY_VERSION);
   }
 
-  const garment = await lookupGarment(input.supabase, input.tenantId, input.sku);
   if (!garment) {
     return unavailable(MHR_TOPOLOGY_VERSION);
   }
@@ -457,7 +467,7 @@ async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace
     return unavailable(mhr ? MHR_TOPOLOGY_VERSION : ANNY_TOPOLOGY_VERSION);
   }
 
-  await sweepExpiredSimulationCache(input.supabase, input.tenantId);
+  await sweep;
 
   const heightCm =
     typeof job.height_cm === 'number' && Number.isFinite(job.height_cm) && job.height_cm >= 50
@@ -465,6 +475,11 @@ async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace
       : 170;
 
   if (mhr) {
+    // Fetched while the cache is checked; only a miss needs it.
+    const variantRow = (variants ?? []).find((row) => row.id === size.variantId);
+    const sewnDownload = allowNewton
+      ? loadSewnGarment(input.supabase, variantRow?.rest_length_path ?? null)
+      : Promise.resolve(null);
     const phenotype = mhrSimulationCacheVector({
       measurements: mhr.derived_measurements,
       heightCm,
@@ -483,20 +498,30 @@ async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace
       return cached;
     }
 
+    if (!allowNewton) {
+      return unavailable(MHR_TOPOLOGY_VERSION);
+    }
+
+    const sewn = await sewnDownload;
+    if (!sewn) {
+      return unavailable(MHR_TOPOLOGY_VERSION, null, 'no_garment');
+    }
+    // A size that cannot close around the body never reaches the GPU. The hold
+    // stays: the shopper's next step is usually the larger size.
+    if (sewnSizeTooSmall(sewn, mhr.derived_measurements)) {
+      return unavailable(MHR_TOPOLOGY_VERSION, null, 'too_small');
+    }
+
     const remainingMs = remainingGpuHoldMs(
       job.created_at,
       typeof job.gpu_hold_until === 'string' ? job.gpu_hold_until : null,
     );
-    if (!allowNewton || remainingMs < DRAPE_MIN_REMAINING_MS) {
-      return unavailable(MHR_TOPOLOGY_VERSION, null, allowNewton ? 'gpu_budget' : null);
+    if (remainingMs < DRAPE_MIN_REMAINING_MS) {
+      return unavailable(MHR_TOPOLOGY_VERSION, null, 'gpu_budget');
     }
 
-    const variantRow = (variants ?? []).find((row) => row.id === size.variantId);
-    const sewn = await loadSewnGarment(input.supabase, variantRow?.rest_length_path ?? null);
-    if (!sewn) {
-      return unavailable(MHR_TOPOLOGY_VERSION, null, 'no_garment');
-    }
-
+    trace.ms.before_gpu = Date.now() - trace.startedAt;
+    const gpuStarted = Date.now();
     const drape = await runNewtonDrape({
       jobId: input.jobId,
       remainingMs,
@@ -504,11 +529,21 @@ async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace
       garment: sewn,
       mechanical: mechanicalFromProfile(garment),
     });
+    trace.ms.gpu_call = Date.now() - gpuStarted;
+    if (drape.status !== 'too_small') {
+      for (const [key, value] of Object.entries(drape.timingsMs)) {
+        trace.ms[`gpu_${key}`] = value;
+      }
+    }
     if (drape.status === 'too_small') {
       return unavailable(MHR_TOPOLOGY_VERSION, null, 'too_small');
     }
     if (drape.status === 'problem') {
-      return unavailable(MHR_TOPOLOGY_VERSION, null, 'drape_quality');
+      // Cloth that only fails by stretching past its fabric cannot close around
+      // this body: the size is too small (the size number itself is unchanged).
+      const failures = drape.problems.filter((problem) => problem.level === 'fail');
+      const tooTight = failures.length > 0 && failures.every((problem) => problem.code === 'overstretched');
+      return unavailable(MHR_TOPOLOGY_VERSION, null, tooTight ? 'too_small' : 'drape_quality');
     }
     const mesh = drape.mesh;
     const payloadBase64 = await persistSimDelta({

@@ -115,7 +115,8 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   const vercel = readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf8');
 
   assert.match(hmr, /convertWarmupLeaseToJob/);
-  assert.match(hmr, /settleWarmReplicaIfNeeded/);
+  // A warm lease dispatches at once: no fixed settle sleep before the GPU call.
+  assert.doesNotMatch(hmr, /settleWarmReplicaIfNeeded|sleep\(/);
   assert.match(hmr, /watchShopperGpuDeadline/);
   assert.match(hmr, /runBodyPrediction/);
   assert.match(hmr, /\.download\(/);
@@ -133,7 +134,7 @@ test('HMR dispatch warms the GPU, then watches the two-minute deadline', () => {
   assert.match(sessionGpu, /shopperGpuActiveLookbackMs/);
   assert.match(sessionGpu, /\.gt\('created_at', cutoff\)/);
   assert.match(sessionGpu, /SHOPPER_GPU_WARMUP_IDLE_MS/);
-  assert.match(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
+  assert.doesNotMatch(sessionGpu, /GPU_WARM_SETTLE_WAIT_MS/);
   assert.match(sessionGpu, /shopper_gpu_sessions/);
   assert.match(sessionGpu, /deleteShopperGpuSession/);
   assert.match(sessionGpu, /ASHRIUM_GPU_MAX_INSTANCES|readShopperGpuMaxInstances/);

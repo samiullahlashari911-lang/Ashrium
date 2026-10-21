@@ -293,8 +293,11 @@ const viewportSource = readFileSync(
   'utf8',
 );
 
-test('each capture is reviewed before it is used: Retake or Use this photo', () => {
+test('each capture is reviewed before it is used: Retake, or it continues on its own', () => {
   assert.match(viewportSource, /Use this photo/);
   assert.match(viewportSource, /Retake/);
-  assert.match(viewportSource, /onCaptured\(pending\.blob, pending\.gate, pending\.photo\)/);
+  assert.match(viewportSource, /onCaptured\(capture\.blob, capture\.gate, capture\.photo\)/);
+  // The shopper stands far from the phone: a live photo is kept after the review countdown.
+  assert.match(viewportSource, /const AUTO_ACCEPT_MS = \d+/);
+  assert.match(viewportSource, /autoAccept: true/);
 });

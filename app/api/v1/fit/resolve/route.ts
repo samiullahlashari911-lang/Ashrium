@@ -7,7 +7,7 @@ import { createServiceClient } from '@/lib/supabase/service';
 import { MHR_TOPOLOGY_VERSION } from '@/types/hmr';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Cache hit → meshopt delta payload.

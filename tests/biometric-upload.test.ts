@@ -30,7 +30,8 @@ test('HMR reads biometric WebPs from Storage then POSTs base64 to Modal', () => 
   assert.match(hmr, /\.download\(/);
   assert.doesNotMatch(hmr, /createSignedUrl/);
   assert.match(hmr, /convertWarmupLeaseToJob/);
-  assert.match(hmr, /settleWarmReplicaIfNeeded/);
+  // A warm lease dispatches at once: no fixed settle sleep before the GPU call.
+  assert.doesNotMatch(hmr, /settleWarmReplicaIfNeeded|sleep\(/);
   assert.match(hmr, /watchShopperGpuDeadline/);
   assert.doesNotMatch(hmr, /GPU_COLD_START_WAIT_MS/);
   assert.doesNotMatch(hmr, /uploadReplicateInputFile/);

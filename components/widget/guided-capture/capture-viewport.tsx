@@ -41,6 +41,24 @@ import {
 import type { CaptureSex, CaptureView, PoseGateStatus } from '@/types/hmr';
 
 const ALIGNED_HOLD_MS = 1200;
+/**
+ * A sharp-enough frame is looked for over this long once the hold completes;
+ * the hold is not restarted for one blurred frame. Only then is the shopper told.
+ */
+const QUALITY_RETRY_MS = 1500;
+/** A live photo is kept after this review time unless the shopper taps Retake (they stand far away). */
+const AUTO_ACCEPT_MS = 4000;
+/** While the pose model loads, the shopper hears this often that it is still coming. */
+const LOADING_REMINDER_MS = 12000;
+
+/** Said when each photo step opens: the shopper may already be too far away to read. */
+const STEP_INTRO: Record<CaptureView, string> = {
+  front:
+    'Front photo. Prop your phone up at about waist height, then step back until your whole body, head to feet, '
+    + 'fits inside the outline. Keep your arms slightly away from your sides. I will take the photo for you.',
+  side:
+    'Side photo. Turn to your side, and hold both arms straight out in front of you at shoulder height.',
+};
 const NOSE = 0;
 const LEFT_SHOULDER = 11;
 const RIGHT_SHOULDER = 12;
@@ -92,6 +110,8 @@ interface PendingCapture {
   gate: PoseGateStatus;
   previewUrl: string;
   photo?: OnDevicePhoto | null;
+  /** Live captures continue on their own after AUTO_ACCEPT_MS. */
+  autoAccept?: boolean;
 }
 
 /** A retaken capture's preview URL and on-device frame are dropped at once. */
@@ -170,6 +190,8 @@ export function CaptureViewport({
   /** When this photo's search for the outline began (`RELAX_AFTER_MS`). */
   const searchStartRef = useRef<number | null>(null);
   const lastHoldBucketRef = useRef(-1);
+  /** First rejected (dark or blurred) frame of the current hold. */
+  const qualityMissSinceRef = useRef<number | null>(null);
   const sourceRef = useRef<CaptureSource>('live');
   const viewportActiveRef = useRef(false);
   const { landmarkerRef, ready, error: poseError, model, fallBackToLite } = poseLandmarker;
@@ -185,6 +207,7 @@ export function CaptureViewport({
   const [flash, setFlash] = useState(false);
   const [muted, setMuted] = useState(false);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
+  const [acceptIn, setAcceptIn] = useState<number | null>(null);
   // Side guide faces the way the shopper faces on the (mirrored) preview.
   const [sideGuideMirrored, setSideGuideMirrored] = useState(false);
 
@@ -222,6 +245,46 @@ export function CaptureViewport({
     }
   };
 
+  // The step's instructions, out loud, as soon as it opens (the pose model may still be loading).
+  useEffect(() => {
+    voiceRef.current.intro(STEP_INTRO[view]);
+  }, [view]);
+
+  useEffect(() => {
+    if (ready) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      voiceRef.current.say('Still getting ready. Stay in front of the camera.');
+    }, LOADING_REMINDER_MS);
+    return () => window.clearInterval(intervalId);
+  }, [ready]);
+
+  const acceptPending = useCallback((capture: PendingCapture): void => {
+    voiceRef.current.stop();
+    onCaptured(capture.blob, capture.gate, capture.photo);
+  }, [onCaptured]);
+
+  // A live photo continues by itself: the shopper is a few metres from the phone.
+  useEffect(() => {
+    if (!pending?.autoAccept) {
+      setAcceptIn(null);
+      return;
+    }
+    const started = Date.now();
+    setAcceptIn(Math.ceil(AUTO_ACCEPT_MS / 1000));
+    const intervalId = window.setInterval(() => {
+      const left = AUTO_ACCEPT_MS - (Date.now() - started);
+      if (left <= 0) {
+        window.clearInterval(intervalId);
+        acceptPending(pending);
+        return;
+      }
+      setAcceptIn(Math.ceil(left / 1000));
+    }, 250);
+    return () => window.clearInterval(intervalId);
+  }, [acceptPending, pending]);
+
   const handleOutlineFrame = useCallback((frame: OutlineFrame | null) => {
     outlineFrameRef.current = frame;
   }, []);
@@ -231,6 +294,7 @@ export function CaptureViewport({
     smootherRef.current.reset();
     lastRawGateRef.current = 'not_detected';
     lastHoldBucketRef.current = -1;
+    qualityMissSinceRef.current = null;
     setHoldProgress(0);
     setGate('not_detected');
   }, []);
@@ -464,21 +528,29 @@ export function CaptureViewport({
       const photo = keepOnDeviceLook
         ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight)
         : null;
-      // A frame too dark or blurred to draw the try-on on is retaken now, with the reason.
+      // A frame too dark or blurred to draw the try-on on: the next aligned frames
+      // are tried; only a run of them restarts the hold, with the reason.
       const quality = photo ? assessCanvasQuality(photo.frame) : 'ok';
       if (quality !== 'ok') {
         releaseOnDevicePhoto(photo);
         capturingRef.current = false;
-        resetHold();
-        setEncodeError(FRAME_QUALITY_COPY[quality]);
-        voiceRef.current.say(FRAME_QUALITY_COPY[quality], true);
+        qualityMissSinceRef.current ??= now;
+        if (now - qualityMissSinceRef.current >= QUALITY_RETRY_MS) {
+          resetHold();
+          setEncodeError(FRAME_QUALITY_COPY[quality]);
+          voiceRef.current.say(FRAME_QUALITY_COPY[quality], true);
+        }
         return;
       }
+      qualityMissSinceRef.current = null;
       void encodeVideoFrameToWebp(video, pose)
         .then((blob) => {
           setHoldProgress(1);
           setFlash(true);
-          voiceRef.current.say('Got it. Check your photo.', true);
+          voiceRef.current.say(
+            view === 'front' ? 'Got it. Stay there for the side photo.' : 'Got it. Building your fitting.',
+            true,
+          );
           const delivery = window.setTimeout(() => {
             pendingDeliveryRef.current = null;
             setFlash(false);
@@ -487,6 +559,7 @@ export function CaptureViewport({
               gate: 'aligned',
               previewUrl: URL.createObjectURL(blob),
               photo,
+              autoAccept: true,
             });
           }, 420);
           pendingDeliveryRef.current = { timer: delivery, photo };
@@ -676,7 +749,9 @@ export function CaptureViewport({
               ].join(' ')}
             />
             {pending
-              ? 'Check your photo'
+              ? acceptIn !== null
+                ? 'Got it'
+                : 'Check your photo'
               : flash
                 ? 'Got it'
                 : aligned
@@ -699,12 +774,9 @@ export function CaptureViewport({
             <button
               type="button"
               className="ash-cta py-4"
-              onClick={() => {
-                voiceRef.current.stop();
-                onCaptured(pending.blob, pending.gate, pending.photo);
-              }}
+              onClick={() => acceptPending(pending)}
             >
-              Use this photo
+              {acceptIn !== null ? `Use this photo (${acceptIn})` : 'Use this photo'}
             </button>
           </div>
         ) : voiceAvailable ? (
@@ -738,8 +810,10 @@ export function CaptureViewport({
           <p className="text-center text-[13px] text-ash-subtle">Loading pose guidance…</p>
         ) : pending ? (
           <p className="text-center text-[13px] text-ash-subtle">
-            Is your whole body in the picture, standing straight? This photo stays on your phone;
-            only a copy without your head is uploaded.
+            {acceptIn !== null
+              ? 'We keep this photo in a moment. Tap Retake if your whole body isn’t in it. '
+              : 'Is your whole body in the picture, standing straight? '}
+            This photo stays on your phone; only a copy without your head is uploaded.
           </p>
         ) : (
           <p className="text-center text-[13px] text-ash-subtle">

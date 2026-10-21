@@ -33,14 +33,6 @@ export const GPU_HOLD_DURING_DRAPE_MS = SHOPPER_INFERENCE_DEADLINE_MS;
 /** Skip Newton when the remaining budget cannot finish a drape. */
 export const DRAPE_MIN_REMAINING_MS = 20 * 1000;
 
-/**
- * Extra wait after scaling 0→1 so Modal `@enter` can finish before dispatch.
- * When min_containers is already 1, submit still waits a short settle so a
- * capture-warm GPU that is still loading weights is not dispatched empty.
- */
-export const GPU_COLD_START_WAIT_MS = 70 * 1000;
-export const GPU_WARM_SETTLE_WAIT_MS = 12 * 1000;
-
 /** Concurrent Modal A100-80GB replicas. Operator env ASHRIUM_GPU_MAX_INSTANCES. */
 export const DEFAULT_SHOPPER_GPU_MAX_INSTANCES = 3;
 export const SHOPPER_GPU_MAX_INSTANCES_CEILING = 8;

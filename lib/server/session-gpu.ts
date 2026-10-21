@@ -1,8 +1,6 @@
 import { scaleModalGpu, setModalSessionGpu } from '@/lib/ml/gpu';
 import {
   FITTING_ROOM_AT_CAPACITY_MESSAGE,
-  GPU_COLD_START_WAIT_MS,
-  GPU_WARM_SETTLE_WAIT_MS,
   SHOPPER_GPU_WARMUP_IDLE_MS,
   containersForOccupancy,
   readShopperGpuMaxInstances,
@@ -20,12 +18,6 @@ export class FittingRoomAtCapacityError extends Error {
     super(message);
     this.name = 'FittingRoomAtCapacityError';
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 function isMissingGpuSessionTable(error: { message?: string; code?: string } | null | undefined): boolean {
@@ -259,35 +251,6 @@ export async function scaleShopperGpuToOccupancy(): Promise<{
 /** Operator keepalive still pins a single warm replica. Shopper path uses leases. */
 export async function warmGpuForShopperSubmit(): Promise<void> {
   await setModalSessionGpu('warm');
-}
-
-/**
- * PATCH replicas for this shopper. Wait the cold-start budget only when a new
- * replica was added; otherwise a short settle so a warming image is not empty.
- */
-export async function warmAndWaitForShopperGpu(
-  tenantId: string,
-  sessionKey: string,
-  maxWaitMs = GPU_COLD_START_WAIT_MS,
-): Promise<void> {
-  const started = Date.now();
-  const claimed = await claimShopperGpuSession(tenantId, sessionKey);
-  const snapshot = await readShopperGpuOccupancy();
-  const budget = claimed.created && snapshot.occupancy <= 1
-    ? Math.max(0, Math.min(GPU_COLD_START_WAIT_MS, maxWaitMs))
-    : Math.max(0, Math.min(GPU_WARM_SETTLE_WAIT_MS, maxWaitMs));
-  const remaining = budget - (Date.now() - started);
-  if (remaining > 0) {
-    await sleep(remaining);
-  }
-}
-
-export async function settleWarmReplicaIfNeeded(convertedLease: boolean): Promise<void> {
-  if (!convertedLease) {
-    return;
-  }
-
-  await sleep(GPU_WARM_SETTLE_WAIT_MS);
 }
 
 export async function holdGpuForFitJob(jobId: string, holdMs: number): Promise<void> {

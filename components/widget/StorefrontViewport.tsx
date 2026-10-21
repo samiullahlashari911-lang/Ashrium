@@ -450,7 +450,7 @@ export function StorefrontViewport({
         : drapePayloadBase64
           ? `Dressing you in size ${activeSize ?? ''}…`
         : unavailableReason === 'too_small'
-          ? `Size ${activeSize ?? ''} is too tight for you`
+          ? `Size ${activeSize ?? ''} doesn’t fit you`
           : activeDrapeEntry === 'failed' || (typeof activeDrapeEntry === 'object' && !drapePayloadBase64) || holdExpired
             ? `Couldn't dress you in size ${activeSize ?? ''}`
             : 'Building your fitting';
@@ -511,7 +511,7 @@ export function StorefrontViewport({
                       : missingGarment === 'no_fit'
                         ? 'None of this item’s sizes fit you'
                         : missingGarment === 'too_tight'
-                          ? `Size ${activeSize ?? ''} is too tight to show on you`
+                          ? `Size ${activeSize ?? ''} doesn’t fit you`
                           : missingGarment === 'session_over'
                             ? `Size ${activeSize ?? ''} can’t be shown now`
                             : `We couldn’t draw size ${activeSize ?? ''} on you`}
@@ -523,8 +523,10 @@ export function StorefrontViewport({
                         ? 'Your size is still measured from your body. Try once more.'
                         : missingGarment === 'session_over'
                           ? 'Your fitting session has ended. Retake photos to see another size on you.'
-                        : missingGarment === 'too_tight' && nextLargerSize
-                          ? 'A bigger size may close around you.'
+                        : missingGarment === 'too_tight'
+                          ? nextLargerSize
+                            ? 'Try a larger size.'
+                            : 'There’s no larger size of this item. Try another garment.'
                           : 'Close this window to pick another item.'}
                   </p>
                 </div>
@@ -570,8 +572,12 @@ export function StorefrontViewport({
                 <p className="text-sm font-medium text-ash-ink">
                   {recommendation?.size.fits === false
                     ? 'None of the sizes of this product fit you.'
-                    : `Size ${activeSize ?? ''} is too tight for you.`}{' '}
-                  <span className="font-normal text-ash-muted">Try another garment that fits you.</span>
+                    : `Size ${activeSize ?? ''} doesn’t fit you.`}{' '}
+                  <span className="font-normal text-ash-muted">
+                    {recommendation?.size.fits !== false && nextLargerSize
+                      ? 'Try a larger size.'
+                      : 'Try another garment that fits you.'}
+                  </span>
                 </p>
               ) : reasons.length > 0 ? (
                 <ul className="flex flex-col gap-1 text-xs text-ash-muted">

@@ -62,7 +62,13 @@ export interface DrapeProblem {
  */
 export type DrapePrediction =
   | { status: 'too_small'; reason: string }
-  | { status: 'ok' | 'problem'; mesh: SimDrapeMesh; problems: DrapeProblem[] };
+  | {
+    status: 'ok' | 'problem';
+    mesh: SimDrapeMesh;
+    problems: DrapeProblem[];
+    /** The GPU's own stage timings (solver, request), for the job's outcome log. */
+    timingsMs: Record<string, number>;
+  };
 
 export interface RunPatternSizeInput {
   sizeCode: string;
@@ -549,10 +555,19 @@ export function parseDrapeSimOutput(output: unknown): DrapePrediction {
   }
 
   const meanStrain = isFiniteNumber(unwrapped.mean_strain) ? unwrapped.mean_strain : 0;
+  const timingsMs: Record<string, number> = {};
+  if (isRecord(unwrapped.timings_ms)) {
+    for (const [key, value] of Object.entries(unwrapped.timings_ms)) {
+      if (isFiniteNumber(value)) {
+        timingsMs[key] = Math.round(value);
+      }
+    }
+  }
 
   return {
     status: unwrapped.status,
     problems: readDrapeProblems(unwrapped.problems),
+    timingsMs,
     mesh: {
       restPositions,
       delta,
