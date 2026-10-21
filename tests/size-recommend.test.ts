@@ -39,7 +39,7 @@ test('a drape that will not come is not "waiting"', () => {
     'Your measurements are larger than this size chart',
   ]);
   assert.deepEqual(approximateReasons(gate, { drapeSettled: false, sizeFits: true }), [
-    'Waiting for the cloth simulation',
+    'Still fitting the garment to you',
   ]);
 });
 

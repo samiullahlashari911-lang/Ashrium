@@ -34,3 +34,27 @@ test('no line without enough drape in a region, or for an unknown garment', () =
   const sparse = summarizeFit({ positionsY: [1.26], clearanceCm: [3], floorY: 0, statureM: 1.75, category: 'tee', easeCm: 8 });
   assert.deepEqual(sparse, []);
 });
+
+test('each size says how much room it leaves on this body, and the words follow the sizes', async () => {
+  const { sizeRoom, sizeRoomLine } = await import('@/lib/fit/fit-summary');
+  const body = { chest_cm: 96.3, waist_cm: 93.7, hip_cm: 112 };
+  const ease = { chestCm: 8, waistCm: 6, hipCm: 6 };
+  const sizes = [
+    { code: 'S', chestCm: 100.1 },
+    { code: 'M', chestCm: 104.9 },
+    { code: 'L', chestCm: 110 },
+    { code: 'XL', chestCm: 114 },
+  ];
+  const lines = sizes.map((size) => sizeRoomLine(sizeRoom('tee', { chestCm: size.chestCm, waistCm: 0, hipCm: 0 }, body, ease)));
+  assert.deepEqual(lines, [
+    '4 cm of room at the chest (snug)',
+    '9 cm of room at the chest (comfortable)',
+    '14 cm of room at the chest (relaxed)',
+    '18 cm of room at the chest (loose)',
+  ]);
+  assert.equal(
+    sizeRoomLine(sizeRoom('pant', { chestCm: 0, waistCm: 90, hipCm: 116 }, body, { chestCm: 4, waistCm: 2, hipCm: 4 })),
+    '4 cm smaller than you at the waist · 4 cm of room at the hips (comfortable)',
+  );
+  assert.equal(sizeRoomLine(sizeRoom('other', { chestCm: 100, waistCm: 0, hipCm: 0 }, body, ease)), null);
+});

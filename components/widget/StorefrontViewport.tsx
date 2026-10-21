@@ -13,6 +13,7 @@ import {
   type GuidedCaptureResult,
 } from '@/components/widget/guided-capture/guided-capture';
 import { evaluateConfidenceGate } from '@/lib/fit/confidence-gate';
+import { sizeRoom, sizeRoomLine } from '@/lib/fit/fit-summary';
 import { recommendFit } from '@/lib/fit/recommend';
 import {
   fetchFitDrapeResolve,
@@ -96,7 +97,6 @@ export function StorefrontViewport({
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [clientPrintQaPassed, setClientPrintQaPassed] = useState<boolean | null>(null);
   const [addedSize, setAddedSize] = useState<string | null>(null);
-  const [fitLine, setFitLine] = useState<string | null>(null);
   // Q9: photos that cannot paint the avatar mean a retake, never the mannequin.
   const [paintFailure, setPaintFailure] = useState<PaintUnavailableReason | null>(null);
   const [captureAttempt, setCaptureAttempt] = useState(0);
@@ -388,6 +388,12 @@ export function StorefrontViewport({
     void reportTryOnShown(embedToken, { jobId: fitJobId, sku: activeSku, sizeCode: activeSize, shown: garmentShown });
   }, [activeSize, activeSku, drapePayloadBase64, embedToken, fitJobId, garmentShown]);
 
+  // How much room the size on screen leaves on this body, from the chart (changes with the size).
+  const activeVariant = activeGarment?.sizeVariants.find((variant) => variant.sizeCode === activeSize) ?? null;
+  const roomLine = result && activeVariant && recommendation
+    ? sizeRoomLine(sizeRoom(activeGarment?.category, activeVariant, result.parametric.derived_measurements, recommendation.ease))
+    : null;
+
   const canvasGarment = recommendation
     ? {
         easeCm: recommendation.ease.chestCm,
@@ -479,7 +485,6 @@ export function StorefrontViewport({
               revealed={revealed}
               onBodyReady={() => setBodySettled(true)}
               onPrintQaFail={() => setClientPrintQaPassed(false)}
-              onFitSummary={setFitLine}
               onPaintUnavailable={setPaintFailure}
               onGarmentShown={handleGarmentShown}
               className="h-[58dvh] min-h-[380px] w-full md:h-full md:min-h-[560px]"
@@ -602,11 +607,13 @@ export function StorefrontViewport({
                   Measured from your body and this product’s size chart, and confirmed by a cloth simulation.
                 </p>
               ) : null}
-              {fitLine && drapePayloadBase64 ? (
-                <p className="text-sm font-medium text-ash-ink">{fitLine}</p>
+              {roomLine ? (
+                <p className="text-sm text-ash-ink">
+                  <span className="font-semibold">Size {activeSize}:</span> {roomLine}
+                </p>
               ) : null}
-              <p className="text-[11px] text-ash-subtle">
-                Your 3D body, measured from your photos, wearing this size as the cloth simulation draped it.
+              <p className="text-xs text-ash-muted">
+                From your measured body and this item’s published size chart.
               </p>
             </div>
 

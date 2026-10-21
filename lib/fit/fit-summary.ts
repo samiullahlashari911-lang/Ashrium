@@ -85,3 +85,64 @@ export function fitSummaryLine(summaries: readonly FitRegionSummary[]): string |
   const line = summaries.map((summary) => `${summary.word} at ${summary.region}`).join(' · ');
   return line.charAt(0).toUpperCase() + line.slice(1);
 }
+
+/**
+ * How much room one size leaves on this body, from the published chart: the
+ * size's girth minus the shopper's, per region the size is chosen by. Unlike
+ * the drape's clearance (cloth touches the chest in every size), it differs
+ * from size to size, so the shopper can compare S, M and L. Worded against the
+ * same wearing-ease target the size number uses; it never changes the size.
+ */
+export interface SizeRoom {
+  region: FitRegion;
+  roomCm: number;
+  word: FitWord;
+}
+
+const ROOM_REGIONS: Record<string, Array<[FitRegion, 'chestCm' | 'waistCm' | 'hipCm', 'chest_cm' | 'waist_cm' | 'hip_cm']>> = {
+  tee: [['chest', 'chestCm', 'chest_cm'], ['waist', 'waistCm', 'waist_cm']],
+  outerwear: [['chest', 'chestCm', 'chest_cm'], ['waist', 'waistCm', 'waist_cm']],
+  pant: [['waist', 'waistCm', 'waist_cm'], ['hips', 'hipCm', 'hip_cm']],
+  dress: [['chest', 'chestCm', 'chest_cm'], ['waist', 'waistCm', 'waist_cm'], ['hips', 'hipCm', 'hip_cm']],
+};
+
+/** Room as a share of the ease target: below these it reads tight, snug, regular, relaxed; above, loose. */
+const ROOM_BANDS = { tight: 0.25, snug: 0.7, comfortable: 1.4, relaxed: 2 } as const;
+
+export function roomWord(roomCm: number, targetCm: number): FitWord {
+  const share = roomCm / Math.max(targetCm, 1);
+  if (share < ROOM_BANDS.tight) return 'tight';
+  if (share < ROOM_BANDS.snug) return 'snug';
+  if (share <= ROOM_BANDS.comfortable) return 'comfortable';
+  if (share <= ROOM_BANDS.relaxed) return 'relaxed';
+  return 'loose';
+}
+
+export function sizeRoom(
+  category: GarmentCategory | null | undefined,
+  size: { chestCm: number; waistCm: number; hipCm: number },
+  body: { chest_cm: number; waist_cm: number; hip_cm: number },
+  easeTarget: { chestCm: number; waistCm: number; hipCm: number },
+): SizeRoom[] {
+  return (ROOM_REGIONS[category ?? ''] ?? [])
+    .filter(([, sizeKey, bodyKey]) => size[sizeKey] > 0 && body[bodyKey] > 0)
+    .map(([region, sizeKey, bodyKey]) => {
+      const roomCm = size[sizeKey] - body[bodyKey];
+      return { region, roomCm, word: roomWord(roomCm, easeTarget[sizeKey]) };
+    });
+}
+
+/** "13 cm of room at the chest (relaxed)", or "4 cm smaller than you at the waist". */
+export function sizeRoomLine(rooms: readonly SizeRoom[]): string | null {
+  if (rooms.length === 0) {
+    return null;
+  }
+  return rooms
+    .map((room) => {
+      const cm = Math.round(Math.abs(room.roomCm));
+      return room.roomCm < 0
+        ? `${cm} cm smaller than you at the ${room.region}`
+        : `${cm} cm of room at the ${room.region} (${room.word})`;
+    })
+    .join(' · ');
+}

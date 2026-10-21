@@ -365,11 +365,8 @@ export function AvatarLoading({
 
   return (
     <div className="mx-auto flex h-[100dvh] w-full max-w-md flex-col items-center px-6 pb-8 pt-8 text-ash-ink">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ash-accent">
-        Building your avatar
-      </p>
-      <h1 className="mt-2 text-center text-[24px] font-semibold tracking-tight">
-        {stage === 'ready' ? 'Here you are' : 'Hold tight, this is the fun part'}
+      <h1 className="text-center text-[24px] font-semibold tracking-tight">
+        {stage === 'ready' ? 'Here you are' : 'Measuring you and fitting your size'}
       </h1>
 
       <div
@@ -415,7 +412,7 @@ export function AvatarLoading({
         <p className="max-w-[300px] text-xs leading-relaxed text-ash-subtle">
           {slowStart
             ? 'Starting a fresh GPU. The first fitting of a session takes a little longer.'
-            : 'Keep this screen open. Your photos are deleted the moment your avatar is built.'}
+            : 'Keep this screen open. Your photos are deleted the moment you are measured.'}
         </p>
       </div>
     </div>

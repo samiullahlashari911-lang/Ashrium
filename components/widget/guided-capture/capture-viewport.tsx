@@ -55,7 +55,7 @@ const LOADING_REMINDER_MS = 12000;
 const STEP_INTRO: Record<CaptureView, string> = {
   front:
     'Front photo. Prop your phone up at about waist height, then step back until your whole body, head to feet, '
-    + 'fits inside the outline. Keep your arms slightly away from your sides. I will take the photo for you.',
+    + 'fits inside the outline. Keep your arms slightly away from your sides. We take the photo for you.',
   side:
     'Side photo. Turn to your side, and hold both arms straight out in front of you at shoulder height.',
 };
@@ -692,10 +692,13 @@ export function CaptureViewport({
         </div>
         <CaptureFlowMeter step={flowStep} />
         <p className="text-[13px] leading-relaxed text-ash-muted">{hint}</p>
-        <ul className="flex flex-col gap-1 text-[12px] leading-snug text-ash-subtle [@media(max-height:760px)]:hidden">
-          <li>{CAPTURE_CLOTHING_TIP}</li>
-          <li>{CAPTURE_PRIVACY_NOTE}</li>
-        </ul>
+        {/* Read while the guide loads; once it is live the camera gets the room (the phone is propped far away). */}
+        {ready ? null : (
+          <ul className="flex flex-col gap-1 text-[12px] leading-snug text-ash-muted [@media(max-height:760px)]:hidden">
+            <li>{CAPTURE_CLOTHING_TIP}</li>
+            <li>{CAPTURE_PRIVACY_NOTE}</li>
+          </ul>
+        )}
       </header>
 
       <div
@@ -723,6 +726,7 @@ export function CaptureViewport({
               sex={sex}
               gate={gate}
               holdProgress={holdProgress}
+              pending={!ready}
               mirrored={view === 'side' && sideGuideMirrored}
               onFrame={handleOutlineFrame}
             />
@@ -738,13 +742,13 @@ export function CaptureViewport({
         <div className="absolute inset-x-0 top-4 flex justify-center px-4">
           <span
             aria-live="polite"
-            className="inline-flex max-w-full items-center gap-2.5 rounded-full bg-white/92 px-5 py-2.5 text-[15px] font-semibold leading-snug text-ash-ink shadow-card"
+            className="inline-flex max-w-full items-center gap-3 rounded-full bg-white/94 px-5 py-3 text-[18px] font-semibold leading-snug text-ash-ink shadow-card"
           >
             <span
               aria-hidden="true"
               className={[
-                'h-3 w-3 shrink-0 rounded-full transition-colors duration-300',
-                aligned || pending ? 'bg-[#22C77A]' : 'bg-[#F0444F]',
+                'h-3.5 w-3.5 shrink-0 rounded-full transition-colors duration-300',
+                aligned || pending ? 'bg-[#22C77A]' : ready ? 'bg-[#F0444F]' : 'bg-ash-subtle',
               ].join(' ')}
             />
             {pending
@@ -753,9 +757,11 @@ export function CaptureViewport({
                 : 'Check your photo'
               : flash
                 ? 'Got it'
-                : aligned
-                  ? 'Perfect, hold still'
-                  : gateStatusCopy(gate, view)}
+                : !ready && source === 'live'
+                  ? 'Getting the camera guide ready…'
+                  : aligned
+                    ? 'Perfect, hold still'
+                    : gateStatusCopy(gate, view)}
           </span>
         </div>
         {(cameraError && source === 'live') || encodeError ? (
@@ -806,17 +812,17 @@ export function CaptureViewport({
             never uploaded. Refresh and allow the camera to try again.
           </p>
         ) : !ready ? (
-          <p className="text-center text-[13px] text-ash-subtle">Loading pose guidance…</p>
+          <p className="text-center text-[13px] text-ash-muted">Getting the camera guide ready. Stay in front of the camera.</p>
         ) : pending ? (
-          <p className="text-center text-[13px] text-ash-subtle">
+          <p className="text-center text-[13px] text-ash-muted">
             {acceptIn !== null
               ? 'We keep this photo in a moment. Tap Retake if your whole body isn’t in it. '
               : 'Is your whole body in the picture, standing straight? '}
             This photo stays on your phone; only a copy without your head is uploaded.
           </p>
         ) : (
-          <p className="text-center text-[13px] text-ash-subtle">
-            The outline turns green when you are in place. Your head is removed on this phone before upload.
+          <p className="text-center text-[13px] text-ash-muted">
+            The outline turns solid green when you are in place. Your head is removed on this phone before upload.
           </p>
         )}
 

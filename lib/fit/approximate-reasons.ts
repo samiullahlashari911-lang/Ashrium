@@ -13,16 +13,16 @@ export function approximateReasons(gate: ConfidenceGateResult, context: Approxim
   if (!context.sizeFits) {
     reasons.push('Your measurements are larger than this size chart');
   } else if (!gate.drapePassed) {
-    reasons.push(context.drapeSettled ? 'This size could not be shown on you' : 'Waiting for the cloth simulation');
+    reasons.push(context.drapeSettled ? 'This size could not be shown on you' : 'Still fitting the garment to you');
   }
   if (!gate.capturePassed) {
-    reasons.push('A photo check did not fully pass');
+    reasons.push('A photo check did not fully pass: retake for an exact size');
   }
   if (!gate.ingestPassed) {
     reasons.push('This product’s size details are incomplete');
   }
   if (!gate.residualPassed) {
-    reasons.push('Clothing may be hiding your shape');
+    reasons.push('Loose clothing may hide your shape: retake in a fitted T-shirt for an exact size');
   }
   if (!gate.printPassed) {
     reasons.push('Product image could not be verified');

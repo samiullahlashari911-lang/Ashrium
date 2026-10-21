@@ -98,7 +98,7 @@ function CheckRow({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <label className="flex cursor-pointer items-start gap-3 text-[13px] leading-relaxed text-ash-ink">
+    <label className="flex min-h-11 cursor-pointer items-start gap-3 py-1.5 text-[13px] leading-relaxed text-ash-ink">
       <input
         type="checkbox"
         checked={checked}
@@ -324,7 +324,7 @@ export function CaptureIntake({
                 setAgeAttested(false);
                 setConsent(false);
               }}
-              className="self-start text-xs text-ash-subtle underline-offset-2 hover:underline"
+              className="-mx-2 inline-flex min-h-11 items-center self-start px-2 text-[13px] text-ash-muted underline underline-offset-2"
             >
               I am under 16
             </button>
@@ -335,7 +335,7 @@ export function CaptureIntake({
           <>
             <PageTitle title="How tall are you?">
               <p className="text-sm leading-relaxed text-ash-muted">
-                Your avatar is scaled to this exact height. Scroll or tap to choose.
+                Your body is measured at this exact height. Scroll or tap to choose.
               </p>
             </PageTitle>
             <div className="flex flex-1 flex-col justify-center">
@@ -482,7 +482,7 @@ export function CaptureIntake({
             </button>
           ) : page !== 'weight' ? (
             <p className="w-full py-4 text-center text-sm text-ash-subtle">
-              {page === 'height' ? 'Scroll to your height' : 'Pick one to continue'}
+              {page === 'height' ? 'Scroll to your height to continue' : 'Pick one to continue'}
             </p>
           ) : null}
         </div>

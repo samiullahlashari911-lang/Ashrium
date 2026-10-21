@@ -36,9 +36,9 @@ export const AVATAR_STAGE_LABEL: Record<AvatarStageKey, { active: string; done: 
   silhouettes: { active: 'Finding your outline', done: 'Outline found' },
   body: { active: 'Building your 3D body', done: '3D body built' },
   measure: { active: 'Taking your measurements', done: 'Measurements taken' },
-  place: { active: 'Putting your avatar together', done: 'Avatar put together' },
+  place: { active: 'Placing you in your photo', done: 'Placed in your photo' },
   dress: { active: 'Dressing you in your size', done: 'Dressed in your size' },
-  ready: { active: 'Your avatar is ready', done: 'Your avatar is ready' },
+  ready: { active: 'Ready', done: 'Ready' },
 };
 
 /** Stages the GPU may report; anything else from the wire is ignored. */
