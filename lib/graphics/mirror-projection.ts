@@ -6,7 +6,7 @@
  * the side view) while the drape is on the canonical body, so one camera
  * cannot map it. Each body vertex gets its own small affine camera instead,
  * fitted from its neighbours' canonical positions → photo pixels; a garment
- * point uses the camera of its nearest body vertex. Patches follow the pose,
+ * point blends the cameras of its nearest body vertices. Patches follow the pose,
  * so a sleeve draped on the canonical arm lands on the photographed arm.
  * All on-device; nothing here leaves the browser.
  */
@@ -17,6 +17,14 @@ import { headlessUvToFrameUv, type HeadlessKeepBox } from '@/lib/widget/webp-enc
 const CELL_M = 0.04;
 /** Neighbours per patch camera: enough to fit 3D → 2D affinely, local enough to follow the pose. */
 const PATCH_NEIGHBOURS = 64;
+/** Body vertices whose cameras a garment point blends. */
+const BLEND_VERTICES = 8;
+/**
+ * Falloff (metres) of the blend past the nearest vertex. One nearest camera
+ * tore the garment where body parts meet (neck / shoulder / head: notches in
+ * the neckline, 30 px steps); a blend over ~1 cm lands it continuously.
+ */
+const BLEND_FALLOFF_M = 0.01;
 
 export type MirrorView = 'front' | 'side';
 
@@ -154,19 +162,15 @@ export function createPatchProjector(
     return camera;
   };
 
-  const nearest = (x: number, y: number, z: number): number => {
+  /** The few nearest body vertices with their distances (metres), nearest first. */
+  const nearestFew = (x: number, y: number, z: number): Array<readonly [number, number]> => {
     for (let reach = 1; reach <= 3; reach += 1) {
-      let best = -1;
-      let bestDistance = Infinity;
-      for (const j of neighbours(x, y, z, reach)) {
-        const d = distanceSq(j, x, y, z);
-        if (d < bestDistance) {
-          bestDistance = d;
-          best = j;
-        }
-      }
-      if (best >= 0) {
-        return best;
+      const found = neighbours(x, y, z, reach);
+      if (found.length > 0) {
+        return found
+          .map((j) => [j, Math.sqrt(distanceSq(j, x, y, z))] as const)
+          .sort((a, b) => a[1] - b[1])
+          .slice(0, BLEND_VERTICES);
       }
     }
     let best = 0;
@@ -178,26 +182,44 @@ export function createPatchProjector(
         best = j;
       }
     }
-    return best;
+    return [[best, Math.sqrt(bestDistance)]];
+  };
+
+  const projectWith = (vertex: number, x: number, y: number, z: number): [number, number] => {
+    const camera = cameraFor(vertex);
+    const offset = [
+      x - bodyPositions[vertex * 3],
+      y - bodyPositions[vertex * 3 + 1],
+      z - bodyPositions[vertex * 3 + 2],
+      1,
+    ];
+    let u = 0;
+    let v = 0;
+    for (let i = 0; i < 4; i += 1) {
+      u += camera.mu[i] * offset[i];
+      v += camera.mv[i] * offset[i];
+    }
+    return [u, v];
   };
 
   return {
     project(x: number, y: number, z: number): [number, number] {
-      const vertex = nearest(x, y, z);
-      const camera = cameraFor(vertex);
-      const offset = [
-        x - bodyPositions[vertex * 3],
-        y - bodyPositions[vertex * 3 + 1],
-        z - bodyPositions[vertex * 3 + 2],
-        1,
-      ];
+      const near = nearestFew(x, y, z);
+      const closest = near[0][1];
       let u = 0;
       let v = 0;
-      for (let i = 0; i < 4; i += 1) {
-        u += camera.mu[i] * offset[i];
-        v += camera.mv[i] * offset[i];
+      let total = 0;
+      for (const [vertex, distance] of near) {
+        const weight = Math.exp(-(((distance - closest) / BLEND_FALLOFF_M) ** 2));
+        if (weight < 1e-4) {
+          continue;
+        }
+        const [pu, pv] = projectWith(vertex, x, y, z);
+        u += pu * weight;
+        v += pv * weight;
+        total += weight;
       }
-      return [u, v];
+      return [u / total, v / total];
     },
   };
 }

@@ -17,6 +17,9 @@
  * covered, nothing is removed at all.
  */
 
+import { boxBlur, squareFilter } from '@/lib/graphics/mask-filter';
+import { linearToSrgb, srgbToLinear } from '@/lib/graphics/photo-lighting';
+
 /** Per-pixel zone of the fitted body in the photo (`zone` input). */
 export const FILL_ZONE = {
   /** Not on the fitted body: background behind the shopper. */
@@ -54,6 +57,20 @@ export interface ClothesRemovalInput {
    * round. Omitted: flat fill.
    */
   facing?: Float32Array;
+  /**
+   * The photo's own light on the fitted body (`photo-shading.ts`), relative,
+   * 0 where unknown. Given, filled skin keeps the tone of the skin it came
+   * from and takes this light's variation across it (an arm under an old
+   * sleeve is shaded as that sleeve was). Omitted: `facing` shade.
+   */
+  skinLight?: Float32Array;
+  /**
+   * 1 where the fitted body certainly is (well inside an arm, away from the
+   * neck): anything there that is not sure skin is the shopper's own clothing,
+   * whatever the mask says. A white sleeve against a white wall is "wall" to
+   * the segmenter and stayed on the arm as a ghost.
+   */
+  bodyCertain?: Uint8Array;
   /** Deterministic grain in tests. */
   random?: () => number;
 }
@@ -89,6 +106,17 @@ const SKIN_FACING_SHADE = 1.03;
 const SMOOTH_PASSES = 2;
 
 const BINS = 16;
+/** Fine skin detail: measured over this box radius, kept within this relative contrast range. */
+const SKIN_DETAIL_RADIUS = 3;
+const SKIN_DETAIL_MIN = 0.008;
+const SKIN_DETAIL_MAX = 0.025;
+/** Clothes confidence given to non-skin pixels where the fitted body certainly is. */
+const BODY_CERTAIN_CLOTHES = 0.9;
+/** Relit skin stays within this share of its fill's mean light. */
+const RELIT_MIN = 0.7;
+const RELIT_MAX = 1.3;
+/** Below this fitted brightness the light is unknown there (off the body). */
+const MIN_LIGHT = 0.02;
 
 function colourBin(photo: Uint8ClampedArray, pixel: number): number {
   const o = pixel * 4;
@@ -230,25 +258,51 @@ export function pushPullFill(
 
 type FillKind = 'background' | 'skin' | 'trousers';
 
-export function removeReplacedClothes(input: ClothesRemovalInput): ClothesRemovalResult {
-  const { width, height, photo, clothes, background, skin, garment, zone, replace } = input;
-  const count = width * height;
-  const likelihood = bottomLikelihood(input);
-  const replacesTop = replace !== 'bottom';
-  const replacesBottom = replace !== 'top';
-
-  // A covered head (headscarf, hijab): its cloth may fall over the shoulders, so leave everything.
+/**
+ * A covered head (headscarf, hijab, hat): its cloth may fall over the
+ * shoulders, so nothing of the shopper's own clothes is touched.
+ */
+export function headIsCovered(zone: Uint8Array, clothes: Float32Array, width: number, waistRow: number): boolean {
   let headPixels = 0;
   let headClothes = 0;
-  for (let pixel = 0; pixel < count; pixel += 1) {
-    if (zone[pixel] === FILL_ZONE.keep && pixel < input.waistRow * width) {
+  const end = Math.min(zone.length, Math.max(0, waistRow) * width);
+  for (let pixel = 0; pixel < end; pixel += 1) {
+    if (zone[pixel] === FILL_ZONE.keep) {
       headPixels += 1;
       if (clothes[pixel] >= CLOTHES_SURE) {
         headClothes += 1;
       }
     }
   }
-  if (headPixels > 0 && headClothes / headPixels > HEAD_COVERED_SHARE) {
+  return headPixels > 0 && headClothes / headPixels > HEAD_COVERED_SHARE;
+}
+
+/** The masks with the fitted body's certainty applied (`bodyCertain`). */
+function withBodyCertainty(input: ClothesRemovalInput): ClothesRemovalInput {
+  const certain = input.bodyCertain;
+  if (!certain) {
+    return input;
+  }
+  const clothes = new Float32Array(input.clothes);
+  const background = new Float32Array(input.background);
+  for (let pixel = 0; pixel < clothes.length; pixel += 1) {
+    if (certain[pixel] && input.skin[pixel] < CLOTHES_SURE && input.zone[pixel] === FILL_ZONE.upper) {
+      clothes[pixel] = Math.max(clothes[pixel], BODY_CERTAIN_CLOTHES);
+      background[pixel] = 0;
+    }
+  }
+  return { ...input, clothes, background };
+}
+
+export function removeReplacedClothes(rawInput: ClothesRemovalInput): ClothesRemovalResult {
+  const input = withBodyCertainty(rawInput);
+  const { width, height, photo, clothes, background, skin, garment, zone, replace } = input;
+  const count = width * height;
+  const likelihood = bottomLikelihood(input);
+  const replacesTop = replace !== 'bottom';
+  const replacesBottom = replace !== 'top';
+
+  if (headIsCovered(zone, clothes, width, input.waistRow)) {
     return { pixels: null, removedPixels: 0, unsure: false };
   }
 
@@ -346,7 +400,10 @@ export function removeReplacedClothes(input: ClothesRemovalInput): ClothesRemova
 
   const out = new Uint8ClampedArray(photo);
   const random = input.random ?? Math.random;
+  const light = input.skinLight;
   for (const kind of needed) {
+    // Skin under the photo's light is filled as albedo, in linear light.
+    const relit = kind === 'skin' && light !== undefined;
     const values = new Float32Array(count * 3);
     const weight = new Float32Array(count);
     let sources = 0;
@@ -360,13 +417,13 @@ export function removeReplacedClothes(input: ClothesRemovalInput): ClothesRemova
           : kind === 'skin'
             ? skin[pixel] >= SOURCE_SURE
             : clothes[pixel] >= SOURCE_SURE && zone[pixel] !== FILL_ZONE.keep && isBottomPixel(input, likelihood, pixel);
-      if (!isSource) {
+      if (!isSource || (relit && !(light[pixel] > MIN_LIGHT))) {
         continue;
       }
       weight[pixel] = 1;
-      values[pixel * 3] = photo[pixel * 4];
-      values[pixel * 3 + 1] = photo[pixel * 4 + 1];
-      values[pixel * 3 + 2] = photo[pixel * 4 + 2];
+      for (let c = 0; c < 3; c += 1) {
+        values[pixel * 3 + c] = relit ? srgbToLinear(photo[pixel * 4 + c]) : photo[pixel * 4 + c];
+      }
       sources += 1;
     }
     if (sources < MIN_SOURCES) {
@@ -374,6 +431,20 @@ export function removeReplacedClothes(input: ClothesRemovalInput): ClothesRemova
       continue;
     }
     const filled = pushPullFill(width, height, values, weight);
+    // The light only shapes the fill: relative to its own mean over the filled
+    // skin, so the fill keeps the tone of the skin it came from (light read
+    // on an old white sleeve and on skin are not on one scale).
+    let lightSum = 0;
+    let lightCount = 0;
+    if (relit) {
+      for (let pixel = 0; pixel < count; pixel += 1) {
+        if (remove[pixel] && kindOf(pixel) === kind && light[pixel] > MIN_LIGHT) {
+          lightSum += light[pixel];
+          lightCount += 1;
+        }
+      }
+    }
+    const meanLight = lightCount > 0 ? lightSum / lightCount : 1;
     for (let pixel = 0; pixel < count; pixel += 1) {
       if (!remove[pixel] || kindOf(pixel) !== kind) {
         continue;
@@ -385,9 +456,13 @@ export function removeReplacedClothes(input: ClothesRemovalInput): ClothesRemova
         kind === 'skin' && input.facing
           ? SKIN_EDGE_SHADE + (SKIN_FACING_SHADE - SKIN_EDGE_SHADE) * Math.sqrt(input.facing[pixel])
           : 1;
+      const relative = relit && light[pixel] > MIN_LIGHT
+        ? Math.min(RELIT_MAX, Math.max(RELIT_MIN, light[pixel] / meanLight))
+        : 1;
       for (let c = 0; c < 3; c += 1) {
         const o = pixel * 4 + c;
-        out[o] = Math.round(photo[o] * (1 - alpha) + (filled[pixel * 3 + c] * shade + grain) * alpha);
+        const fill = relit ? linearToSrgb(filled[pixel * 3 + c] * relative) : filled[pixel * 3 + c] * shade;
+        out[o] = Math.round(photo[o] * (1 - alpha) + (fill + grain) * alpha);
       }
     }
   }
@@ -412,5 +487,99 @@ export function removeReplacedClothes(input: ClothesRemovalInput): ClothesRemova
       }
     }
   }
+  addSkinTexture(input, out, remove, kindOf, random);
   return { pixels: out, removedPixels, unsure: false };
+}
+
+/** Smooth 2D value noise in [0, 1) on a lattice of `cell` pixels. */
+function valueNoise(x: number, y: number, cell: number, seed: number): number {
+  const hash = (ix: number, iy: number): number => {
+    const h = Math.sin(ix * 127.1 + iy * 311.7 + seed * 74.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const fx = x / cell;
+  const fy = y / cell;
+  const ix = Math.floor(fx);
+  const iy = Math.floor(fy);
+  const tx = fx - ix;
+  const ty = fy - iy;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const top = hash(ix, iy) * (1 - sx) + hash(ix + 1, iy) * sx;
+  const bottom = hash(ix, iy + 1) * (1 - sx) + hash(ix + 1, iy + 1) * sx;
+  return top * (1 - sy) + bottom * sy;
+}
+
+/**
+ * Filled skin gets the texture of the shopper's own skin. A diffusion fill is
+ * airbrush-smooth, which read as painted; the fine detail (pores, hair,
+ * mottling) of their visible skin is measured as a relative contrast and the
+ * filled skin is given multi-scale noise of that same strength, never more.
+ */
+function addSkinTexture(
+  input: ClothesRemovalInput,
+  out: Uint8ClampedArray,
+  remove: Uint8Array,
+  kindOf: (pixel: number) => FillKind,
+  random: () => number,
+): void {
+  const { width, height, photo, skin, garment } = input;
+  const count = width * height;
+  const luma = new Float32Array(count);
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    luma[pixel] = 0.299 * photo[pixel * 4] + 0.587 * photo[pixel * 4 + 1] + 0.114 * photo[pixel * 4 + 2];
+  }
+  const local = boxBlur(luma, width, height, SKIN_DETAIL_RADIUS);
+  const contrasts: number[] = [];
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    if (!remove[pixel] && garment[pixel] === 0 && skin[pixel] >= SOURCE_SURE && local[pixel] > 20) {
+      contrasts.push((luma[pixel] - local[pixel]) / local[pixel]);
+    }
+  }
+  if (contrasts.length < MIN_SOURCES) {
+    return;
+  }
+  // Robust spread (median absolute deviation): a beard edge must not count as skin texture.
+  const sorted = contrasts.map(Math.abs).sort((a, b) => a - b);
+  const sigma = Math.min(SKIN_DETAIL_MAX, Math.max(SKIN_DETAIL_MIN, 1.4826 * (sorted[Math.floor(sorted.length / 2)] ?? 0)));
+  const seed = random() * 1000;
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    if (!remove[pixel] || kindOf(pixel) !== 'skin') {
+      continue;
+    }
+    const x = pixel % width;
+    const y = (pixel - x) / width;
+    // Three octaves, soft grain to mottling (pores are below a phone photo's
+    // resolution at arm's length: a finer octave read as sandpaper), ~unit spread.
+    const n = (
+      0.4 * (valueNoise(x, y, 3, seed) - 0.5)
+      + 0.4 * (valueNoise(x, y, 8, seed + 1) - 0.5)
+      + 0.2 * (valueNoise(x, y, 20, seed + 2) - 0.5)
+    ) * 7;
+    const strength = remove[pixel] === 1 ? 1 : 0.5;
+    const factor = 1 + sigma * n * strength;
+    for (let c = 0; c < 3; c += 1) {
+      out[pixel * 4 + c] = Math.round(out[pixel * 4 + c] * factor);
+    }
+  }
+}
+
+/**
+ * Where the fitted body certainly is, for `bodyCertain`: on the body above the
+ * waistband (`FILL_ZONE.upper`), `inset` pixels inside its outline (the fit
+ * may sit a few pixels off the photo), and `headClearance` pixels clear of the
+ * head, so a beard on the neck is never taken for a collar.
+ */
+export function certainBodyArea(
+  zone: Uint8Array,
+  head: Uint8Array,
+  width: number,
+  height: number,
+  inset: number,
+  headClearance: number,
+): Uint8Array {
+  const upper = Uint8Array.from(zone, (value) => (value === FILL_ZONE.upper ? 1 : 0));
+  const inside = squareFilter(upper, width, height, Math.max(1, Math.round(inset)), false);
+  const nearHead = squareFilter(head, width, height, Math.max(1, Math.round(headClearance)), true);
+  return inside.map((value, pixel) => (value && !nearHead[pixel] ? 1 : 0));
 }

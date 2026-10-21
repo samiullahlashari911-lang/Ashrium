@@ -28,8 +28,10 @@ import {
 import {
   abortShopperGpu,
   uploadDualWebpAndDispatch,
+  uploadFrontEarly,
   warmShopperGpu,
   type DualUploadProgress,
+  type SignedUploadTargets,
 } from '@/lib/widget/fit-client';
 import type {
   FitJobPublicStatus,
@@ -119,6 +121,8 @@ export function GuidedCapture({
       : `gpu-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
   );
   const jobIdRef = useRef<string | null>(null);
+  /** The front photo's upload, started when it was kept (`uploadFrontEarly`). */
+  const earlyFrontRef = useRef<Promise<SignedUploadTargets | null> | null>(null);
   const completedRef = useRef(false);
   const onAvatarReadyRef = useRef(onAvatarReady);
   jobIdRef.current = jobId;
@@ -150,8 +154,10 @@ export function GuidedCapture({
     setFrontBlob(blob);
     setFrontPhoto(photo ?? null);
     setFrontGate(gate);
+    // Sent while the shopper turns for the side photo.
+    earlyFrontRef.current = uploadFrontEarly(embedToken, blob);
     setStep('side');
-  }, []);
+  }, [embedToken]);
 
   const handleSideCaptured = useCallback(
     (blob: Blob, gate: PoseGateStatus, photo?: OnDevicePhoto | null) => {
@@ -172,6 +178,7 @@ export function GuidedCapture({
         weightKg: intake.weightKg ?? undefined,
         gpuSessionKey: gpuSessionKeyRef.current,
         onProgress: setUploadStage,
+        earlyFront: earlyFrontRef.current ?? undefined,
       })
         .then((dispatch) => {
           setJobId(dispatch.jobId);

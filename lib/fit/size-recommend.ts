@@ -15,6 +15,15 @@ export const CATEGORY_EASE_CM: Record<GarmentCategory, CategoryEaseCm> = {
   other: { chestCm: 6, waistCm: 4, hipCm: 6 },
 };
 
+/**
+ * How far (cm) the photo measurement moves between two captures of the same
+ * person (live jobs f56fa1bb / 7377ef9b: chest 96.3 vs 97.0, same photos). A
+ * size within this of the wearing-ease target still fits, so noise alone never
+ * pushes a shopper up a size; a body this close to a size boundary is told it
+ * is between sizes instead of being given one size as if it were certain.
+ */
+export const SIZE_TOLERANCE_CM = 1;
+
 export const DEFAULT_LETTER_SIZE_CHART: readonly StorefrontSizeVariant[] = [
   { id: null, sizeCode: 'S', chestCm: 96, waistCm: 80, hipCm: 96, lengthCm: 68 },
   { id: null, sizeCode: 'M', chestCm: 104, waistCm: 88, hipCm: 104, lengthCm: 70 },
@@ -118,18 +127,33 @@ function variantFits(
       return true;
     }
 
-    return published + 1e-6 >= needed[key];
+    return published + SIZE_TOLERANCE_CM + 1e-6 >= needed[key];
   });
+}
+
+/** Smallest room left over the needed girths (cm, negative = short of the ease target). */
+function fitMargin(
+  variant: StorefrontSizeVariant,
+  needed: Record<GirthKey, number>,
+  category: GarmentCategory | null,
+  elasticWaist: boolean,
+): number {
+  const margins = primaryGirths(category, elasticWaist)
+    .filter((key) => variant[key] > 0)
+    .map((key) => variant[key] - needed[key]);
+  return margins.length > 0 ? Math.min(...margins) : Infinity;
 }
 
 function toRecommendation(
   variant: StorefrontSizeVariant,
   source: SizeRecommendation['source'],
   fits: boolean,
+  betweenSizeCode: string | null = null,
 ): SizeRecommendation {
   return {
     sizeCode: variant.sizeCode,
     fits,
+    betweenSizeCode,
     source,
     variantId: variant.id,
     chestCm: variant.chestCm,
@@ -155,10 +179,14 @@ function pickSmallestFitting(
     return left.chestCm - right.chestCm;
   });
 
-  const fitting = ordered.find((variant) => variantFits(variant, needed, category, elasticWaist));
-  return fitting
-    ? toRecommendation(fitting, source, true)
-    : toRecommendation(ordered[ordered.length - 1], source, false);
+  const index = ordered.findIndex((variant) => variantFits(variant, needed, category, elasticWaist));
+  if (index < 0) {
+    return toRecommendation(ordered[ordered.length - 1], source, false);
+  }
+  const fitting = ordered[index];
+  const larger = ordered[index + 1];
+  const close = fitMargin(fitting, needed, category, elasticWaist) < SIZE_TOLERANCE_CM;
+  return toRecommendation(fitting, source, true, close && larger ? larger.sizeCode : null);
 }
 
 /**

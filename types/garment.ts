@@ -88,6 +88,11 @@ export interface SizeRecommendation {
    * look, never claimed as a fit.
    */
   fits: boolean;
+  /**
+   * The body sits within `SIZE_TOLERANCE_CM` of this size's limit: it is
+   * between this size and the next larger one, which is named here.
+   */
+  betweenSizeCode: string | null;
   source: SizeRecommendSource;
   variantId: string | null;
   chestCm: number;

@@ -78,13 +78,16 @@ async function putWebpToSignedUrl(signedUrl: string, blob: Blob): Promise<void> 
   }
 }
 
-async function mintSignedUploadTargets(
-  embedToken: string | null,
-): Promise<{
+/** Signed PUT targets for one fitting's two headless WebPs. */
+export interface SignedUploadTargets {
   jobId: string;
   front: { filePath: string; uploadUrl: string };
   side: { filePath: string; uploadUrl: string };
-} | null> {
+}
+
+async function mintSignedUploadTargets(
+  embedToken: string | null,
+): Promise<SignedUploadTargets | null> {
   const response = await fetch('/api/v1/biometrics/upload-url', {
     method: 'POST',
     credentials: 'same-origin',
@@ -181,12 +184,50 @@ async function uploadDualHeadlessWebpsViaProxy(
   };
 }
 
+/**
+ * Sends the headless front photo while the shopper turns for the side one, so
+ * only the side is left to upload at submit. Null when signed uploads are not
+ * available (submit then sends both). An abandoned upload is wiped by the same
+ * 15-minute biometric sweep as any other.
+ */
+export async function uploadFrontEarly(
+  embedToken: string | null,
+  frontBlob: Blob,
+): Promise<SignedUploadTargets | null> {
+  try {
+    const signed = await mintSignedUploadTargets(embedToken);
+    if (!signed) {
+      return null;
+    }
+    await putWebpToSignedUrl(signed.front.uploadUrl, frontBlob);
+    return signed;
+  } catch {
+    return null;
+  }
+}
+
 export async function uploadDualHeadlessWebps(
   embedToken: string | null,
   frontBlob: Blob,
   sideBlob: Blob,
   onProgress?: (stage: DualUploadProgress) => void,
+  earlyFront?: Promise<SignedUploadTargets | null>,
 ): Promise<DualUploadTargets> {
+  const sent = earlyFront ? await earlyFront : null;
+  if (sent) {
+    try {
+      onProgress?.('side');
+      await putWebpToSignedUrl(sent.side.uploadUrl, sideBlob);
+      return {
+        jobId: sent.jobId,
+        front: { filePath: sent.front.filePath },
+        side: { filePath: sent.side.filePath },
+      };
+    } catch {
+      // Fall back to sending both below.
+    }
+  }
+
   onProgress?.('urls');
   const signed = await mintSignedUploadTargets(embedToken);
   if (signed) {
@@ -319,6 +360,8 @@ export async function uploadDualWebpAndDispatch(
     weightKg?: number;
     gpuSessionKey?: string;
     onProgress?: (stage: DualUploadProgress) => void;
+    /** `uploadFrontEarly` started when the front photo was kept. */
+    earlyFront?: Promise<SignedUploadTargets | null>;
   },
 ): Promise<{ jobId: string }> {
   const targets = await uploadDualHeadlessWebps(
@@ -326,6 +369,7 @@ export async function uploadDualWebpAndDispatch(
     input.frontBlob,
     input.sideBlob,
     input.onProgress,
+    input.earlyFront,
   );
 
   input.onProgress?.('dispatch');
@@ -372,6 +416,8 @@ export interface FitRecommendResponse {
     code: string;
     /** False: no size fits; `code` is the largest. Older servers omit it (treated as fitting). */
     fits?: boolean;
+    /** The body is between `code` and this larger size. Older servers omit it. */
+    between?: string | null;
     source: 'variant' | 'ease_chart';
     variantId: string | null;
     chestCm: number;

@@ -46,6 +46,7 @@ function recommendationFromApi(payload: FitRecommendResponse): FitRecommendation
     size: {
       sizeCode: payload.size.code,
       fits: payload.size.fits !== false,
+      betweenSizeCode: typeof payload.size.between === 'string' ? payload.size.between : null,
       source: payload.size.source,
       variantId: payload.size.variantId,
       chestCm: payload.size.chestCm,
@@ -568,6 +569,14 @@ export function StorefrontViewport({
                 </div>
                 <ConfidenceBadge sizeCode={recommendedSize} gate={recommendation?.gate ?? null} />
               </div>
+              {recommendation?.size.betweenSizeCode && !tooTight ? (
+                <p className="text-sm font-medium text-ash-ink">
+                  You’re between {recommendedSize} and {recommendation.size.betweenSizeCode}.{' '}
+                  <span className="font-normal text-ash-muted">
+                    {recommendedSize} sits closer to how it’s cut; {recommendation.size.betweenSizeCode} is roomier.
+                  </span>
+                </p>
+              ) : null}
               {tooTight ? (
                 <p className="text-sm font-medium text-ash-ink">
                   {recommendation?.size.fits === false

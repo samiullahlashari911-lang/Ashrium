@@ -83,6 +83,15 @@ test('live cues wait until the step instructions have been said', () => {
   assert.deepEqual(speech.spoken, ['Front photo. Step back.', 'Step back']);
 });
 
+test('"Got it" is never swallowed by instructions still playing', async () => {
+  const speech = installSpeech();
+  const voice = new CaptureVoice();
+  voice.intro('Side photo. Turn to your side.');
+  voice.announce('Got it. Building your fitting.');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(speech.spoken, ['Side photo. Turn to your side.', 'Got it. Building your fitting.']);
+});
+
 test('an interrupting line is spoken a tick after cancel, and a routine repeat never interrupts', async () => {
   const speech = installSpeech();
   const voice = new CaptureVoice();

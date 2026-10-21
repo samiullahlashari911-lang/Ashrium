@@ -199,3 +199,72 @@ test('the shipped body: a tee replaces tops, trousers bottoms, a jacket nothing'
   assert.ok(zones.some((zone) => zone === FILL_ZONE.lower));
   assert.ok(zones.some((zone) => zone === FILL_ZONE.upper));
 });
+
+test('a white sleeve the mask calls wall is still taken off where the fitted arm certainly is', () => {
+  const base = input();
+  const photo = new Uint8ClampedArray(base.photo);
+  const clothes = new Float32Array(base.clothes);
+  const background = new Float32Array(base.background);
+  const bodyCertain = new Uint8Array(W * H);
+  for (let y = 10; y < 20; y += 1) {
+    for (let x = 6; x < 12; x += 1) {
+      const p = y * W + x;
+      photo.set([236, 236, 232, 255], p * 4); // white cotton against a white wall
+      clothes[p] = 0.05;
+      background[p] = 0.9;
+      if (x >= 7 && x < 11) {
+        bodyCertain[p] = 1;
+      }
+    }
+  }
+  const missed = removeReplacedClothes({ ...base, photo, clothes, background }).pixels;
+  assert.ok(missed && near(rgb(missed, 9, 15), [236, 236, 232], 4), 'without the fitted arm the sleeve stays');
+  const out = removeReplacedClothes({ ...base, photo, clothes, background, bodyCertain }).pixels;
+  assert.ok(out && near(rgb(out, 9, 15), SKIN, 45), `sleeve on the fitted arm → skin, got ${out && rgb(out, 9, 15)}`);
+});
+
+test('filled skin has the texture of the shopper’s own skin: not airbrushed, never rougher', () => {
+  const base = input();
+  const photo = new Uint8ClampedArray(base.photo);
+  // Visible forearm and head skin with a fine ±6% texture.
+  for (let p = 0; p < W * H; p += 1) {
+    if (base.skin[p] > 0.5) {
+      const factor = (p * 7919) % 3 === 0 ? 1.06 : (p * 7919) % 3 === 1 ? 0.94 : 1;
+      photo.set([SKIN[0] * factor, SKIN[1] * factor, SKIN[2] * factor, 255], p * 4);
+    }
+  }
+  const out = removeReplacedClothes({ ...base, photo }).pixels;
+  assert.ok(out);
+  const spread = (xs: number[], ys: number[]): number => {
+    const values: number[] = [];
+    for (const y of ys) {
+      for (const x of xs) {
+        values.push(rgb(out, x, y)[0]);
+      }
+    }
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    return Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length) / mean;
+  };
+  // The filled sleeve (old top on the arm, rows 12-17): textured, at most as rough as real skin.
+  const filled = spread([7, 8, 9, 10], [12, 13, 14, 15, 16, 17]);
+  assert.ok(filled > 0.005, `filled skin is airbrushed: ${filled.toFixed(4)}`);
+  assert.ok(filled < 0.08, `filled skin rougher than real skin: ${filled.toFixed(4)}`);
+});
+
+test('relit skin follows the light across it and keeps the tone of the skin it came from', () => {
+  // Light rising down the arm (as an old white sleeve recorded it).
+  const skinLight = new Float32Array(W * H);
+  for (let y = 0; y < H; y += 1) {
+    for (let x = 0; x < W; x += 1) {
+      skinLight[y * W + x] = y < 15 ? 0.75 : 1.25;
+    }
+  }
+  const out = removeReplacedClothes(input({ skinLight })).pixels;
+  assert.ok(out);
+  const row = (y: number): number => [7, 8, 9, 10].reduce((sum, x) => sum + rgb(out, x, y)[0], 0) / 4;
+  const top = row(12);
+  const bottom = row(18);
+  assert.ok(bottom > top + 10, `the lit end is brighter: ${top.toFixed(0)} → ${bottom.toFixed(0)}`);
+  const mean = (top + bottom) / 2;
+  assert.ok(Math.abs(mean - SKIN[0]) < 15, `tone kept: ${mean.toFixed(0)} vs ${SKIN[0]}`);
+});

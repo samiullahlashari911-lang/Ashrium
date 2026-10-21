@@ -538,7 +538,7 @@ export function CaptureViewport({
         if (now - qualityMissSinceRef.current >= QUALITY_RETRY_MS) {
           resetHold();
           setEncodeError(FRAME_QUALITY_COPY[quality]);
-          voiceRef.current.say(FRAME_QUALITY_COPY[quality], true);
+          voiceRef.current.announce(FRAME_QUALITY_COPY[quality]);
         }
         return;
       }
@@ -547,9 +547,8 @@ export function CaptureViewport({
         .then((blob) => {
           setHoldProgress(1);
           setFlash(true);
-          voiceRef.current.say(
+          voiceRef.current.announce(
             view === 'front' ? 'Got it. Stay there for the side photo.' : 'Got it. Building your fitting.',
-            true,
           );
           const delivery = window.setTimeout(() => {
             pendingDeliveryRef.current = null;

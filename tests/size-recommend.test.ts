@@ -57,3 +57,34 @@ test('an elastic waist is sized by the hip, not the relaxed waist', () => {
   assert.equal(size.fits, true);
   assert.equal(recommendSize(body, 'pant', JOGGERS).fits, false);
 });
+
+// Men's Crewneck Short Sleeve T-Shirt: the published chest chart (no waist column).
+const CREWNECK: StorefrontSizeVariant[] = [
+  { id: 's', sizeCode: 'S', chestCm: 100.1, waistCm: 0, hipCm: 0, lengthCm: 62 },
+  { id: 'm', sizeCode: 'M', chestCm: 104.9, waistCm: 0, hipCm: 0, lengthCm: 64 },
+  { id: 'l', sizeCode: 'L', chestCm: 110, waistCm: 0, hipCm: 0, lengthCm: 65 },
+  { id: 'xl', sizeCode: 'XL', chestCm: 114, waistCm: 0, hipCm: 0, lengthCm: 67.1 },
+];
+
+test('measurement noise never moves the size: two captures of one person get one size', () => {
+  // Live jobs f56fa1bb / 7377ef9b, same photos: chest 96.3 and 97.0 cm (was M then L).
+  const first = recommendSize({ chest_cm: 96.3, waist_cm: 93.7, hip_cm: 112 }, 'tee', CREWNECK);
+  const second = recommendSize({ chest_cm: 97.0, waist_cm: 92.8, hip_cm: 112 }, 'tee', CREWNECK);
+  assert.equal(first.sizeCode, 'M');
+  assert.equal(second.sizeCode, 'M');
+  assert.equal(first.betweenSizeCode, 'L');
+  assert.equal(second.betweenSizeCode, 'L');
+});
+
+test('a body clear of every boundary is not "between sizes"', () => {
+  const size = recommendSize({ chest_cm: 94, waist_cm: 80, hip_cm: 96 }, 'tee', CREWNECK);
+  assert.equal(size.sizeCode, 'M');
+  assert.equal(size.betweenSizeCode, null);
+});
+
+test('past the tolerance the next size is chosen, and the largest size names no larger one', () => {
+  assert.equal(recommendSize({ chest_cm: 98.2, waist_cm: 80, hip_cm: 96 }, 'tee', CREWNECK).sizeCode, 'L');
+  const largest = recommendSize({ chest_cm: 106.5, waist_cm: 80, hip_cm: 96 }, 'tee', CREWNECK);
+  assert.equal(largest.sizeCode, 'XL');
+  assert.equal(largest.betweenSizeCode, null);
+});

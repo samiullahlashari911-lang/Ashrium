@@ -48,3 +48,25 @@ test('the side view faces whichever flank the GPU saw', () => {
   assert.equal(viewDepth('side', -1, 0.2, 0.5), -0.2);
   assert.equal(viewDepth('front', -1, 0.2, 0.5), 0.5);
 });
+
+test('a garment crossing two body parts lands without a tear (the neckline notches)', () => {
+  // Two parts side by side whose photo cameras disagree by 30 px (neck vs shoulder in a posed photo).
+  const body = slab();
+  const count = body.length / 3;
+  const parts = new Uint8Array(count);
+  const pixels = new Float32Array(count * 2);
+  for (let i = 0; i < count; i += 1) {
+    parts[i] = body[i * 3] < 0 ? 0 : 1;
+    pixels[i * 2] = 500 + 400 * body[i * 3] + (parts[i] === 1 ? 30 : 0);
+    pixels[i * 2 + 1] = 900 - 400 * body[i * 3 + 1];
+  }
+  const projector = createPatchProjector(body, pixels, parts);
+  let previous = projector.project(-0.05, 1.2, 0.12)[0];
+  let worst = 0;
+  for (let x = -0.049; x <= 0.05; x += 0.001) {
+    const [u] = projector.project(x, 1.2, 0.12);
+    worst = Math.max(worst, Math.abs(u - previous));
+    previous = u;
+  }
+  assert.ok(worst < 3, `largest step between points 1 mm apart: ${worst.toFixed(1)} px`);
+});

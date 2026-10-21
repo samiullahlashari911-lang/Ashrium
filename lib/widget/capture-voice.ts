@@ -144,6 +144,12 @@ export class CaptureVoice {
     }
   }
 
+  /** A result the shopper must hear ("Got it", a retake reason): interrupts even the instructions. */
+  announce(text: string): void {
+    this.introUntil = 0;
+    this.say(text, true);
+  }
+
   /** Speaks `text` unless it was just said; `force` interrupts and says it now. */
   say(text: string, force = false): void {
     const speech = synth();

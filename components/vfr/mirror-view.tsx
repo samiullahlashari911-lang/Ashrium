@@ -7,9 +7,18 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { AnnyCanvasGarment, PaintUnavailableReason } from '@/components/vfr/anny-canvas';
 import { fitSummaryLine, summarizeFit } from '@/lib/fit/fit-summary';
 import { findMhrHullMesh, vertexBufferToMeters } from '@/lib/graphics/anny-hull';
-import { bodyHeights, loadBodyParts, replacedClothes, vertexFillZones } from '@/lib/graphics/body-parts';
-import { FILL_ZONE, removeReplacedClothes } from '@/lib/graphics/clothes-removal';
+import { BODY_PART, bodyHeights, loadBodyParts, replacedClothes, vertexFillZones } from '@/lib/graphics/body-parts';
+import { FILL_ZONE, certainBodyArea, headIsCovered, removeReplacedClothes } from '@/lib/graphics/clothes-removal';
 import { foldOcclusion, seamSmoothNormals } from '@/lib/graphics/cloth-shading';
+import { photoShading } from '@/lib/graphics/photo-shading';
+import {
+  fitPhotoLighting,
+  lightForShader,
+  lightingAt,
+  srgbToLinear,
+  type PhotoLighting,
+} from '@/lib/graphics/photo-lighting';
+import { closeGarmentGaps, collarGapBand } from '@/lib/graphics/garment-gaps';
 import { compositeSimPositions, decodeSimDelta, simDeltaFromBase64 } from '@/lib/graphics/meshopt-delta';
 import {
   bodyFramePixels,
@@ -50,6 +59,16 @@ export interface MirrorViewProps {
   className?: string;
 }
 
+/** The fitted arm is trusted over the mask this far inside its outline, and this far clear of the head (crop height). */
+const BODY_CERTAIN_INSET = 0.004;
+const BODY_CERTAIN_HEAD_CLEARANCE = 0.06;
+
+/** Smoothing of the photo's light (fraction of the crop height): past weave and small old wrinkles. */
+const PHOTO_LIGHT_RADIUS = 0.012;
+
+/** Light softness when the photo's own light cannot be read (the old fixed key light). */
+const DEFAULT_AMBIENT_SHARE = 0.42;
+
 /** Fallback fabric when the product image gives no colour (print QA off). */
 const NEUTRAL_FABRIC = new THREE.Color().setRGB(0.32, 0.33, 0.36, THREE.SRGBColorSpace);
 /** Space around the shopper in the cropped photo (fraction of their height). */
@@ -64,12 +83,27 @@ interface BodyAssets {
   zones: Uint8Array | null;
 }
 
+interface BodyZones {
+  zone: Uint8Array;
+  facing: Float32Array;
+  /** 1 on the fitted head (face, hair, ears), never the hands or feet. */
+  head: Uint8Array;
+  /** View-space body normal per pixel (3 each; 0 off the body). */
+  normal: Float32Array;
+}
+
 interface PhotoCrop {
   x: number;
   y: number;
   w: number;
   h: number;
 }
+
+/** Collar gaps (fraction of the crop height): how narrow a gap is closed, and how far from the head. */
+const COLLAR_GAP_RADIUS = 0.008;
+const COLLAR_BAND_REACH = 0.05;
+/** The inside of the back collar, seen over the shoulder, sits in its own shade. */
+const INSIDE_FABRIC_SHADE = 0.72;
 
 /** Longest edge the clothes masks are computed at (masks are smooth; the fill runs at full size). */
 const SEGMENT_MAX_EDGE_PX = 1024;
@@ -149,13 +183,19 @@ function renderBodyZones(
   triangles: Uint32Array,
   zones: Uint8Array,
   facingPerVertex: Float32Array,
+  normalPerVertex: Float32Array,
+  parts: Uint8Array | null,
   crop: PhotoCrop,
-): { zone: Uint8Array; facing: Float32Array } {
+): BodyZones {
   const corners = triangles.length;
   const positions = new Float32Array(corners * 3);
   const colours = new Float32Array(corners * 3);
   for (let t = 0; t < corners; t += 3) {
     const corner = [zones[triangles[t]], zones[triangles[t + 1]], zones[triangles[t + 2]]];
+    const isHead = parts !== null
+      && parts[triangles[t]] === BODY_PART.head
+      && parts[triangles[t + 1]] === BODY_PART.head
+      && parts[triangles[t + 2]] === BODY_PART.head;
     const open = corner.filter((value) => value !== FILL_ZONE.keep);
     const zone = open.length === 0 ? FILL_ZONE.keep : Math.max(...open);
     for (let k = 0; k < 3; k += 1) {
@@ -163,6 +203,15 @@ function renderBodyZones(
       positions.set(occluderPositions.subarray(vertex * 3, vertex * 3 + 3), (t + k) * 3);
       colours[(t + k) * 3] = (zone + 1) / 8;
       colours[(t + k) * 3 + 1] = facingPerVertex[vertex];
+      colours[(t + k) * 3 + 2] = isHead ? 1 : 0;
+    }
+  }
+  // Smooth view-space normals (x right, y up, z toward the camera), 0.5-centred.
+  const normalColours = new Float32Array(corners * 3);
+  for (let t = 0; t < corners; t += 1) {
+    const vertex = triangles[t];
+    for (let c = 0; c < 3; c += 1) {
+      normalColours[t * 3 + c] = normalPerVertex[vertex * 3 + c] * 0.5 + 0.5;
     }
   }
   const geometry = new THREE.BufferGeometry();
@@ -173,12 +222,17 @@ function renderBodyZones(
   scene.add(new THREE.Mesh(geometry, material));
   const target = new THREE.WebGLRenderTarget(crop.w, crop.h);
   const read = new Uint8Array(crop.w * crop.h * 4);
+  const readNormals = new Uint8Array(crop.w * crop.h * 4);
   try {
     renderer.setRenderTarget(target);
     renderer.setClearColor(0x000000, 0);
     renderer.clear();
     renderer.render(scene, camera);
     renderer.readRenderTargetPixels(target, 0, 0, crop.w, crop.h, read);
+    geometry.setAttribute('color', new THREE.BufferAttribute(normalColours, 3));
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.readRenderTargetPixels(target, 0, 0, crop.w, crop.h, readNormals);
   } finally {
     renderer.setRenderTarget(null);
     target.dispose();
@@ -187,16 +241,75 @@ function renderBodyZones(
   }
   const zone = new Uint8Array(crop.w * crop.h);
   const facing = new Float32Array(crop.w * crop.h);
+  const head = new Uint8Array(crop.w * crop.h);
+  const normal = new Float32Array(crop.w * crop.h * 3);
   for (let y = 0; y < crop.h; y += 1) {
     // Render targets read bottom row first.
     const source = (crop.h - 1 - y) * crop.w;
     for (let x = 0; x < crop.w; x += 1) {
+      const pixel = y * crop.w + x;
       const red = read[(source + x) * 4];
-      zone[y * crop.w + x] = red === 0 ? FILL_ZONE.outside : Math.max(0, Math.round((red / 255) * 8) - 1);
-      facing[y * crop.w + x] = read[(source + x) * 4 + 1] / 255;
+      zone[pixel] = red === 0 ? FILL_ZONE.outside : Math.max(0, Math.round((red / 255) * 8) - 1);
+      facing[pixel] = read[(source + x) * 4 + 1] / 255;
+      head[pixel] = read[(source + x) * 4 + 2] > 127 ? 1 : 0;
+      if (red !== 0) {
+        const nx = readNormals[(source + x) * 4] / 127.5 - 1;
+        const ny = readNormals[(source + x) * 4 + 1] / 127.5 - 1;
+        const nz = readNormals[(source + x) * 4 + 2] / 127.5 - 1;
+        const length = Math.hypot(nx, ny, nz) || 1;
+        normal[pixel * 3] = nx / length;
+        normal[pixel * 3 + 1] = ny / length;
+        normal[pixel * 3 + 2] = nz / length;
+      }
     }
   }
-  return { zone, facing };
+  return { zone, facing, head, normal };
+}
+
+/**
+ * The photo's light, fitted on the shopper's visible skin (sure skin, on the
+ * body, not under the new garment), sampled every other pixel.
+ */
+function fitSkinLight(photo: Uint8ClampedArray, zones: BodyZones, skin: Float32Array, width: number): PhotoLighting | null {
+  const normals: number[] = [];
+  const luminance: number[] = [];
+  for (let pixel = 0; pixel < zones.zone.length; pixel += 2) {
+    if (zones.zone[pixel] === FILL_ZONE.outside || skin[pixel] < 0.6 || pixel % width === 0) {
+      continue;
+    }
+    normals.push(zones.normal[pixel * 3], zones.normal[pixel * 3 + 1], zones.normal[pixel * 3 + 2]);
+    luminance.push(
+      0.2126 * srgbToLinear(photo[pixel * 4]) + 0.7152 * srgbToLinear(photo[pixel * 4 + 1]) + 0.0722 * srgbToLinear(photo[pixel * 4 + 2]),
+    );
+  }
+  return fitPhotoLighting(Float32Array.from(normals), Float32Array.from(luminance));
+}
+
+/** The fitted light's brightness on every body pixel (0 off the body). */
+function skinLightMap(lighting: PhotoLighting, zones: BodyZones): Float32Array {
+  const light = new Float32Array(zones.zone.length);
+  for (let pixel = 0; pixel < light.length; pixel += 1) {
+    if (zones.zone[pixel] !== FILL_ZONE.outside) {
+      light[pixel] = lightingAt(lighting, zones.normal[pixel * 3], zones.normal[pixel * 3 + 1], zones.normal[pixel * 3 + 2]);
+    }
+  }
+  return light;
+}
+
+/** The photo's relative light as a texture the garment shader reads at its own pixel (rows bottom-up, halved). */
+function shadingDataTexture(shading: Float32Array, width: number, height: number): THREE.DataTexture {
+  const data = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    const source = (height - 1 - y) * width;
+    for (let x = 0; x < width; x += 1) {
+      data[y * width + x] = Math.round(Math.min(1, shading[source + x] / 2) * 255);
+    }
+  }
+  const texture = new THREE.DataTexture(data, width, height, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 /** Alpha channel of a drawn canvas (the garment's coverage), one byte per pixel. */
@@ -317,7 +430,11 @@ void main() {
 // each panel's grain), and a velvety edge sheen.
 const GARMENT_FRAGMENT = `
 uniform vec3 uLight;
+uniform float uAmbient;
 uniform float uExposure;
+uniform sampler2D uPhotoLight;
+uniform float uPhotoLightMix;
+uniform vec2 uResolution;
 uniform float uHeat;
 varying vec3 vNormalView;
 varying vec3 vColor;
@@ -337,12 +454,18 @@ float noise(vec2 p) {
 void main() {
   vec3 n = normalize(vNormalView);
   if (!gl_FrontFacing) n = -n;
-  float keyLight = clamp((dot(n, uLight) + 0.3) / 1.3, 0.0, 1.0);
+  float keyLight = max(dot(n, uLight), 0.0);
   float facing = max(n.z, 0.0);
-  // Peaks at ~1.0: a lit fold face stays below white, so shading always shows.
-  float shade = (0.42 + 0.46 * keyLight + 0.12 * facing) * mix(vOcclusion, 1.0, uHeat);
+  // The room's light (fitted on the shopper's skin): ambient share uAmbient,
+  // the rest from uLight. Peaks at ~1.0 so a lit fold stays below white.
+  float shade = (uAmbient + (0.92 - uAmbient) * keyLight + 0.08 * facing) * mix(vOcclusion, 1.0, uHeat);
   // Cloth turning away from the camera darkens (legs and sleeves read round).
   shade *= mix(0.74, 1.0, pow(facing, 0.6));
+  // The photo's own light on the body (photo-shading.ts, stored halved) carries
+  // the form light; the drape's normals and fold occlusion add its folds.
+  float photoLight = texture2D(uPhotoLight, gl_FragCoord.xy / uResolution).r * 2.0;
+  float photoShade = photoLight * (0.8 + 0.2 * keyLight) * mix(vOcclusion, 1.0, uHeat) * mix(0.86, 1.0, pow(facing, 0.6));
+  shade = mix(shade, photoShade, uPhotoLightMix * (1.0 - uHeat));
 
   // Jersey: vertical wales ~2 mm apart plus a soft slub, in pattern metres.
   float wales = 0.5 + 0.5 * sin(vPatternUv.x * 3000.0);
@@ -577,6 +700,40 @@ export const MirrorView: FC<MirrorViewProps> = ({
       occluder.renderOrder = -1;
       scene.add(occluder);
 
+      // Where the fitted body is in the photo, and the photo's own light on it.
+      let zones: BodyZones | null = null;
+      if (body.zones) {
+        const facingPerVertex = new Float32Array(bodyCount);
+        const normalPerVertex = new Float32Array(bodyCount * 3);
+        for (let i = 0; i < bodyCount; i += 1) {
+          const n = viewNormal(view, sign, body.normals[i * 3], body.normals[i * 3 + 1], body.normals[i * 3 + 2]);
+          facingPerVertex[i] = Math.max(0, n[2]);
+          normalPerVertex.set(n, i * 3);
+        }
+        zones = renderBodyZones(
+          renderer, camera, occluderPositions, body.triangles, body.zones, facingPerVertex, normalPerVertex, body.parts, crop,
+        );
+      }
+      const masks = personMasks[view];
+      const readyMasks = masks && masks !== 'failed' && masks.width === crop.w && masks.height === crop.h ? masks : null;
+      const photoPixels = context.getImageData(0, 0, crop.w, crop.h);
+      const lighting = zones && readyMasks ? fitSkinLight(photoPixels.data, zones, readyMasks.skin, crop.w) : null;
+      const shaderLight = lighting ? lightForShader(lighting) : null;
+      // The light across the body, from the shopper's own clothes and skin.
+      const onBody = zones ? Uint8Array.from(zones.zone, (value) => (value === FILL_ZONE.outside ? 0 : 1)) : null;
+      const shading = zones && readyMasks && onBody && !showClearanceHeatmap
+        ? photoShading({
+          width: crop.w,
+          height: crop.h,
+          photo: photoPixels.data,
+          clothes: readyMasks.clothes,
+          skin: readyMasks.skin,
+          onBody,
+          radius: Math.max(3, Math.round(crop.h * PHOTO_LIGHT_RADIUS)),
+        })
+        : null;
+      const shadingTexture = shading ? shadingDataTexture(shading, crop.w, crop.h) : null;
+
       // The draped garment, carried into the photo patch by patch.
       const projector = createPatchProjector(body.positions, pixels, body.parts);
       const draped = compositeSimPositions(drape);
@@ -632,7 +789,16 @@ export const MirrorView: FC<MirrorViewProps> = ({
       garmentGeometry.setIndex(new THREE.BufferAttribute(drape.indices, 1));
       const garmentMaterial = new THREE.ShaderMaterial({
         uniforms: {
-          uLight: { value: new THREE.Vector3(view === 'front' ? 0.25 : 0.6, 0.7, view === 'front' ? 0.65 : 0.3).normalize() },
+          // The photo's own light when it could be read from the shopper's skin.
+          uLight: {
+            value: shaderLight
+              ? new THREE.Vector3(...shaderLight.direction)
+              : new THREE.Vector3(view === 'front' ? 0.25 : 0.6, 0.7, view === 'front' ? 0.65 : 0.3).normalize(),
+          },
+          uAmbient: { value: shaderLight?.ambientShare ?? DEFAULT_AMBIENT_SHARE },
+          uPhotoLight: { value: shadingTexture },
+          uPhotoLightMix: { value: shadingTexture ? 1 : 0 },
+          uResolution: { value: new THREE.Vector2(crop.w, crop.h) },
           uExposure: { value: photoExposure(frame, crop) },
           uHeat: { value: showClearanceHeatmap ? 1 : 0 },
         },
@@ -644,31 +810,57 @@ export const MirrorView: FC<MirrorViewProps> = ({
 
       renderer.render(scene, camera);
 
-      // The shopper's own clothes, out where the new garment replaces them.
-      const masks = personMasks[view];
-      const replace = replacedClothes(garment?.category);
-      if (replace && body.zones && masks && masks !== 'failed' && masks.width === crop.w && masks.height === crop.h) {
-        const facingPerVertex = new Float32Array(bodyCount);
-        for (let i = 0; i < bodyCount; i += 1) {
-          const [, , towardCamera] = viewNormal(view, sign, body.normals[i * 3], body.normals[i * 3 + 1], body.normals[i * 3 + 2]);
-          facingPerVertex[i] = Math.max(0, towardCamera);
+      // The garment as one layer: collar gaps closed, then used for the clothes
+      // removal, the contact shadow and the final draw.
+      const layer = document.createElement('canvas');
+      layer.width = crop.w;
+      layer.height = crop.h;
+      const layerContext = layer.getContext('2d', { willReadFrequently: true });
+      if (!layerContext) {
+        throw new Error('No 2D context for the garment layer.');
+      }
+      layerContext.drawImage(renderer.domElement, 0, 0);
+      const heights = bodyHeights(body.positions);
+      const waistRow = rowAtHeight(body, pixels, heights.naturalWaistY, crop.y);
+      if (zones && !showClearanceHeatmap && Number.isFinite(waistRow)) {
+        const garmentPixels = layerContext.getImageData(0, 0, crop.w, crop.h);
+        const added = closeGarmentGaps({
+          width: crop.w,
+          height: crop.h,
+          rgba: garmentPixels.data,
+          allowed: collarGapBand(zones.zone, zones.head, crop.w, crop.h, crop.h * COLLAR_BAND_REACH),
+          radius: Math.max(2, Math.round(crop.h * COLLAR_GAP_RADIUS)),
+          shade: INSIDE_FABRIC_SHADE,
+          // Never over a headscarf's cloth: a covered head keeps everything as photographed.
+          oldClothes: replacedClothes(garment?.category) && readyMasks
+            && !headIsCovered(zones.zone, readyMasks.clothes, crop.w, waistRow)
+            ? readyMasks.clothes
+            : undefined,
+        });
+        if (added > 0) {
+          layerContext.putImageData(garmentPixels, 0, 0);
         }
-        const { zone, facing } = renderBodyZones(
-          renderer, camera, occluderPositions, body.triangles, body.zones, facingPerVertex, crop,
-        );
-        const heights = bodyHeights(body.positions);
-        const photoPixels = context.getImageData(0, 0, crop.w, crop.h);
+      }
+
+      // The shopper's own clothes, out where the new garment replaces them.
+      const replace = replacedClothes(garment?.category);
+      if (replace && zones && readyMasks) {
         const removal = removeReplacedClothes({
           width: crop.w,
           height: crop.h,
           photo: photoPixels.data,
-          clothes: masks.clothes,
-          background: masks.background,
-          skin: masks.skin,
-          garment: canvasAlpha(renderer.domElement, crop.w, crop.h),
-          zone,
-          facing,
-          waistRow: rowAtHeight(body, pixels, heights.naturalWaistY, crop.y),
+          clothes: readyMasks.clothes,
+          background: readyMasks.background,
+          skin: readyMasks.skin,
+          garment: canvasAlpha(layer, crop.w, crop.h),
+          zone: zones.zone,
+          facing: zones.facing,
+          // Filled skin is lit by the photo's own light: the old sleeve records the arm's.
+          skinLight: shading ?? (lighting ? skinLightMap(lighting, zones) : undefined),
+          bodyCertain: certainBodyArea(
+            zones.zone, zones.head, crop.w, crop.h, crop.h * BODY_CERTAIN_INSET, crop.h * BODY_CERTAIN_HEAD_CLEARANCE,
+          ),
+          waistRow,
           crotchRow: rowAtHeight(body, pixels, heights.crotchY, crop.y),
           replace,
         });
@@ -687,7 +879,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
       shade.height = crop.h;
       const shadeContext = shade.getContext('2d');
       if (shadeContext && !showClearanceHeatmap) {
-        shadeContext.drawImage(renderer.domElement, 0, 0);
+        shadeContext.drawImage(layer, 0, 0);
         shadeContext.globalCompositeOperation = 'source-in';
         shadeContext.fillStyle = 'rgba(20, 16, 12, 0.42)';
         shadeContext.fillRect(0, 0, crop.w, crop.h);
@@ -698,13 +890,15 @@ export const MirrorView: FC<MirrorViewProps> = ({
         context.restore();
       }
       shade.width = 0;
-      context.drawImage(renderer.domElement, 0, 0);
+      context.drawImage(layer, 0, 0);
+      layer.width = 0;
       callbacks.current.onGarmentShown?.(true);
 
       occluderGeometry.dispose();
       occluderMaterial.dispose();
       garmentGeometry.dispose();
       garmentMaterial.dispose();
+      shadingTexture?.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
     } catch (error) {
