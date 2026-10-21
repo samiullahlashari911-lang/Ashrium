@@ -222,9 +222,15 @@ def triangulate_panel(
         for index, tri in enumerate(mesh.triangles):
             if tri is None:
                 continue
-            a, b, c = (P[v] for v in tri)
+            # Only interior edges count: boundary edges are never split, and a
+            # stitched edge matched to a longer partner can sit above the limit.
             longest = max(
-                float(np.dot(a - b, a - b)), float(np.dot(b - c, b - c)), float(np.dot(c - a, c - a))
+                (
+                    float(np.dot(P[p] - P[q], P[p] - P[q]))
+                    for p, q in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0]))
+                    if _Mesh.key(p, q) not in boundary_edges
+                ),
+                default=0.0,
             )
             if longest > limit_sq:
                 long_triangles.append((longest, index))

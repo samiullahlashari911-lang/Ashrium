@@ -37,32 +37,6 @@ test('the inside of a fold is darker than open cloth', () => {
   assert.ok(occlusion[7] < occlusion[5], `crease ${occlusion[7]} should be darker than the edge ${occlusion[5]}`);
 });
 
-test('compression is found where the drape is shorter than its pattern, across that direction', async () => {
-  const { clothCompression } = await import('@/lib/graphics/cloth-shading');
-  // A 4 x 4 grid of pattern points 1 cm apart, draped with x squeezed to 85% and y unchanged.
-  const uv: number[] = [];
-  const squeezed: number[] = [];
-  const flat: number[] = [];
-  const indices: number[] = [];
-  for (let j = 0; j < 4; j += 1) {
-    for (let i = 0; i < 4; i += 1) {
-      uv.push(i * 0.01, j * 0.01);
-      squeezed.push(i * 0.01 * 0.85, j * 0.01, 0);
-      flat.push(i * 0.01, j * 0.01, 0);
-    }
-  }
-  for (let j = 0; j < 3; j += 1) {
-    for (let i = 0; i < 3; i += 1) {
-      const a = j * 4 + i;
-      indices.push(a, a + 1, a + 4, a + 1, a + 5, a + 4);
-    }
-  }
-  const { amount, direction } = clothCompression(squeezed, uv, indices);
-  assert.ok(amount[5] > 0.9, `strongly compressed: ${amount[5]}`);
-  assert.ok(Math.abs(direction[15]) > 0.99, 'compressed along x');
-  assert.equal(clothCompression(flat, uv, indices).amount[5], 0, 'a relaxed drape has no wrinkles');
-});
-
 test('the open edges are the hem, not the sewn seams', async () => {
   const { openEdgeRim } = await import('@/lib/graphics/cloth-shading');
   // A 3 x 3 vertex sheet split down the middle into two panels with duplicated seam vertices.
@@ -75,4 +49,41 @@ test('the open edges are the hem, not the sewn seams', async () => {
   assert.ok(Math.abs(rim[3] - 0.4) < 1e-6, 'the seam centre is not an edge: it sits one ring in');
   assert.ok(Math.abs(rim[8] - 0.4) < 1e-6, 'its duplicate in the other panel agrees');
   assert.equal(rim[0], 1, 'the outline is an edge');
+});
+
+test('the form normal keeps the garment’s shape and drops its folds', async () => {
+  const { formNormals, seamSmoothNormals } = await import('@/lib/graphics/cloth-shading');
+  // A 21 x 21 sheet in the xy plane with a 1 cm ripple along x (folds) on a gentle overall tilt.
+  const n = 21;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let j = 0; j < n; j += 1) {
+    for (let i = 0; i < n; i += 1) {
+      const x = i * 0.01;
+      positions.push(x, j * 0.01, 0.006 * Math.sin((x / 0.04) * Math.PI * 2) + 0.2 * x);
+    }
+  }
+  for (let j = 0; j < n - 1; j += 1) {
+    for (let i = 0; i < n - 1; i += 1) {
+      const a = j * n + i;
+      indices.push(a, a + 1, a + n, a + 1, a + n + 1, a + n);
+    }
+  }
+  const normals = seamSmoothNormals(positions, indices);
+  const form = formNormals(positions, indices, normals, 12);
+  const centre = 10 * n + 10;
+  const spread = (values: Float32Array): number => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 5; i < 16; i += 1) {
+      const x = values[(10 * n + i) * 3];
+      min = Math.min(min, x);
+      max = Math.max(max, x);
+    }
+    return max - min;
+  };
+  assert.ok(spread(normals) > 0.5, 'the true normals swing across the folds');
+  assert.ok(spread(form) < 0.15, `the form normals do not: ${spread(form).toFixed(3)}`);
+  // The overall tilt (z rises with x) survives: the form normal leans to -x.
+  assert.ok(form[centre * 3] < -0.1);
 });

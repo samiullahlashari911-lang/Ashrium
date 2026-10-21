@@ -9,7 +9,12 @@ import { fitSummaryLine, summarizeFit } from '@/lib/fit/fit-summary';
 import { findMhrHullMesh, vertexBufferToMeters } from '@/lib/graphics/anny-hull';
 import { BODY_PART, bodyHeights, loadBodyParts, replacedClothes, vertexFillZones } from '@/lib/graphics/body-parts';
 import { FILL_ZONE, certainBodyArea, headIsCovered, removeReplacedClothes } from '@/lib/graphics/clothes-removal';
-import { clothCompression, foldOcclusion, openEdgeRim, seamSmoothNormals } from '@/lib/graphics/cloth-shading';
+import {
+  foldOcclusion,
+  formNormals,
+  openEdgeRim,
+  seamSmoothNormals,
+} from '@/lib/graphics/cloth-shading';
 import { photoShading } from '@/lib/graphics/photo-shading';
 import {
   fitPhotoLighting,
@@ -63,8 +68,8 @@ export interface MirrorViewProps {
 const BODY_CERTAIN_INSET = 0.004;
 const BODY_CERTAIN_HEAD_CLEARANCE = 0.06;
 
-/** Smoothing of the photo's light (fraction of the crop height): past weave and small old wrinkles. */
-const PHOTO_LIGHT_RADIUS = 0.012;
+/** Smoothing of the photo's light (fraction of the crop height): past the old garment's own folds, so only the light across the body is kept. */
+const PHOTO_LIGHT_RADIUS = 0.035;
 
 /** Light softness when the photo's own light cannot be read (the old fixed key light). */
 const DEFAULT_AMBIENT_SHARE = 0.42;
@@ -499,27 +504,21 @@ const GARMENT_VERTEX = `
 attribute vec3 aColor;
 attribute float aOcclusion;
 attribute vec2 aPatternUv;
-attribute float aCompression;
-attribute vec3 aCompressionDir;
-attribute float aWrinkleS;
 attribute float aRim;
+attribute vec3 aFormNormal;
+varying vec3 vFormNormal;
 varying vec3 vNormalView;
 varying vec3 vColor;
 varying float vOcclusion;
 varying vec2 vPatternUv;
-varying float vCompression;
-varying vec3 vCompressionDir;
-varying float vWrinkleS;
 varying float vRim;
 void main() {
   vNormalView = normal;
   vColor = aColor;
   vOcclusion = aOcclusion;
   vPatternUv = aPatternUv;
-  vCompression = aCompression;
-  vCompressionDir = aCompressionDir;
-  vWrinkleS = aWrinkleS;
   vRim = aRim;
+  vFormNormal = aFormNormal;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
@@ -540,13 +539,8 @@ varying vec3 vNormalView;
 varying vec3 vColor;
 varying float vOcclusion;
 varying vec2 vPatternUv;
-varying float vCompression;
-varying vec3 vCompressionDir;
-varying float vWrinkleS;
 varying float vRim;
-
-// Jersey buckles into folds ~3 cm apart where the drape is compressed.
-const float WRINKLE_WAVELENGTH_M = 0.032;
+varying vec3 vFormNormal;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -561,20 +555,6 @@ float noise(vec2 p) {
 void main() {
   vec3 n = normalize(vNormalView);
   if (!gl_FrontFacing) n = -n;
-  // Wrinkles below the 1.4 cm cloth mesh, only where the solver compressed
-  // the cloth (cloth-shading.ts clothCompression): the surface rises and falls
-  // along the compression direction; the phase wanders with the fabric so
-  // folds are irregular, like real buckling, and fade where it relaxes.
-  float wrinkle = vCompression * (1.0 - uHeat);
-  float phase = vWrinkleS * (6.2831853 / WRINKLE_WAVELENGTH_M) + 2.2 * noise(vPatternUv * 38.0);
-  // A fold pattern finer than the pixels is moire, not cloth: fade it out.
-  wrinkle *= clamp(1.0 - (fwidth(phase) - 0.9) / 1.4, 0.0, 1.0);
-  float ridge = sin(phase);
-  float swell = 0.6 + 0.8 * noise(vPatternUv * 21.0 + 7.0);
-  vec3 across = vCompressionDir - dot(vCompressionDir, n) * n;
-  if (wrinkle > 0.001 && dot(across, across) > 1e-6) {
-    n = normalize(n + normalize(across) * (0.95 * wrinkle * swell * cos(phase)));
-  }
   float keyLight = max(dot(n, uLight), 0.0);
   float facing = max(n.z, 0.0);
   // The room's light (fitted on the shopper's skin): ambient share uAmbient,
@@ -585,11 +565,17 @@ void main() {
   // The photo's own light on the body (photo-shading.ts, stored halved) carries
   // the form light; the drape's normals and fold occlusion add its folds.
   float photoLight = texture2D(uPhotoLight, gl_FragCoord.xy / uResolution).r * 2.0;
-  float photoShade = photoLight * (0.8 + 0.2 * keyLight) * mix(vOcclusion, 1.0, uHeat) * mix(0.86, 1.0, pow(facing, 0.6));
+  // The folds the solver made: the true surface's light against the
+  // garment's smooth form (cloth-shading.ts formNormals), on top of the
+  // photo's own light on that form.
+  vec3 form = normalize(vFormNormal);
+  if (!gl_FrontFacing) form = -form;
+  float formLight = uAmbient + (1.0 - uAmbient) * max(dot(form, uLight), 0.0);
+  float trueLight = uAmbient + (1.0 - uAmbient) * keyLight;
+  float folds = clamp(trueLight / max(formLight, 0.08), 0.5, 1.45);
+  float photoShade = photoLight * folds * mix(vOcclusion, 1.0, uHeat) * mix(0.86, 1.0, pow(facing, 0.6));
   shade = mix(shade, photoShade, uPhotoLightMix * (1.0 - uHeat));
-  // Fold valleys hold shadow; open edges (hem, sleeve ends, neckline) show the
-  // fabric's thickness turning under.
-  shade *= 1.0 - 0.26 * wrinkle * swell * (0.5 - 0.5 * ridge);
+  // Open edges (hem, sleeve ends, neckline) show the fabric's thickness turning under.
   shade *= mix(1.0, 0.8, vRim * (1.0 - uHeat));
 
   // Jersey: vertical wales ~2 mm apart plus a soft slub, in pattern metres.
@@ -879,19 +865,11 @@ export const MirrorView: FC<MirrorViewProps> = ({
       // Seam-smoothed normals and fold occlusion from the drape itself.
       const smoothNormals = seamSmoothNormals(draped, drape.indices);
       const occlusion = foldOcclusion(draped, smoothNormals, drape.indices, { strength: 4, floor: 0.45, spread: 3 });
-      const patternUv = drape.uv.length === count * 2 ? drape.uv : null;
-      const compression = patternUv ? clothCompression(draped, patternUv, drape.indices) : null;
       const rim = openEdgeRim(draped, drape.indices);
-      const compressionDir = new Float32Array(count * 3);
-      const wrinkleS = new Float32Array(count);
-      if (compression) {
-        for (let i = 0; i < count; i += 1) {
-          const dx = compression.direction[i * 3];
-          const dy = compression.direction[i * 3 + 1];
-          const dz = compression.direction[i * 3 + 2];
-          compressionDir.set(viewNormal(view, sign, dx, dy, dz), i * 3);
-          wrinkleS[i] = draped[i * 3] * dx + draped[i * 3 + 1] * dy + draped[i * 3 + 2] * dz;
-        }
+      const form = formNormals(draped, drape.indices, smoothNormals);
+      const formView = new Float32Array(count * 3);
+      for (let i = 0; i < count; i += 1) {
+        formView.set(viewNormal(view, sign, form[i * 3], form[i * 3 + 1], form[i * 3 + 2]), i * 3);
       }
       const normals = new Float32Array(count * 3);
       const colours = new Float32Array(count * 3);
@@ -923,10 +901,8 @@ export const MirrorView: FC<MirrorViewProps> = ({
       }
       const garmentGeometry = new THREE.BufferGeometry();
       garmentGeometry.setAttribute('aOcclusion', new THREE.BufferAttribute(occlusion, 1));
-      garmentGeometry.setAttribute('aCompression', new THREE.BufferAttribute(compression?.amount ?? new Float32Array(count), 1));
-      garmentGeometry.setAttribute('aCompressionDir', new THREE.BufferAttribute(compressionDir, 3));
-      garmentGeometry.setAttribute('aWrinkleS', new THREE.BufferAttribute(wrinkleS, 1));
       garmentGeometry.setAttribute('aRim', new THREE.BufferAttribute(rim, 1));
+      garmentGeometry.setAttribute('aFormNormal', new THREE.BufferAttribute(formView, 3));
       garmentGeometry.setAttribute(
         'aPatternUv',
         new THREE.BufferAttribute(drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2), 2),
