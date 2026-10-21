@@ -1,623 +1,154 @@
 # AGENTS.md — Ashrium Virtual Fitting Room (VFR)
 
-Read this file in full before touching any code. It is the source of truth for
-every prompt, every feature slice, and every review. If a request conflicts
-with this file, stop and ask before proceeding.
+The binding rules for this repo. Detail lives in
+`docs/agents/spec-full.md`: the full file map (§5.5), dated owner decisions
+for the UI and the shopper result (§6), body/drape pipeline detail (§7), and
+the phase roadmap (§11). Read the section your task touches. If a request
+conflicts with a rule here, stop and ask. Current status: `handoff.md`.
 
----
+## 1. Product
 
-## 1. Role
+Ashrium is a multi-tenant virtual fitting room embedded in Shopify
+storefronts (WooCommerce later). A shopper attests 16+, consents, enters
+height, sex and optional weight, and takes two guided photos (front A-pose,
+side with wrists at or above the shoulders). The phone crops the head and
+uploads two headless WebPs. The live GPU fits a **Meta MHR** body
+(`mhr-18439-127`), drapes the merchant's real **GarmentCode** sewing pattern
+(graded per size) with **Newton** on Modal, and the shopper sees **their own
+photo wearing the garment** (the mirror view) plus a size. A hard size claim
+is made only when the confidence AND-gate passes; otherwise "Approximate
+fit". Commercial: $3,500 managed package per merchant + usage meters +
+return-rate dashboard. No Stripe in v1.
 
-You are a senior full-stack engineer working across **Next.js App Router,
-Supabase (Postgres + Storage + Realtime), Three.js WebGL rendering, and
-Shopify Liquid**. You write production-grade TypeScript, respect existing
-architecture, and never rewrite working code to satisfy a single feature
-request. You think like an engineer maintaining a live commercial product,
-not like someone prototyping a demo.
+**This build is fully functional, not a demo.** Every slice calls the real
+Modal GPU, runs real MHR fit / Newton drape / GarmentCode ingest, and writes
+real data to the real Supabase project. No mock inference, stub responses,
+fixture phenotypes, invented girths, or "pretend this worked" branches —
+anywhere.
 
-Python is allowed **only inside the Modal GPU app** (`gpu/`). The Next.js app
-stays TypeScript and talks to Modal with `fetch`. Do not add a local
-Python API (`backend/main.py` is retired and must not become the inference
-path).
-
----
-
-## 2. Project Overview
-
-Ashrium VFR is a **multi-tenant virtual fitting room** embedded in Shopify
-storefronts (WooCommerce later). A shopper attests age, consents, enters
-height, sex, and optional weight, takes two guided photos (front A-pose, side
-profile with wrists at or above the shoulders), and the client **crops the
-head on-device** before uploading two headless WebPs. The shopper receives a
-3D avatar built on the **Meta MHR** parametric body (topology
-`mhr-18439-127`). Garments are ingested server-side from the merchant's
-catalog via **GarmentCode/PyGarment core (MIT)** — never
-`NvidiaWarp-GarmentCode` — graded by re-instantiating the 2D pattern per
-size, and draped with **Newton XPBD on the same warm Modal A100
-app**. When the confidence AND-gate passes, the shopper gets a
-specific size recommendation written into the cart; otherwise they see an
-approximate fit with no hard size claim.
-
-The repository today is a **working multi-tenant shell**: auth, garment CRUD,
-invite-only merchant provision, onboarding, Shopify settings, a live Modal
-HMAC fetch path, Three.js viewports (including a clearance heatmap
-and sim-delta v2), a Shopify Liquid block, and telemetry ingestion. The
-locked product in this file **supersedes ANNY-Fit, `anny-13380-104`, and
-in-process JS XPBD on the shopper path**. Those pieces are extended or
-retired per the roadmap in Section 11. Do not write new ANNY phenotypes,
-stamp `anny-13380-104` on new rows, or treat ANNY-Fit as the live GPU.
-
-**Live GPU = our Python pipeline on Modal A100-80GB**, reached through
-HMAC HTTP (`POST /body`, `/drape`, `/pattern`). Owner-approved
-(2026-10-07): when Modal has no free A100-80GB, the app falls back to
-A100-40GB, then L40S (`gpu=["A100-80GB", "A100-40GB", "L40S"]`) so a cold
-start does not queue for minutes. Required env (fail closed —
-no mock fallback): `MODAL_GPU_URL` and `ASHRIUM_GPU_HMAC`. If either is
-missing, stop and ask. If HuggingFace gated access to **SAM 3D Body**
-weights is not granted, stop — do not stub the initializer.
-
-**This build is fully functional, not a mock or a demo.** Every slice must
-call the real Modal GPU, run real MHR fit / Newton drape / GarmentCode ingest, and
-write real data through the real Supabase project. Do not build mock
-inference, mock CAD grading, stub responses, hardcoded fixture phenotypes, or
-placeholder "pretend this worked" branches anywhere in the app.
-
-**Core commercial product:** $3,500 managed package per merchant, usage
-meters, and a return-rate guarantee dashboard. No Stripe in v1 (isolated to
-Phase 7 or later). Shopify first; WooCommerce is a later twin of the Liquid
-block.
-
----
-
-## 3. Tech Stack
+## 2. Stack (locked)
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js (App Router) |
-| Language | TypeScript, strict mode (app). Python **only** in `gpu/`. |
-| Database / Auth / Storage | Supabase (Postgres, Storage buckets, Realtime, tenant JWT) |
-| 3D Rendering | Three.js (raw, WebGL) |
-| Body model | **Meta MHR** (Apache 2.0 code + assets). LOD 1 render topology `mhr-18439-127`. LOD 3 (~4,899 verts) as cloth collider. |
-| Body inference | SAM 2 silhouettes (Apache 2.0) → **SAM 3D Body as initializer only** (SAM License on that step) → joint two-view **MHR** fit |
-| Cloth simulation | **Newton** on upstream Warp (Apache 2.0) **inside the same warm Modal A100 app** (`task=drape`). Owner-approved (2026-10-09, Q24): the sewn GarmentCode garment drapes with `SolverStyle3D` (rest shape = the 2D panels); `SolverXPBD` / `SolverVBD` remain allowed. JS XPBD in `lib/graphics/xpbd-cloth.ts` is debug-only. |
-| Pattern ingest | **GarmentCode / PyGarment core (MIT)** inside the Modal app (`task=pattern`). Never `NvidiaWarp-GarmentCode`. |
-| Pose capture | MediaPipe Pose (`@mediapipe/tasks-vision`) — already in the stack |
-| ML / GPU | Modal **A100-80GB** (fallback A100-40GB → L40S when none is free), via `fetch` in `lib/ml/gpu.ts`. Not ANNY-Fit. Not Replicate. |
-| Storefront Integration | Shopify Liquid block + `public/vfr-widget.js` iframe |
-| Styling | Design tokens in `lib/design-tokens.ts` ("Ashrium" light: warm canvas, white cards, violet accent) |
+| App | Next.js App Router, strict TypeScript (no `any`), Tailwind with `ash-*` tokens from `lib/design-tokens.ts` |
+| Data | Supabase (Postgres, Storage, Realtime, tenant JWT) |
+| 3D | **Raw Three.js** (WebGL), patterns from `components/vfr/vfr-canvas.tsx` |
+| Pose / on-device | MediaPipe (`@mediapipe/tasks-vision`) |
+| GPU | Our Python pipeline on **Modal A100-80GB** (fallback A100-40GB → L40S), HMAC HTTP `POST /body`, `/drape`, `/pattern`, `/session`, called only via `fetch` in `lib/ml/gpu.ts` |
+| Body | SAM 2 silhouettes → SAM 3D Body (**initializer only**) → joint two-view MHR fit. Render LOD 1 (18,439 verts / 127 joints), cloth collider LOD 3 |
+| Cloth | Newton (Style3D for sewn garments; XPBD/VBD allowed) inside the same warm Modal app. JS XPBD (`lib/graphics/xpbd-cloth.ts`) is debug-only |
+| Patterns | GarmentCode / PyGarment core (MIT). **Never `NvidiaWarp-GarmentCode`** |
+| Storefront | Shopify Liquid block + `public/vfr-widget.js` iframe |
 
-**Do not** introduce any other major library without approval. See Section 10.
+## 3. Hard bans
 
----
-
-## 4. Development Philosophy
-
-- Build **one vertical slice at a time**. Each phase in the roadmap (Section
-  11) is a demoable, isolated slice with its own contract (types + API
-  routes). Later phases *consume* earlier contracts — they do not rewrite
-  earlier UI or types.
-- **Build against the live Modal A100 and real CAD grading — no
-  mocks.** Every slice must run end-to-end with `MODAL_GPU_URL` and
-  `ASHRIUM_GPU_HMAC`. The Modal app is swappable via the URL env so the
-  widget, capture flow, and viewport do not need a rewrite — "swappable"
-  does not mean "mocked."
-- Prefer the smallest working version of a feature. Do not add
-  configurability, abstraction layers, or edge-case handling that wasn't
-  asked for.
-- **Ship to production after each user-visible slice.** Commit (never
-  secrets), push `master` to `origin`, and confirm Vercel production is
-  updating. The merchant reviews on phone and desktop against the live
-  HTTPS app — localhost-only work is not done.
-- Do not touch code outside the current phase's file map (Section 5.5)
-  unless the task explicitly requires it.
-- Refactor only when a pattern is clearly repeated three or more times, and
-  only inside the current slice.
-- When in doubt about scope, ask. Do not guess and ship a bigger diff than
-  requested.
-
----
-
-## 5. Architecture
-
-### 5.1 What already exists — extend, do not rebuild
-
-- **Auth / access:** `app/(auth)/sign-in/page.tsx`,
-  `app/(auth)/auth/callback/route.ts`, tenant JWT in `lib/supabase/tenant.ts`,
-  invite-only provision (`scripts/invite-merchant.mjs`,
-  `lib/server/provision-merchant.ts`)
-- **APIs:** dual signed WebP upload, Modal HMAC body/drape/pattern, widget
-  token/script, telemetry, garments CRUD, usage meters, catalog sync,
-  fit recommend/resolve
-- **Widget isolation:** `public/vfr-widget.js`, `lib/widget/bridge.ts`,
-  `components/widget/StorefrontViewport.tsx`
-- **Viewport / graphics:** clearance heatmap + sim-delta v2
-  (`lib/graphics/radial-heatmap.ts`, `lib/graphics/strain-shader.ts`),
-  disposal in `components/vfr/vfr-canvas.tsx`
-- **Capture gates:** honest pose gates in
-  `components/widget/guided-capture/capture-viewport.tsx`
-- **Merchant UI:** onboarding wizard, Shopify settings form, per-SKU ingest
-  (`components/dashboard/catalog-sync-bar.tsx`,
-  `lib/catalog/shopify-selector.ts`), operator GPU banner
-  (`components/dashboard/replicate-runtime-banner.tsx`)
-- **Biometrics wipe:** `lib/server/biometrics-wipe.ts`
-- **Design tokens:** `lib/design-tokens.ts` (Ashrium — warm off-white canvas,
-  white cards on hairlines, one violet accent; Tailwind `ash-*` via CSS
-  variables in `app/globals.css`); do not introduce a new UI kit unless asked.
-
-Session GPU warm uses Modal `min_containers=1` when the shopper
-passes age + privacy consent so `@modal.enter` overlaps height and photos.
-After submit, a call may stay `starting` for **up to 3 minutes**.
-Once inference starts (`started_at`), body + optional drape share a **2-minute
-wall clock**. Widget wait is **5 minutes** total. If the avatar is not
-ready, cancel the call, fail the job, and sleep (`min_containers=0`).
-If capture starts the GPU and no job is submitted, sleep after 4 minutes
-without a warmup ping.
-Merchants cannot scale Modal. Operator/cron may POST
-`/api/v1/hmr/keepalive`. Do not add 24/7 Vercel cron keep-alive against the
-A100 credit.
-
-To retire (do not build new work against these):
-
-- ANNY-Fit output parse, `AnnyParametricVector` on **new** rows, and
-  `public/models/anny-hull.glb` as the product hull (Phase 3)
-- In-process JS XPBD as the shopper drape path (Phase 4; keep as debug)
-- Invented catalog girths (`completeMeasurements` filling chest/waist/hip
-  and marking them as source-true) (Phase 5)
-- Local `backend/main.py` as an API
-- Static demo `app/merchant/page.tsx` if it reappears — live dashboard is
-  the post-login home
-
-### 5.2 Widget isolation model
-
-The storefront-facing widget is a sandboxed iframe. It must never contain
-merchant credentials, Shopify Admin tokens, or raw garment CAD data. It
-receives only:
-- an **embed token** (not the merchant JWT), used solely to mint upload URLs
-  and dispatch HMR/meter calls
-- `product_id` / `variant_id` / `sku` from the host page via
-  `lib/widget/bridge.ts`
-
-All catalog ingestion, KES/grading, GarmentCode, and Shopify Admin GraphQL
-calls happen **server-side only** (Section 8). The widget never talks to
-Shopify Admin directly.
-
-### 5.3 API routes
-
-- All product API routes live under **`/api/v1/*`**. Do not create routes
-  outside this namespace.
-- Every `fit_jobs` row and every API call that touches a fit job must carry
-  `tenant_id`. Never drop tenant scoping to "make it work."
-- Realtime subscriptions use the private topic pattern `fit_job:{id}` only.
-  Never use wildcard topics like `fitting_session:%`.
-
-### 5.4 Database schema conventions
-
-- Do not rename `fit_jobs`. Extend it: `height_cm`, `sex`, `weight_kg`
-  (nullable), `front_image_path`, `side_image_path`,
-  `parametric_result jsonb`, `inference_duration_ms`, `gpu_hold_until`
-  (session A100 hold through Newton drape). Stop writing to
-  `gltf_output_url` as the product output — that field is legacy. Stamp
-  `topology_version` inside `parametric_result`. New rows use
-  **`mhr-18439-127`**. Do not write `anny-13380-104` on new rows.
-- `garment_cad_profiles`: `category`, `composition` (JSON), `GSM`, ingest
-  `confidence`, `mode` (A/B/C), and an approximate-fit flag. Keep the
-  existing mechanical columns (`k_stretch`, etc.) as the KES-mapped target
-  for **drape look only** — KES must not flip the size verdict. Mode A is
-  explicit KES/mechanical (Tier 1). Mode B is pipeline-validated Tier 2: a
-  product-page size chart plus material, mapped through the KES table — no
-  merchant click. Mode C is category defaults and stays approximate.
-  Unsupported geometry (hoods, lapels, cardigans, long sleeves — sweaters
-  and sweatshirts included — jumpsuits, skirts, multi-piece sets) is an
-  explicit dashboard state: storefront Approximate / no 3D. Cargo trousers
-  sew as plain trousers (pockets not drawn) (owner, 2026-10-10). Long
-  sleeves come back when they pass the drape grid (they tore at the cap).
-- `garment_size_variants`: `size_code`, chest/waist/hip/length cm,
-  rest-length / pattern storage path. Grade by **re-instantiating the 2D
-  pattern per size**, not radial 3D scale.
-- `simulation_cache` (vector-enabled): `variant_id`, `vector(6)`, storage
-  paths, clearance stats. Cache hit is a latency optimization only.
-- Biometrics bucket: `image/webp` only, 15-minute TTL, path pattern
-  `{tenant}/{job}/front.webp` and `{tenant}/{job}/side.webp`. Uploaded
-  frames are **head-cropped**; no face pixels on the server.
-- A TTL sweep must exist for both the image bucket and any row holding a
-  raw phenotype. `GET /api/v1/cron/ttl-sweep` (Bearer `CRON_SECRET`) plus
-  SQL helpers (`sweep_privacy_ttl_db`, optional pg_cron) remain the sweep
-  path. Immediate wipe on inference success or failure remains the hot
-  path. Do **not** reuse that cron to keep the A100 warm.
-
-### 5.5 File map (primary, by area)
-
-| Area | Files |
-|---|---|
-| Types | `types/hmr.ts` (`MhrParametricVector`; stop writing new ANNY rows), `types/graphics.ts`, `types/garment.ts`, `types/database.ts` |
-| Capture / widget | `components/widget/guided-capture/*`, `StorefrontViewport.tsx`, `app/widget/vfr/widget-preview-client.tsx` (first-party sandbox), `lib/widget/bridge.ts`, `lib/widget/fit-client.ts`, `lib/widget/webp-encode.ts` (head crop; on-device full frames `OnDevicePhoto`), `lib/widget/pose-gates.ts`, `lib/widget/height-units.ts`, `lib/widget/weight-units.ts`, `lib/widget/capture-progress.ts`, `lib/widget/capture-outlines.ts` (generated), `lib/widget/outline-frame.ts` (where the drawn outline's body sits on screen; the gate matches against it), `lib/widget/pose-smoothing.ts` (landmark smoothing, motion, 300 ms grace, settled instructions), `lib/widget/capture-voice.ts` (spoken guidance, mute), `lib/widget/frame-quality.ts` (light/sharpness retake gate), `components/widget/ui/*` (wheel picker, segmented toggle), `lib/widget/avatar-stages.ts` + `components/widget/loading/avatar-loading.tsx` (particle loader; real stages only), `lib/widget/embed-origin.ts` (first-party HTTPS sandbox vs storefront allowlist), `lib/widget/consent-gate.ts` (16+ and privacy AND-gate for intake Next), `extensions/shopify-vfr/blocks/vfr_embed.liquid` |
-| Size / confidence | `lib/fit/size-recommend.ts`, `lib/fit/fit-summary.ts` (one plain fit line from drape clearance; never changes the size), `lib/fit/confidence-gate.ts`, `lib/fit/recommend.ts`, `lib/fit/simulation-match.ts`, `app/api/v1/fit/recommend/route.ts`, `components/vfr/confidence-badge.tsx` |
-| Avatar / drape (app) | `components/vfr/mirror-view.tsx` + `lib/graphics/mirror-projection.ts` (shopper result: their photo with the drape drawn in), `components/vfr/anny-canvas.tsx` / `lib/graphics/anny-hull.ts` (consume MHR until renamed), `lib/graphics/anny-hull-server.ts`, `lib/graphics/anny-garment.ts` (fallback mannequin, undergarment, GarmentCode UVs), `lib/graphics/photo-skin.ts` (on-device photo painting + head alignment), `lib/graphics/body-parts.ts` + `public/models/mhr-parts.bin` (per-vertex parts from `gpu/tools/build_body_parts.py`; skin fill where a tried garment replaces the shopper's own clothes), `lib/graphics/clothes-removal.ts` + `lib/widget/clothes-segmenter.ts` (on-device: take the shopper's own clothes out where the tried garment replaces them), `lib/graphics/print-qa.ts`, `lib/graphics/meshopt-delta.ts`, `lib/graphics/strain-shader.ts` (clearance), `lib/graphics/radial-heatmap.ts`, `lib/graphics/dispose-session.ts`, `lib/graphics/viewport-activity.ts` (pause WebGL/capture when off-screen or the tab is hidden), `components/vfr/radial-heatmap-legend.tsx`, `public/models/mhr-hull.glb` (`mhr-18439-127`). Debug only: `lib/graphics/xpbd-cloth.ts`, `components/vfr/vfr-canvas.tsx`, `lib/graphics/pbd-cloth.ts`. Retire `public/models/anny-hull.glb` from the hot path. |
-| GPU (Python) | `gpu/pipeline.py`, `gpu/modal_app.py` + `gpu/body/pins.py` (git sources pinned to reviewed SHAs), `gpu/requirements.txt`, `gpu/body/*` (SAM 2 silhouettes, SAM 3D Body initializer, two-view MHR fit, joint-informed ISO girths, stage timings / fit diagnostics), `gpu/drape/*` (Newton on MHR LOD 3, `task=drape`; `sewn.py` the one drape entry point for production and the grid: too-small check → placement → Style3D → border → quality checks; `newton_style3d.py` sewn-garment drape + kernel warm-up in `@enter`, `arrange.py` placement on the shopper's body (tops from the shoulders, bottoms from the natural waist; flat sheets pulled in to hug the body before the seams are welded), drape-grid limits in `sewn.py` (a size needs 2% ease at its closing girth; elastic / drawstring waists gathered to 0.78 of the chart's relaxed waist), `border.py` exact LOD 1 border so cloth never enters the drawn body), `gpu/dev_drape_grid.py` (dev-only drape grid: generated MHR bodies × catalog garments × every size, pass/fail per drape; run before every GPU deploy) + `gpu/tools/render_grid.py` (contact sheets), `scripts/regrade-garments.ts` (operator: re-grade a tenant's catalog from saved charts so every size has its sewn garment), `gpu/pattern/*` (GarmentCode/PyGarment MIT `task=pattern`: HTML parse, per-size 2D re-instantiate calibrated to the published chart within 1 cm (owner Q23), self-intersection reject; pant waist and seat measured from the sewn panel edges (darts and crotch extension excluded) in `rest_length.py`; `sew.py` + `mesher.py` sew the panels into `ashrium.garment_mesh.v1`), `gpu/dev_sew_drape.py` (dev-only ephemeral `modal run`: sew + drape every size on a test body with recorded frames), `gpu/tools/build_outlines.py` (offline: capture outlines from model-photo masks / the MHR mesh) + `gpu/tools/dev_outline_masks.py` (dev-only SAM 2 masks of model photos), `gpu/cuda_gate.py` (Warp CUDA-graph capture never overlaps PyTorch body work in the same container), `gpu/body/photo_uv.py` (per-vertex photo coordinates + 0-255 visibility per view for on-device painting; geometry only), `gpu/tools/build_mhr_faces.py` → `gpu/body/mhr_lod1_faces.npy` (offline: LOD 1 triangles from `mhr-hull.glb`), `gpu/progress.py` (signed stage callbacks; never blocks inference). Never `NvidiaWarp-GarmentCode`. |
-| ML | `lib/ml/gpu.ts` (Modal HMAC fetch; parse MHR output; warm/sleep `min_containers`), `lib/ml/session-gpu.ts` (5-minute shopper wait; 2-minute inference after `started_at`) |
-| API | `app/api/v1/biometrics/upload-url/route.ts`, `app/api/v1/biometrics/upload/route.ts` (embed-token WebP ingest; service role Storage), `app/api/v1/hmr/route.ts`, `app/api/v1/hmr/warmup/route.ts` (embed-token capture warm), `app/api/v1/hmr/status/route.ts` (job poll + 5-minute session abort), `app/api/v1/hmr/keepalive/route.ts` (operator/cron scale only; shopper capture/submit warms), `app/api/v1/hmr/progress/route.ts` (Modal → app HMAC stage callback), `lib/server/gpu-callback-auth.ts`, `lib/server/fit-job-timing.ts` (best-effort latency timestamps), `app/api/v1/cron/ttl-sweep/route.ts`, `lib/server/apply-hmr-prediction.ts`, `lib/server/abort-shopper-gpu.ts`, `lib/server/biometric-upload.ts`, `lib/server/session-gpu.ts`, `lib/server/gpu-control-auth.ts`, `lib/server/request-tenant.ts`, `lib/server/cron-secret.ts`, `lib/server/durable-rate-limit.ts`, `lib/server/ttl-sweep.ts`, `lib/server/widget-cors.ts` (widget `/api/v1/widget/*` HTTPS preflight; tenant allowlist remains the authz gate), `lib/safe-path.ts` (same-origin redirect paths), `lib/supabase/fit-job-realtime.ts`, `app/api/v1/catalog/sync/route.ts`, `lib/catalog/*`, `lib/server/shopify-credentials.ts`, `lib/server/shopify-actions.ts`, `lib/server/shopify-app.ts` (per-client custom-distribution app, shared env app as fallback), `app/api/v1/shopify/install/route.ts` (client app `application_url`), `app/api/v1/shopify/webhooks/route.ts` + `lib/server/shopify-webhook.ts` (products, uninstall, privacy webhooks), `scripts/client-new.mjs` (`npm run client:new`; writes `shopify.app.<client>.toml`), `app/api/v1/fit/recommend/route.ts`, `app/api/v1/fit/resolve/route.ts`, `lib/fit/resolve-drape.ts` (shopper path → Modal `task=drape`), `app/api/v1/fit/outcome/route.ts` + `lib/server/try-on-outcome.ts` (`fit_jobs.try_on_outcome`: garment, size, drape result, drawn yes/no; labels only), `app/api/v1/operator/invite-merchant/route.ts` |
-| Merchant UI | `app/page.tsx`, `components/marketing/landing-page.tsx`, `components/marketing/capture-demo.tsx` (landing capture demo: model photos with the real male outlines fitted; `public/marketing/capture-*.webp`, `product-linen.webp`, `signin-linen.webp`), `app/privacy/page.tsx`, `lib/privacy/consent-copy.ts`, `lib/privacy/illinois-bipa.ts` (BIPA geofence ship flag; off until counsel), `app/(dashboard)/dashboard-navigation.tsx`, `app/(dashboard)/onboarding/page.tsx`, `app/(dashboard)/onboarding/onboarding-wizard.tsx`, `app/(dashboard)/settings/page.tsx`, `app/(dashboard)/settings/integrations/shopify-form.tsx`, `components/settings/domain-allowlist-form.tsx`, `components/settings/telemetry-secret-form.tsx`, `components/dashboard/empty-state.tsx`, `components/dashboard/catalog-sync-bar.tsx`, `components/dashboard/replicate-runtime-banner.tsx`, `components/dashboard/storefront-golive-banner.tsx` (Sandbox is not storefront go-live), `lib/onboarding.ts`, `lib/server/storefront-golive.ts`, `lib/server/tenant-settings.ts` |
-| Theme | `lib/design-tokens.ts`, `components/theme/atmosphere-backdrop.tsx` |
-| Auth / access | `app/(auth)/sign-in/auth-form.tsx`, `app/(auth)/auth-shell.tsx`, `app/(auth)/auth/confirm/*` (invite + reset land here; token verified on submit, never on GET), `app/(auth)/forgot-password/*`, `lib/server/account-actions.ts`, `lib/server/auth-links.ts`, `lib/server/email.ts` (Resend over `fetch`; `RESEND_API_KEY`), `lib/auth/password-policy.ts` (12+ chars), `lib/server/daily-tryon-cap.ts` (`ASHRIUM_DAILY_TRYON_CAP`, default 1000 per store per 24h), `lib/supabase/merchant-access.ts`, `lib/server/provision-merchant.ts`, `lib/server/operator-secret.ts`, `scripts/invite-merchant.mjs` |
-| Storefront twins | `extensions/shopify-vfr/blocks/vfr_embed.liquid`, `extensions/woocommerce-vfr/ashrium-vfr.php` |
-| Tests | `tests/*.test.ts` (head crop / no-face bbox, side wrist gate, pose-gate hysteresis, height dial units, capture step meter, iframe consent submit / `allow-forms`, dashboard scroll pauses / deferred sandbox iframe, widget CORS preflight vs tenant authz, storefront go-live checklist, route parsers, cron auth, catalog honesty, GarmentCode pattern ingest, print QA / mannequin albedo, MHR GPU contract / 5-minute shopper GPU session, on-device photo painting `photo-skin`, body parts / skin fill, clothes removal, fit summary, capture light/sharpness gate, on-device frames). GPU: `gpu/tests/` (girth geometry, diagnostics, skeleton layout, 127-joint alignment, axes/units, adaptive convergence, height projection, true rotations). |
-| DB | migrations for `fit_jobs` columns, WebP paths, size variants, vector cache, `match_simulation_cache` RPC, `garment-simulations` bucket, Realtime trigger, invite-only merchant access (`tenants.status`), Shopify catalog credentials + `garment-cad` rest-length bucket, durable `rate_limit_hits` + TTL sweep RPCs, `fit_jobs.try_on_outcome` |
-
----
-
-## 6. UI / Styling Rules
-
-Aesthetic reference: **3DLOOK-style clean, minimal capture flows** (as seen
-in YourFit / Mobile Tailor) — generous whitespace, a single clear call to
-action per screen, visible progress state, and a calm, trustworthy tone. Key
-patterns to replicate, not copy pixel-for-pixel:
-
-- **Consent and age before camera.** The intake screen names what is
-  collected, why, the 15-minute destruction window, and that the head is
-  cropped on-device. Age attestation is required before Continue; refuse
-  the under-16 / COPPA path. Fitted-clothing copy: the silhouette must not
-  become the body — the shopper wears a fitted short-sleeve T-shirt and
-  fitted trousers or leggings (owner, 2026-10-09), so the garment they try
-  replaces them cleanly.
-- **Guided capture viewport:** live camera feed with an overlay silhouette,
-  a real-time gate indicator (aligned / too close / turn required), and
-  auto-capture on a **1.2s hold** after gates pass — not a manual shutter
-  as the primary path. **Side gate:** wrists at or above the shoulders.
-  **Head crop** from MediaPipe landmarks runs in `encodeVideoFrameToWebp`
-  so face pixels never leave the device.
-- **Illinois BIPA geofence (ship flag).** Optional until counsel signs off.
-  A timezone/locale heuristic is **not legal advice**. Document the flag in
-  code and leave it off unless a later task turns it on.
-- **Confidence badges:** a small, unambiguous visual state — e.g. a solid
-  badge for high-confidence size claims, an outlined/muted badge with
-  "Approximate fit" copy when the confidence AND-gate fails. Never render an
-  approximate result to look identical to a confident one.
-- **Owner decision (2026-10-10, night) — no mannequin anywhere:** the shopper
-  result is the mirror view below, showing the shopper's whole photo with
-  their head and face (on device only; the crop starts at the top of the
-  frame), Front / Side. The fitted body mesh is never shown: it drapes the
-  garment and hides its far side. The garment is drawn in its colourway
-  colour (`lib/graphics/colourway.ts`; the product photo is not a fabric
-  texture). "Size M on you" appears only once the drape is drawn. A size too
-  small for the body says so in one line and asks the shopper to try another
-  garment. The 3D avatar is not shown to shoppers or in the sandbox.
-- **Shopper result: the mirror view.** **Owner decision (2026-10-10, Q15/Q16/
-  Q29; replaces the painted 360-degree avatar):** the shopper sees their own
-  front or side photo (Front / Side switch) with the selected size drawn in
-  where Newton draped it on their fitted body (`components/vfr/mirror-view.tsx`,
-  `lib/graphics/mirror-projection.ts`: per-patch affine cameras from the GPU's
-  per-vertex `photo_uv`, the fitted body as a depth-only occluder). It runs
-  **on their device only**: the full camera frames stay in browser memory
-  (`OnDevicePhoto`, never a Blob) and are wiped when Try On closes. Servers
-  still receive only headless photos, never return images, and never store
-  appearance. **The tried garment replaces the shopper's own clothes**
-  (owner 2026-10-11, replaces Q16): on device, MediaPipe's selfie multiclass
-  segmenter marks their clothes (`lib/widget/clothes-segmenter.ts`), and where
-  the new top / trousers / dress leaves the old one showing it is filled from
-  their own nearby skin (above the trouser waistband, arms, neck), their own
-  trousers (a top's hem below the waistband) or the background (outside the
-  body) — `lib/graphics/clothes-removal.ts`. Outerwear replaces nothing; the
-  face, hair and feet are never filled; a covered head (headscarf, hijab)
-  means nothing is removed; an unsure mask removes nothing and shows "wear a
-  fitted T-shirt". The consent bullet and `/privacy` section always say so. Counsel review (BIPA / GDPR) before a paying store
-  goes live. If the photos cannot carry the drape (no `photo_uv`, frame
-  gone), or a capture is too dark or blurred (`lib/widget/frame-quality.ts`),
-  the shopper retakes with the reason. The 3D avatar (`anny-canvas.tsx`,
-  painted, turnable) is a **dashboard-sandbox debug view only** ("3D (debug)",
-  behind `allowGallery`); the porcelain mannequin likewise. A size with under
-  2% ease over the body where it closes (`gpu/drape/sewn.py` `too_small`)
-  shows "too tight to show on you" instead of a drape; a drape that fails its
-  quality checks shows no garment. Neither changes the size recommendation.
-  **Clearance heatmap** (loose = blue) is a **toggle**, not always-on over
-  the product texture. Legend sits at the edge, not overlapping the model.
-  Strain is not a verdict.
-- **GPU session chrome (sandbox):** shopper/sandbox path uses Modal
-  A100-80GB. The GPU warms (`min_containers=1`) when the shopper passes
-  age + privacy consent, so `@enter` overlaps height and photos. Submit
-  then dispatches to a warm GPU. A call may stay `starting` for up
-  to **3 minutes** after submit. Once `started_at` is set, body + optional
-  drape share a **2-minute wall clock**. Shopper wait is **5 minutes**
-  total. If the avatar is not ready, cancel the call, fail the
-  job, wipe photos, and set `min_containers=0`. Do not leave the GPU
-  billed past that 5-minute session. Abandoned capture sleeps the GPU
-  after 4 minutes without a warmup ping.
-  Merchants cannot Warm/Sleep the GPU. Manual scale is operator-only
-  (`ASHRIUM_OPERATOR_SECRET` or `CRON_SECRET` on
-  `POST /api/v1/hmr/keepalive`). Do **not** run 24/7 Vercel cron keep-alive.
-  Idle billing is `$0.000694/s` (~7,205s per $5). Ingest (`task=pattern`)
-  may cold-start; do not hold `min_containers` for catalog.
-- Use the **Ashrium design tokens** (`lib/design-tokens.ts`, from the
-  owner's reference board) for the landing page, widget, dashboard, and auth
-  chrome: warm off-white canvas, white cards, near-black ink, a single violet
-  accent. Do not add a component/UI kit unless explicitly approved.
-- **Shopper intake:** short consent (bullets + 16+ and agree checkboxes
-  pinned above the CTA, full text behind "Full details") → height wheel
-  (cm | ft/in) → body profile (Female / Male / Prefer not to say, "Why we
-  ask") → optional weight wheel (kg | lb, Skip). Next appears only after a
-  choice. An animated progress line counts the 5 steps after consent. Copy
-  about sex or weight improving the fit stays gated on
-  `SEX_SHAPE_PRIOR_LIVE` / `WEIGHT_PRIOR_LIVE` until the GPU uses them.
-- **Capture outlines** are generated offline by `gpu/tools/build_outlines.py`
-  → `lib/widget/capture-outlines.ts`: female / male / neutral, front A-pose
-  and side with arms forward at shoulder height. Owner-approved
-  (2026-10-07): outlines should read as a natural body, so they are traced
-  from SAM 2 masks of model photos (`gpu/tools/outline_masks/`, masked with
-  `gpu/tools/dev_outline_masks.py`; male and female done — female from photos
-  the owner supplied on 2026-10-10 — neutral still from the MHR mean mesh).
-  Red until the gate passes, green while aligned, a trace around the
-  outline during the 1.2s hold. The live preview is mirrored like a selfie
-  (display only), side outlines are centred on the torso and flip to face
-  the way the shopper faces, and the pose gate requires a visible face (the
-  same rule as the on-device head crop) with a specific message for each
-  failure.
-- **Capture gate (owner, 2026-10-10 night, Q1–Q15):** green only when the
-  body matches the drawn outline (crown and soles within 10% of the outline's
-  height, torso centred; looser while holding, and from the start after 15 s
-  of red — owner 2026-10-11 relaxation), the whole head is inside the
-  picture (estimated crown, not just confident face points), the shopper
-  stands upright (torso vertical and full length, knees straight) and is still.
-  Landmarks are smoothed and a miss under 300 ms does not restart the 1.2 s
-  hold; a 3·2·1 count runs during it. Pose uses MediaPipe `full` on a small
-  copy of the frame (falls back to `lite` on a slow phone), loaded once for
-  both photos during the intake. Every auto-capture is reviewed (full frame
-  with head, on device): Retake / Use this photo. Instructions are spoken
-  (built-in voice, mute button). A product with no sewn 3D says "size-only"
-  before the photos; when no garment is drawn, one card on the photo says why
-  with one next step (try the next size up, try again), never a fake drape.
-- Replicate any attached design exactly: spacing, type hierarchy, corner
-  radius, and color. Do not "simplify" or approximate a provided design.
-- Empty states are required everywhere data can be absent (no garments yet,
-  no telemetry yet, no size result yet) — never leave a blank panel.
-
----
-
-## 7. Body Model & Simulation Rules
-
-This is the most failure-prone area of the codebase. Follow these exactly.
-
-- **Single source of truth for topology:** ship `public/models/mhr-hull.glb`
-  (Meta MHR Apache 2.0 assets). Stamp `topology_version` on every phenotype,
-  every cached delta, and every placeholder asset. Official render topology
-  is **MHR LOD 1: 18,439 vertices / 127 joints**, version string
-  **`mhr-18439-127`**. Cloth collider is **MHR LOD 3 (~4,899 verts)**. Do
-  not write `anny-13380-104` (or the historical 13,718/163 ANNY figures) on
-  new phenotypes or cache rows.
-- **MHR parametric body only.** New product representation is
-  `MhrParametricVector`: shape / skeleton / pose params, `joint_rotations`
-  as needed, `derived_measurements` (chest/waist/hip cm via ISO 8559-1 plane
-  slice + 2D convex hull), `topology_version`, optional `stated_weight_kg`,
-  and vertex buffer or storage URL for the deformed LOD 1 mesh. Prefer
-  **server-authored vertex positions** when the Cog returns them (avoids
-  client/server deform drift). `AnnyParametricVector` is legacy; do not
-  write it on new `fit_jobs` rows. SMPL-X mesh types stay retired.
-- **GPU `task=body` (live weights, no fixtures).** Inputs: `front_image`,
-  `side_image`, `height_cm`, `sex`, optional `weight_kg`. Pipeline:
-  1. SAM 2 silhouettes (Apache 2.0)
-  2. SAM 3D Body per view as **initializer only**
-  3. Joint differentiable MHR fit: shared identity (20 body) + shared
-     skeleton (68), per-view pose; hard constraint body stature (sole to
-     crown on the canonical mesh, owner Q28 2026-10-10; the joint span ran
-     to a ground-level joint and left bodies ~7 cm short) = stated
-     height; keypoints primary, silhouette **weak** (clothed outline must
-     not inflate girths)
-  4. Re-evaluate MHR in **canonical pose** (do not measure a reposed LBS
-     mesh)
-  5. Girths: plane slice + 2D convex hull (ISO 8559-1). Horizontal torso;
-     limb-axis for limbs; body-part filter so an A-pose chest slice does
-     not span both arms
-- **No box mesh, no dummy geometry, no stubbed inference.**
-  `lib/ml/gpu.ts` calls the live Modal app. Fail closed if `MODAL_GPU_URL`
-  or `ASHRIUM_GPU_HMAC` is missing. Surface the real Modal
-  error — never fabricate a phenotype. Client code must never assume a
-  fixed morph-target count.
-- **Drape resolution order (`task=drape` on the same warm GPU):** attempt
-  `simulation_cache` match first (cosine similarity, threshold ≥ 0.995,
-  scoped by `variant_id` + `tenant_id`) as a **latency optimization**. On a
-  miss, run Newton XPBD/VBD in the Modal app on the rigid MHR LOD 3 collider
-  (~4–6k garment verts). Stop when displacement + regional **clearance**
-  stabilize. Write clearance into sim-delta v2, store the meshopt delta in
-  `garment-simulations`, insert the vector into `simulation_cache`.
-  `lib/fit/resolve-drape.ts` calls Modal on the shopper path — not
-  `lib/graphics/xpbd-cloth.ts`. A miss must **not** withhold size; size is
-  girth + chart. Drape may land late on `fit_job:{id}` Realtime. **Drape
-  must never block the avatar SLA** (`task=body` stays the avatar path).
-  Until drape lands, show the girth-based size with an **Approximate**
-  badge. When Newton or a cache hit lands — at any wait — re-evaluate the
-  AND-gate; do not discard a late drape.
-  **Owner decision (2026-10-08, cap changed 2026-10-09):** the shopper never
-  sees a half-built avatar; the first thing they see is themselves dressed.
-  The particle loader and its real stage list stay up after `task=body`
-  completes — "Putting your avatar together" until the 3D body is rendered,
-  then "Dressing you in your size" until the recommended size's drape lands
-  or is known not to come — capped at the server's drape budget
-  (`GPU_HOLD_DURING_DRAPE_MS`) + 15 s (`REVEAL_HOLD_MAX_MS`); a shorter cap
-  showed an undressed avatar while a still-allowed drape ran. Past the cap
-  or on drape failure the shopper sees themselves in their own clothes with
-  an honest message, and a late drape still pours on. The GPU wait budget
-  ends when the job completes.
-- **Client-side compositing:** `V_final = V_0 + ΔX`. Heatmap is
-  **clearance** (loose regions = blue). Strain may exist as a debug channel;
-  it is not a size verdict. Keep `lib/graphics/pbd-cloth.ts` /
-  `xpbd-cloth.ts` as optional debug — not the storefront rendering path.
-- **Confidence gate (hard rule):** a high-confidence size claim (solid
-  badge + `VFR_SIZE_RECOMMENDED` cart write) requires **ALL** of:
-  1. capture gates passed (including side wrists-at-shoulders and successful
-     on-device head crop)
-  2. garment ingest confidence is Tier 1 or pipeline-validated Tier 2
-  3. clothing / height residual is within tolerance
-  4. drape has landed (cache hit **or** completed Newton run), with no
-     client time cutoff
-  If any condition fails, render "Approximate fit" — never emit a hard size
-  claim without the full AND-gate. The **size number** is always from
-  girths + the published size chart. KES and clearance must not flip that
-  number.
-- **Three.js memory discipline:** every renderer, geometry, material, and
-  texture created for a session must be disposed when that session ends or
-  the component unmounts. Follow the existing disposal pattern in
-  `components/vfr/vfr-canvas.tsx`. Every phase must dispose what it creates.
-
----
-
-## 8. Biometrics & Security Rules
-
-- **No React Three Fiber.** No `replicate` npm package — all GPU calls
-  go through `fetch` in `lib/ml/gpu.ts`. These are hard bans, not
-  preferences.
-- **Consent, age, then camera.** No live camera until the shopper checks
-  consent (copy in `lib/privacy/consent-copy.ts`) and attests they are 16+.
-  Refuse the under-16 / COPPA path. `/privacy` must match the checkbox.
-- **Head crop before WebP.** Guided capture produces exactly two images —
-  front and side — with the head removed from MediaPipe landmarks, then
-  encoded client-side to WebP (1024px, q85). **No face pixels on the
-  server.** Uploads use short-lived signed PUT URLs minted via the embed
-  token, never a merchant credential.
-- **Ephemeral storage, always.** Biometric images live in a bucket with a
-  15-minute TTL and are wiped immediately on inference success *or* failure
-  via `lib/server/biometrics-wipe.ts`. No raw photo is ever stored beyond
-  that window, and no code path should treat these images as durable data.
-- **No durable phenotype without a TTL plan.** If a `parametric_result` is
-  cached or logged for debugging, it must be covered by the same sweep
-  discipline as the images.
-- **Server-only catalog credentials.** Shopify Admin GraphQL credentials live
-  in `tenant_integrations` and are read only in server routes. The widget
-  never receives, stores, or proxies these credentials — it sends only
-  `product_id` / `variant_id` / `sku`.
-- **No secrets in client code.** Any token, API key, HuggingFace weight
-  access, or Modal credential is fetched via a server route or lives
-  only on Modal secrets / `.env.local`. Never embed secrets in widget JS, client
-  bundles, chat, or git.
-- Gallery upload of biometric photos is **debug-only in the merchant
-  dashboard sandbox** and must never be exposed on the live storefront —
-  storefront capture is live-camera only.
-- **Catalog honesty:** do not invent girths. `completeMeasurements` (or
-  equivalent) must not set `measurementsFromSource` on filled-in values.
-  Per-SKU ingest is the primary path; bulk sync is secondary.
-- **Appearance:** faceless and non-skin-toned on every server and in every
-  stored artifact; servers never infer or store skin colour. The only
-  appearance ever shown is the shopper's own, painted on their device from
-  their own photos (always on, never uploaded, consent bullet and `/privacy`
-  section always shown).
-
----
-
-## 9. State Management & TypeScript
-
-- Keep capture-session and phenotype state colocated with the widget flow;
-  do not introduce a new global store without approval.
-- Local component state for anything transient (form fields mid-capture,
-  gate status, GPU warm/sleep). Persist only what a session genuinely needs
-  across a reload.
-- Strict TypeScript. No `any`. Keep types simple, explicit, and colocated in
-  `types/*` per the domain split in Section 5.5.
-- Do not carry `mesh` / SMPL-X / ANNY types forward into new code once a
-  slice removes their usage — delete dead types in the same commit that
-  retires them.
-
----
-
-## 10. Decision Boundaries
-
-- **Ask before adding any new npm package.** `@mediapipe/tasks-vision` is
-  already approved. GPU Python deps live in `gpu/requirements.txt` and still
-  need a brief check before adding anything heavy.
-- **No `replicate` npm package.** Ever. Use `fetch` against the Modal
-  HMAC HTTP app (`/body`, `/drape`, `/pattern`, `/session`).
-- **No React Three Fiber.** Raw Three.js only, matching the existing
-  `vfr-canvas.tsx` patterns.
+- **No React Three Fiber.** **No `replicate` npm package.** Ever.
 - **Python only in `gpu/`.** No local `backend/main.py` API.
-- **All GPU calls are live.** `MODAL_GPU_URL` and `ASHRIUM_GPU_HMAC` point at
-  **our Modal app on `A100-80GB`**, not ANNY-Fit and not Replicate. Fail
-  closed if either is missing.
-  Do not add a mock branch, a fixture phenotype, or a "skip inference" flag.
-  If HuggingFace access to SAM 3D Body weights is not granted, stop — do
-  not stub the initializer.
-- **Session GPU, not 24/7 cron.** Shopper path uses Modal.
-  `min_containers=1` when the shopper passes consent; hard stop at **5
-  minutes after submit** (3 minutes if still `starting`, then 120s after
-  `started_at`; cancel the call, fail the job, `min_containers=0`).
-  Merchants cannot Warm/Sleep. Operator/cron may scale via keepalive. Do
-  not keep-alive with dummy predictions against the A100 credit.
-- **Ask before changing existing UI** that isn't part of the current task's
-  file map.
-- **Ask before renaming or dropping a database column/table** that other
-  phases depend on (especially `fit_jobs`, `tenant_id`, and anything in
-  `garment_cad_profiles`).
-- **Ask before editing AGENTS.md itself** to change locked product
-  decisions (MHR topology `mhr-18439-127`, SAM 3D Body as initializer only,
-  Newton in the Modal app, GarmentCode MIT / never `NvidiaWarp-GarmentCode`,
-  clearance heatmap, on-device head crop, session `min_containers`,
-  confidence-gate formula, live-inference requirement,
-  no-R3F / no-replicate-npm bans). Additive updates (e.g., adding a new
-  file to the file map as a phase lands) do not require asking.
-- If a request would require more than one npm package, more than one new
-  major architectural pattern, or touching more than one phase's file map at
-  once — stop and ask for scope confirmation before writing code.
+- **No mocks, no fallback inference.** Fail closed if `MODAL_GPU_URL` or
+  `ASHRIUM_GPU_HMAC` is missing; surface the real Modal error. If
+  HuggingFace access to SAM 3D Body weights is missing, stop — do not stub.
+- **No ANNY on new work:** never write `anny-13380-104` or
+  `AnnyParametricVector` on new rows; ANNY-Fit is not the GPU.
+- **No 24/7 keep-alive** (Vercel cron or dummy predictions) against the A100.
+- No secrets in client code, widget JS, chat or git — `.env.local` / Modal
+  secrets only.
 
----
+## 4. Privacy and biometrics (never relax)
 
-## 11. Phase Roadmap
+- Consent + 16+ attestation before any camera. `/privacy` matches the
+  checkbox copy (`lib/privacy/consent-copy.ts`).
+- Head cropped **on-device** before WebP (1024 px, q85). **No face pixels on
+  any server.** Uploads use short-lived signed PUT URLs minted by the embed
+  token, never a merchant credential.
+- Biometric images: `image/webp` only, path `{tenant}/{job}/front|side.webp`,
+  15-minute TTL, wiped immediately on inference success **or** failure
+  (`lib/server/biometrics-wipe.ts`). Any cached phenotype is covered by the
+  same TTL sweep (`/api/v1/cron/ttl-sweep`). Never reuse that cron to warm
+  the GPU.
+- Full camera frames, the face, the drape drawing and clothes removal stay
+  **on the phone** (`OnDevicePhoto`, never a Blob) and are wiped when Try On
+  closes. Servers never return images, never store appearance, never infer
+  skin colour.
+- The widget is a sandboxed iframe: it gets an embed token and
+  `product_id`/`variant_id`/`sku` only — never merchant JWTs, Shopify Admin
+  tokens or CAD data. Catalog/Shopify Admin calls are server-side only.
+- Gallery upload of biometric photos is dashboard-sandbox debug only; the
+  storefront is live-camera only. Illinois BIPA flag stays off until counsel.
 
-Each phase is an isolated, demoable vertical slice with its own contract.
-Later phases consume earlier contracts; they do not rewrite earlier UI.
-**Every phase starts by confirming this file's locks, then code, then a
-demoable check on real Modal + real Supabase.** If a phase's lock in
-this file is stale, update AGENTS.md first (additive file-map edits are
-fine; locked-decision edits still follow Section 10).
+## 5. Fit and simulation rules
 
-The previous ANNY-Fit roadmap is retired. SaaS shell work that already
-landed (auth, onboarding, per-SKU Shopify ingest, clearance heatmap) is
-kept and consumed — not redone.
+- **Size number = body girths + the published size chart.** KES, clearance
+  and the drape never change it. A drape miss never withholds a size.
+- **Confidence AND-gate** for a solid badge + `VFR_SIZE_RECOMMENDED` cart
+  write — ALL of: capture gates passed (incl. side wrists and head crop);
+  garment ingest Tier 1 or pipeline-validated Tier 2; clothing/height
+  residual in tolerance; drape landed (cache hit or Newton run, no client
+  cutoff). Otherwise "Approximate fit", visibly different.
+- Topology: stamp `topology_version` (`mhr-18439-127`) on every phenotype and
+  cached delta. Measure girths on the **canonical-pose** mesh (ISO 8559-1
+  plane slice + convex hull); silhouette is a weak term.
+- Drape order: `simulation_cache` match (cosine ≥ 0.995, scoped by
+  `variant_id` + `tenant_id`) → else Newton on Modal via
+  `lib/fit/resolve-drape.ts`. Drape never blocks the body result; re-check
+  the AND-gate whenever a late drape lands.
+- Grade by **re-instantiating the 2D pattern per size**, never by 3D scaling.
+  Unsupported geometry (hoods, lapels, long sleeves, jumpsuits, skirts, sets)
+  is size-only with an Approximate badge.
+- Shopper result = **mirror view** (their own Front/Side photo with the drape
+  drawn in, the tried garment replacing their own clothes). No mannequin and
+  no 3D avatar for shoppers; the 3D view is sandbox debug only. Never show a
+  fake drape — say why and give one next step.
+- **Three.js memory:** dispose every renderer, geometry, material and texture
+  a session creates (follow `vfr-canvas.tsx`).
 
-| Phase | Deliverable | Depends on |
-|---|---|---|
-| **0 — AGENTS.md rewrite** | This file: MHR topology, Modal A100, clearance heatmap, head crop, session `min_containers`, no ANNY-Fit, Newton in Modal, GarmentCode ingest | — |
-| **1 — Privacy and capture** | Consent + age attestation, fitted-clothing copy, side wrist gate, on-device head crop into headless WebPs, optional Illinois ship flag, crop + wrist-gate tests. Demo: sandbox produces two headless WebPs; `/privacy` matches the checkbox. | 0 |
-| **2 — Modal A100 + session-warm GPU** | `gpu/` with live SAM 2 → SAM 3D Body init → MHR `task=body`; Modal app on `A100-80GB`; `MODAL_GPU_URL` required; shopper consent sets `min_containers=1`; stay warm through `task=drape`; sleep when no job is active and no drape hold remains. Demo: a completed shopper submit warms A100-80GB and a real body predict returns MHR params or the **real** Modal error. | 0 |
-| **3 — App body contract (ANNY → MHR)** | `MhrParametricVector`; ship `mhr-hull.glb`; viewport + status parse MHR; wipe biometrics on success or failure; size rec + AND-gate; Approximate if clothing/height residual is large. Demo: Sandbox Try On shows a **real** MHR avatar from the live Modal GPU, not a height-scaled dummy hull. | 1 + 2 |
-| **4 — Newton drape on the same warm GPU** | Modal `task=drape`; collider = MHR LOD 3; clearance into sim-delta v2; `resolve-drape.ts` → Modal; JS XPBD debug-only; cache hit optional; miss must not withhold size; Approximate until drape lands, then AND-gate with no client time cutoff. Demo: one SKU draped on the live avatar; heatmap toggle; loose regions blue. | 3 |
-| **5 — Catalog honesty + GarmentCode** | Stop inventing girths; per-SKU primary; Modal `task=pattern` (HTML parse → GarmentCode); hard-reject self-intersection; cross-check size chart; grade by re-instantiating 2D pattern per size; unsupported styles = Approximate / no 3D; KES does not flip size. Ingest may cold-start. Demo: paste one product URL → one graded garment → visible tier/confidence → no invented chest=waist+16. | 0 |
-| **6 — Texture and mannequin** | (Superseded 2026-10-09 by the on-device painted avatar, Section 6.) Faceless non-skin-toned mannequin, neutral undergarment, garment albedo on GarmentCode UVs; failed print QA → visualization off + Approximate; heatmap remains a toggle. Demo: shopper can recognize the SKU color; body is not a nude grey mesh. | 4 + 5 |
-| **7 — Merchant lifecycle on a Shopify development store** | Invite → onboard → allowlist → Admin token → Test this SKU → Liquid block → Try On (shopper submit warms A100) → size to cart when AND-gate passes. GPU sleeps when no job is active. A Partner development store is a real shop with a real Admin API — not a mock JSON catalog. | 3 + 5 + 6 |
+## 6. GPU session budget
 
-**Order is strict:** 0 → 1 → 2 → 3 → 4; 5 may run after 0 in parallel with
-1–3; 6 after 4+5; 7 last. If a credential is missing, stop and ask — do
-not mock.
+GPU warms (`min_containers=1`) when the shopper passes consent. After
+submit: up to 3 min `starting`, then 2 min of inference after `started_at`,
+5 min total shopper wait — then cancel, fail the job, wipe photos,
+`min_containers=0`. Abandoned capture sleeps after 4 min without a warmup
+ping. Only the operator/cron scales via `POST /api/v1/hmr/keepalive`;
+merchants cannot. Catalog ingest (`task=pattern`) may cold-start. Never
+leave `min_containers=1` overnight.
 
-**What a human must supply (never paste into chat or git):**
+## 7. API and database
 
-- Modal account + token (`modal token new`)
-- HuggingFace access to **SAM 3D Body** weights (gated) as a Modal secret
-- Working Supabase project
-- Phase 7: Shopify Partner development store + custom app (`read_products`)
-- All of `MODAL_GPU_URL`, `ASHRIUM_GPU_HMAC`,
-  `ASHRIUM_OPERATOR_SECRET`, and Supabase keys in
-  **`.env.local` only**
+- Product routes only under `/api/v1/*`. Every fit-job row and call carries
+  `tenant_id`. Realtime topic `fit_job:{id}` only — no wildcards.
+- Do not rename `fit_jobs`; extend it. `gltf_output_url` is legacy.
+- `garment_cad_profiles` modes: A explicit KES, B chart + material (Tier 2),
+  C category defaults (Approximate). Catalog honesty: never mark filled-in
+  measurements as source-true.
+- Detail of columns, buckets and the full file map: `docs/agents/spec-full.md`
+  §5.4–§5.5.
 
-**Definition of done (v1):** an invited merchant can accept the invite, set
-their domain, connect a Shopify **development store**, install the Liquid
-block, ingest **one SKU**, and open both the sandbox and the live storefront
-Try On. A shopper can attest age, consent, enter height/sex/(weight), pass
-guided front/side capture (head cropped on-device), see their real MHR
-avatar from the live Modal GPU, see a draped size with a clearance heatmap toggle,
-and — when the AND-gate passes — get a size written into the cart. Photos
-are gone immediately after inference. The return-rate dashboard reflects
-real telemetry. `npm run dev` runs the app against the real Modal GPU and the
-real Supabase project using credentials in `.env.local` — no mock mode
-anywhere.
+## 8. How to work
 
----
+- One vertical slice at a time; extend what exists, don't rebuild it. Touch
+  only files the task needs; match existing patterns.
+- Smallest working version. No speculative config, abstraction or edge-case
+  handling. Refactor only when a pattern repeats 3+ times.
+- Routine engineering choices: decide, state the choice in one line, and
+  proceed (the owner delegates these). Ask only at the boundaries in §9.
+- Done = verified: `npm run check` (typecheck + lint + tests) for the app,
+  `gpu/tests/` pytest for GPU code, the drape grid (`gpu/dev_drape_grid.py`)
+  before every GPU deploy, and a look at visual changes in the running app.
+- Ship each user-visible slice: commit (never secrets), push `master`,
+  confirm the Vercel production deploy. Localhost-only is not done.
+- When a file is added for a phase, add it to the file map in
+  `docs/agents/spec-full.md` §5.5.
 
-## 12. Final Reminder
+## 9. Decision boundaries — ask first
 
-Read this file before every feature. Follow it strictly. Build the smallest
-correct version of each phase slice against the live Modal A100 and
-real Supabase project — no mocks, no stubs, no fixture data. Never mix MHR
-and ANNY topology versions, never let a raw biometric photo or a face pixel
-outlive its TTL, never leave `min_containers=1` overnight, and ask before
-adding a package, changing locked product decisions, or touching a file
-outside the current phase's map.
-
----
+- Adding any npm package (heavy GPU Python deps: a brief check).
+- Changing existing UI outside the current task.
+- Renaming or dropping a column/table other code depends on (`fit_jobs`,
+  `tenant_id`, `garment_cad_profiles`, …).
+- Changing any locked decision in §2–§6 (here or in `spec-full.md`).
+- A request needing 2+ new packages, 2+ new architectural patterns, or work
+  across several areas at once — confirm scope first.
+- Anything only the owner can supply: Modal/HF/Supabase/Shopify credentials
+  (never pasted into chat or git), spending, legal/privacy wording.
 
 ## Agent skills
 
