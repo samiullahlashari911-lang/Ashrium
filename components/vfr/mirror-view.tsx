@@ -9,7 +9,7 @@ import { fitSummaryLine, summarizeFit } from '@/lib/fit/fit-summary';
 import { findMhrHullMesh, vertexBufferToMeters } from '@/lib/graphics/anny-hull';
 import { BODY_PART, bodyHeights, loadBodyParts, replacedClothes, vertexFillZones } from '@/lib/graphics/body-parts';
 import { FILL_ZONE, certainBodyArea, headIsCovered, removeReplacedClothes } from '@/lib/graphics/clothes-removal';
-import { foldOcclusion, seamSmoothNormals } from '@/lib/graphics/cloth-shading';
+import { clothCompression, foldOcclusion, openEdgeRim, seamSmoothNormals } from '@/lib/graphics/cloth-shading';
 import { photoShading } from '@/lib/graphics/photo-shading';
 import {
   fitPhotoLighting,
@@ -296,6 +296,93 @@ function skinLightMap(lighting: PhotoLighting, zones: BodyZones): Float32Array {
   return light;
 }
 
+/** A camera frame is never pin-sharp: the garment is drawn with this much softness (px). */
+const GARMENT_SOFTNESS_PX = 0.6;
+/** Pixels more saturated than this are coloured, not lit white. */
+const NEUTRAL_SATURATION = 0.2;
+
+/**
+ * The colour of the room's light, from the photo's brightest near-neutral
+ * surfaces (a white shirt, a pale wall: a white patch takes the light's
+ * colour), never from a coloured garment. Unit brightness, within ±10%.
+ */
+function photoLightTint(photo: Uint8ClampedArray): [number, number, number] {
+  const bright: Array<[number, number]> = [];
+  for (let pixel = 0; pixel < photo.length / 4; pixel += 3) {
+    const r = photo[pixel * 4];
+    const g = photo[pixel * 4 + 1];
+    const b = photo[pixel * 4 + 2];
+    const max = Math.max(r, g, b);
+    if (max < 60 || max >= 254 || (max - Math.min(r, g, b)) / max > NEUTRAL_SATURATION) {
+      continue;
+    }
+    bright.push([pixel, r + g + b]);
+  }
+  if (bright.length < 200) {
+    return [1, 1, 1];
+  }
+  bright.sort((x, y) => y[1] - x[1]);
+  const sum = [0, 0, 0];
+  for (const [pixel] of bright.slice(0, Math.max(50, Math.floor(bright.length * 0.2)))) {
+    for (let c = 0; c < 3; c += 1) {
+      sum[c] += srgbToLinear(photo[pixel * 4 + c]);
+    }
+  }
+  const mean = (sum[0] + sum[1] + sum[2]) / 3 || 1;
+  return sum.map((value) => Math.min(1.1, Math.max(0.9, value / mean))) as [number, number, number];
+}
+
+/** The photo's sensor grain: spread of the wall's fine detail (0-255 units), 0 when unknown. */
+function photoGrain(photo: Uint8ClampedArray, background: Float32Array | null, width: number, height: number): number {
+  if (!background) {
+    return 0;
+  }
+  const residuals: number[] = [];
+  for (let y = 1; y < height - 1; y += 2) {
+    for (let x = 1; x < width - 1; x += 2) {
+      const pixel = y * width + x;
+      if (background[pixel] < 0.8) {
+        continue;
+      }
+      const luma = (index: number): number => 0.299 * photo[index * 4] + 0.587 * photo[index * 4 + 1] + 0.114 * photo[index * 4 + 2];
+      residuals.push(Math.abs(luma(pixel) - (luma(pixel - 1) + luma(pixel + 1) + luma(pixel - width) + luma(pixel + width)) / 4));
+    }
+  }
+  if (residuals.length < 500) {
+    return 0;
+  }
+  residuals.sort((a, b) => a - b);
+  return Math.min(6, 1.4826 * (residuals[Math.floor(residuals.length / 2)] ?? 0));
+}
+
+/** The photo's grain over the drawn garment only. */
+function addGarmentGrain(
+  context: CanvasRenderingContext2D,
+  layer: HTMLCanvasElement,
+  width: number,
+  height: number,
+  grain: number,
+): void {
+  const coverage = layer.getContext('2d')?.getImageData(0, 0, width, height).data;
+  if (!coverage) {
+    return;
+  }
+  const image = context.getImageData(0, 0, width, height);
+  let seed = 1234567;
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const alpha = coverage[pixel * 4 + 3] / 255;
+    if (alpha <= 0) {
+      continue;
+    }
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const noise = ((seed / 0x7fffffff) - 0.5) * 2 * grain * alpha;
+    for (let c = 0; c < 3; c += 1) {
+      image.data[pixel * 4 + c] = Math.max(0, Math.min(255, image.data[pixel * 4 + c] + noise));
+    }
+  }
+  context.putImageData(image, 0, 0);
+}
+
 /** The photo's relative light as a texture the garment shader reads at its own pixel (rows bottom-up, halved). */
 function shadingDataTexture(shading: Float32Array, width: number, height: number): THREE.DataTexture {
   const data = new Uint8Array(width * height);
@@ -412,15 +499,27 @@ const GARMENT_VERTEX = `
 attribute vec3 aColor;
 attribute float aOcclusion;
 attribute vec2 aPatternUv;
+attribute float aCompression;
+attribute vec3 aCompressionDir;
+attribute float aWrinkleS;
+attribute float aRim;
 varying vec3 vNormalView;
 varying vec3 vColor;
 varying float vOcclusion;
 varying vec2 vPatternUv;
+varying float vCompression;
+varying vec3 vCompressionDir;
+varying float vWrinkleS;
+varying float vRim;
 void main() {
   vNormalView = normal;
   vColor = aColor;
   vOcclusion = aOcclusion;
   vPatternUv = aPatternUv;
+  vCompression = aCompression;
+  vCompressionDir = aCompressionDir;
+  vWrinkleS = aWrinkleS;
+  vRim = aRim;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
@@ -435,11 +534,19 @@ uniform float uExposure;
 uniform sampler2D uPhotoLight;
 uniform float uPhotoLightMix;
 uniform vec2 uResolution;
+uniform vec3 uLightTint;
 uniform float uHeat;
 varying vec3 vNormalView;
 varying vec3 vColor;
 varying float vOcclusion;
 varying vec2 vPatternUv;
+varying float vCompression;
+varying vec3 vCompressionDir;
+varying float vWrinkleS;
+varying float vRim;
+
+// Jersey buckles into folds ~3 cm apart where the drape is compressed.
+const float WRINKLE_WAVELENGTH_M = 0.032;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -454,6 +561,20 @@ float noise(vec2 p) {
 void main() {
   vec3 n = normalize(vNormalView);
   if (!gl_FrontFacing) n = -n;
+  // Wrinkles below the 1.4 cm cloth mesh, only where the solver compressed
+  // the cloth (cloth-shading.ts clothCompression): the surface rises and falls
+  // along the compression direction; the phase wanders with the fabric so
+  // folds are irregular, like real buckling, and fade where it relaxes.
+  float wrinkle = vCompression * (1.0 - uHeat);
+  float phase = vWrinkleS * (6.2831853 / WRINKLE_WAVELENGTH_M) + 2.2 * noise(vPatternUv * 38.0);
+  // A fold pattern finer than the pixels is moire, not cloth: fade it out.
+  wrinkle *= clamp(1.0 - (fwidth(phase) - 0.9) / 1.4, 0.0, 1.0);
+  float ridge = sin(phase);
+  float swell = 0.6 + 0.8 * noise(vPatternUv * 21.0 + 7.0);
+  vec3 across = vCompressionDir - dot(vCompressionDir, n) * n;
+  if (wrinkle > 0.001 && dot(across, across) > 1e-6) {
+    n = normalize(n + normalize(across) * (0.95 * wrinkle * swell * cos(phase)));
+  }
   float keyLight = max(dot(n, uLight), 0.0);
   float facing = max(n.z, 0.0);
   // The room's light (fitted on the shopper's skin): ambient share uAmbient,
@@ -466,20 +587,27 @@ void main() {
   float photoLight = texture2D(uPhotoLight, gl_FragCoord.xy / uResolution).r * 2.0;
   float photoShade = photoLight * (0.8 + 0.2 * keyLight) * mix(vOcclusion, 1.0, uHeat) * mix(0.86, 1.0, pow(facing, 0.6));
   shade = mix(shade, photoShade, uPhotoLightMix * (1.0 - uHeat));
+  // Fold valleys hold shadow; open edges (hem, sleeve ends, neckline) show the
+  // fabric's thickness turning under.
+  shade *= 1.0 - 0.26 * wrinkle * swell * (0.5 - 0.5 * ridge);
+  shade *= mix(1.0, 0.8, vRim * (1.0 - uHeat));
 
   // Jersey: vertical wales ~2 mm apart plus a soft slub, in pattern metres.
   float wales = 0.5 + 0.5 * sin(vPatternUv.x * 3000.0);
   float slub = noise(vPatternUv * 260.0);
-  float knit = 1.0 + ((wales - 0.5) * 0.05 + (slub - 0.5) * 0.08) * (1.0 - uHeat);
+  float knit = 1.0 + ((wales - 0.5) * 0.022 + (slub - 0.5) * 0.06) * (1.0 - uHeat);
 
   // White cloth is never paper white in a photo: keep headroom for the light.
   vec3 base = clamp(vColor, vec3(0.035), vec3(0.86));
   float edge = pow(1.0 - max(n.z, 0.0), 2.5);
   // Dark cloth catches a soft highlight on its lit folds, or it reads as a hole.
-  vec3 sheen = (vec3(0.035) * edge + vec3(0.05) * pow(keyLight, 3.0)) * (1.0 - uHeat);
+  // Cotton's soft sheen: brightest where the cloth turns away and catches the light.
+  vec3 sheen = (vec3(0.05) * edge * (0.4 + 0.6 * keyLight) + vec3(0.04) * pow(keyLight, 3.0)) * (1.0 - uHeat);
   // The highlight takes the cloth's own hue, so dark blue denim stays blue.
   vec3 tint = base / max(max(base.r, max(base.g, base.b)), 0.001);
   vec3 colour = base * shade * knit * mix(min(uExposure, 1.05), 1.0, uHeat) + sheen * tint * (0.4 + base);
+  // Lit by the room's light colour (a warm lamp, a cool window), as the photo is.
+  colour *= mix(uLightTint, vec3(1.0), uHeat);
   gl_FragColor = vec4(colour, 1.0);
   #include <colorspace_fragment>
 }`;
@@ -733,6 +861,8 @@ export const MirrorView: FC<MirrorViewProps> = ({
         })
         : null;
       const shadingTexture = shading ? shadingDataTexture(shading, crop.w, crop.h) : null;
+      const lightTint = photoLightTint(photoPixels.data);
+      const grain = photoGrain(photoPixels.data, readyMasks?.background ?? null, crop.w, crop.h);
 
       // The draped garment, carried into the photo patch by patch.
       const projector = createPatchProjector(body.positions, pixels, body.parts);
@@ -749,6 +879,20 @@ export const MirrorView: FC<MirrorViewProps> = ({
       // Seam-smoothed normals and fold occlusion from the drape itself.
       const smoothNormals = seamSmoothNormals(draped, drape.indices);
       const occlusion = foldOcclusion(draped, smoothNormals, drape.indices, { strength: 4, floor: 0.45, spread: 3 });
+      const patternUv = drape.uv.length === count * 2 ? drape.uv : null;
+      const compression = patternUv ? clothCompression(draped, patternUv, drape.indices) : null;
+      const rim = openEdgeRim(draped, drape.indices);
+      const compressionDir = new Float32Array(count * 3);
+      const wrinkleS = new Float32Array(count);
+      if (compression) {
+        for (let i = 0; i < count; i += 1) {
+          const dx = compression.direction[i * 3];
+          const dy = compression.direction[i * 3 + 1];
+          const dz = compression.direction[i * 3 + 2];
+          compressionDir.set(viewNormal(view, sign, dx, dy, dz), i * 3);
+          wrinkleS[i] = draped[i * 3] * dx + draped[i * 3 + 1] * dy + draped[i * 3 + 2] * dz;
+        }
+      }
       const normals = new Float32Array(count * 3);
       const colours = new Float32Array(count * 3);
       const fabric = garment?.colorHex
@@ -779,6 +923,10 @@ export const MirrorView: FC<MirrorViewProps> = ({
       }
       const garmentGeometry = new THREE.BufferGeometry();
       garmentGeometry.setAttribute('aOcclusion', new THREE.BufferAttribute(occlusion, 1));
+      garmentGeometry.setAttribute('aCompression', new THREE.BufferAttribute(compression?.amount ?? new Float32Array(count), 1));
+      garmentGeometry.setAttribute('aCompressionDir', new THREE.BufferAttribute(compressionDir, 3));
+      garmentGeometry.setAttribute('aWrinkleS', new THREE.BufferAttribute(wrinkleS, 1));
+      garmentGeometry.setAttribute('aRim', new THREE.BufferAttribute(rim, 1));
       garmentGeometry.setAttribute(
         'aPatternUv',
         new THREE.BufferAttribute(drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2), 2),
@@ -799,6 +947,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
           uPhotoLight: { value: shadingTexture },
           uPhotoLightMix: { value: shadingTexture ? 1 : 0 },
           uResolution: { value: new THREE.Vector2(crop.w, crop.h) },
+          uLightTint: { value: new THREE.Vector3(...lightTint) },
           uExposure: { value: photoExposure(frame, crop) },
           uHeat: { value: showClearanceHeatmap ? 1 : 0 },
         },
@@ -883,6 +1032,21 @@ export const MirrorView: FC<MirrorViewProps> = ({
         shadeContext.globalCompositeOperation = 'source-in';
         shadeContext.fillStyle = 'rgba(20, 16, 12, 0.42)';
         shadeContext.fillRect(0, 0, crop.w, crop.h);
+        // The shadow falls on the shopper, never on the wall a metre behind
+        // them: a halo there read as a pasted cut-out.
+        if (onBody) {
+          const bodyMask = shadeContext.createImageData(crop.w, crop.h);
+          for (let pixel = 0; pixel < onBody.length; pixel += 1) {
+            bodyMask.data[pixel * 4 + 3] = onBody[pixel] ? 255 : 0;
+          }
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = crop.w;
+          maskCanvas.height = crop.h;
+          maskCanvas.getContext('2d')?.putImageData(bodyMask, 0, 0);
+          shadeContext.globalCompositeOperation = 'destination-in';
+          shadeContext.drawImage(maskCanvas, 0, 0);
+          maskCanvas.width = 0;
+        }
         const blurPx = Math.max(2, Math.round(crop.h * 0.006));
         context.save();
         context.filter = `blur(${blurPx}px)`;
@@ -890,7 +1054,14 @@ export const MirrorView: FC<MirrorViewProps> = ({
         context.restore();
       }
       shade.width = 0;
+      // Composited like the photo it sits in: the camera's softness, then its grain.
+      context.save();
+      context.filter = `blur(${GARMENT_SOFTNESS_PX}px)`;
       context.drawImage(layer, 0, 0);
+      context.restore();
+      if (grain > 0 && !showClearanceHeatmap) {
+        addGarmentGrain(context, layer, crop.w, crop.h, grain);
+      }
       layer.width = 0;
       callbacks.current.onGarmentShown?.(true);
 

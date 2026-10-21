@@ -124,3 +124,133 @@ export function foldOcclusion(
   }
   return occlusion;
 }
+
+/**
+ * Where the drape is compressed against its own sewing pattern, and along which
+ * direction. The solver's cloth is a 1.4 cm mesh: real jersey buckles into
+ * 1-4 cm wrinkles that it cannot show, but it does report the excess length
+ * (the smaller principal stretch of each triangle, pattern → drape, below 1).
+ * The shader draws wrinkles there, across that direction, as strongly as the
+ * compression: physics below the mesh, never decoration. `uv` is each
+ * vertex's pattern position in metres.
+ */
+export interface ClothCompression {
+  /** 0 (relaxed or stretched) to 1 (strongly compressed), per vertex. */
+  amount: Float32Array;
+  /** Unit compression direction per vertex (3 each, drape frame); 0 where relaxed. */
+  direction: Float32Array;
+}
+
+/** Principal stretch at or above this is relaxed; at or below the floor it is fully compressed. */
+const COMPRESSION_START = 0.99;
+const COMPRESSION_FULL = 0.9;
+/** Stretches outside this range come from triangles whose pattern coordinates jump across a seam. */
+const VALID_STRETCH_MIN = 0.5;
+const VALID_STRETCH_MAX = 2;
+
+export function clothCompression(
+  positions: ArrayLike<number>,
+  uv: ArrayLike<number>,
+  indices: ArrayLike<number>,
+): ClothCompression {
+  const count = positions.length / 3;
+  const amount = new Float32Array(count);
+  const direction = new Float32Array(count * 3);
+  const weight = new Float32Array(count);
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t];
+    const b = indices[t + 1];
+    const c = indices[t + 2];
+    const e1 = [positions[b * 3] - positions[a * 3], positions[b * 3 + 1] - positions[a * 3 + 1], positions[b * 3 + 2] - positions[a * 3 + 2]];
+    const e2 = [positions[c * 3] - positions[a * 3], positions[c * 3 + 1] - positions[a * 3 + 1], positions[c * 3 + 2] - positions[a * 3 + 2]];
+    const u1 = [uv[b * 2] - uv[a * 2], uv[b * 2 + 1] - uv[a * 2 + 1]];
+    const u2 = [uv[c * 2] - uv[a * 2], uv[c * 2 + 1] - uv[a * 2 + 1]];
+    const det = u1[0] * u2[1] - u2[0] * u1[1];
+    if (Math.abs(det) < 1e-12) {
+      continue;
+    }
+    // Deformation gradient F (3x2): pattern → drape.
+    const i00 = u2[1] / det;
+    const i01 = -u2[0] / det;
+    const i10 = -u1[1] / det;
+    const i11 = u1[0] / det;
+    const f0 = [0, 1, 2].map((r) => e1[r] * i00 + e2[r] * i10);
+    const f1 = [0, 1, 2].map((r) => e1[r] * i01 + e2[r] * i11);
+    // Right Cauchy-Green C = FᵀF; its smaller eigenvalue is the squared compressed stretch.
+    const c00 = f0[0] * f0[0] + f0[1] * f0[1] + f0[2] * f0[2];
+    const c01 = f0[0] * f1[0] + f0[1] * f1[1] + f0[2] * f1[2];
+    const c11 = f1[0] * f1[0] + f1[1] * f1[1] + f1[2] * f1[2];
+    const half = (c00 + c11) / 2;
+    const root = Math.sqrt(Math.max(0, half * half - (c00 * c11 - c01 * c01)));
+    const small = half - root;
+    const stretch = Math.sqrt(Math.max(0, small));
+    if (stretch < VALID_STRETCH_MIN || stretch > VALID_STRETCH_MAX || stretch >= COMPRESSION_START) {
+      continue;
+    }
+    // Its eigenvector in pattern space, carried into the drape by F.
+    const v = Math.abs(c01) > 1e-12 ? [c01, small - c00] : c00 <= c11 ? [1, 0] : [0, 1];
+    const d = [0, 1, 2].map((r) => f0[r] * v[0] + f1[r] * v[1]);
+    const length = Math.hypot(d[0], d[1], d[2]) || 1;
+    const strength = Math.min(1, (COMPRESSION_START - stretch) / (COMPRESSION_START - COMPRESSION_FULL));
+    for (const vertex of [a, b, c]) {
+      // Directions have no sign: align with what the vertex has gathered so far.
+      const dot = direction[vertex * 3] * d[0] + direction[vertex * 3 + 1] * d[1] + direction[vertex * 3 + 2] * d[2];
+      const sign = dot < 0 ? -1 : 1;
+      for (let k = 0; k < 3; k += 1) {
+        direction[vertex * 3 + k] += (sign * strength * d[k]) / length;
+      }
+      amount[vertex] += strength;
+      weight[vertex] += 1;
+    }
+  }
+  for (let i = 0; i < count; i += 1) {
+    if (weight[i] > 0) {
+      amount[i] = Math.min(1, amount[i] / weight[i]);
+      const length = Math.hypot(direction[i * 3], direction[i * 3 + 1], direction[i * 3 + 2]) || 1;
+      for (let k = 0; k < 3; k += 1) {
+        direction[i * 3 + k] /= length;
+      }
+    }
+  }
+  return { amount, direction };
+}
+
+/**
+ * 1 on the garment's open edges (hem, sleeve ends, neckline), 0.4 one ring in,
+ * 0 elsewhere. Seams are not edges: vertices at the same position are one.
+ */
+export function openEdgeRim(positions: ArrayLike<number>, indices: ArrayLike<number>): Float32Array {
+  const count = positions.length / 3;
+  const ids = weldIds(positions, count);
+  const uses = new Map<number, number>();
+  const key = (p: number, q: number): number => (p < q ? p * count + q : q * count + p);
+  for (let t = 0; t < indices.length; t += 3) {
+    const corners = [indices[t], indices[t + 1], indices[t + 2]];
+    for (let k = 0; k < 3; k += 1) {
+      const edgeKey = key(ids[corners[k]], ids[corners[(k + 1) % 3]]);
+      uses.set(edgeKey, (uses.get(edgeKey) ?? 0) + 1);
+    }
+  }
+  const edge = new Uint8Array(count);
+  for (const [edgeKey, n] of uses) {
+    if (n === 1) {
+      edge[Math.floor(edgeKey / count)] = 1;
+      edge[edgeKey % count] = 1;
+    }
+  }
+  const rim = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) {
+    rim[i] = edge[ids[i]] ? 1 : 0;
+  }
+  for (let t = 0; t < indices.length; t += 3) {
+    const corners = [indices[t], indices[t + 1], indices[t + 2]];
+    if (corners.some((vertex) => edge[ids[vertex]])) {
+      for (const vertex of corners) {
+        if (!edge[ids[vertex]]) {
+          rim[vertex] = Math.max(rim[vertex], 0.4);
+        }
+      }
+    }
+  }
+  return rim;
+}
