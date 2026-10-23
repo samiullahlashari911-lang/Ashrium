@@ -754,7 +754,9 @@ export const MirrorView: FC<MirrorViewProps> = ({
     };
   }, [removesClothes, body, photoUv, photos]);
 
-  // Composite: photo, then the garment drawn into it.
+  // Composite: photo, then the garment drawn into it. Only this view's masks
+  // redraw it; the other photo's masks arriving used to cost a full redraw.
+  const masks = personMasks[view];
   useEffect(() => {
     const canvas = canvasRef.current;
     const photo = view === 'front' ? photos?.front : photos?.side;
@@ -828,7 +830,6 @@ export const MirrorView: FC<MirrorViewProps> = ({
           renderer, camera, occluderPositions, body.triangles, body.zones, facingPerVertex, normalPerVertex, body.parts, crop,
         );
       }
-      const masks = personMasks[view];
       const readyMasks = masks && masks !== 'failed' && masks.width === crop.w && masks.height === crop.h ? masks : null;
       const photoPixels = context.getImageData(0, 0, crop.w, crop.h);
       const lighting = zones && readyMasks ? fitSkinLight(photoPixels.data, zones, readyMasks.skin, crop.w) : null;
@@ -1062,7 +1063,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
       renderer?.forceContextLoss();
       callbacks.current.onGarmentShown?.(false);
     }
-  }, [albedo, body, drape, garment?.category, garment?.colorHex, garment?.easeCm, personMasks, photoUv, photos, showClearanceHeatmap, view]);
+  }, [albedo, body, drape, garment?.category, garment?.colorHex, garment?.easeCm, masks, photoUv, photos, showClearanceHeatmap, view]);
 
   const hasSide = Boolean(photos?.side && photoUv);
 

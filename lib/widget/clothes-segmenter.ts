@@ -12,6 +12,9 @@ import type { ImageSegmenter } from '@mediapipe/tasks-vision';
 const WASM_BASE_URL = '/mediapipe';
 const MODEL_URL = '/mediapipe/selfie_multiclass_256x256.tflite';
 
+/** The model's own input size: tiles are drawn at it, so MediaPipe neither resizes nor upsamples. */
+const MODEL_INPUT_PX = 256;
+
 /** Model categories (selfie_multiclass_256x256). */
 const CATEGORY = { background: 0, hair: 1, bodySkin: 2, faceSkin: 3, clothes: 4, others: 5 } as const;
 
@@ -25,24 +28,22 @@ export interface PersonMasks {
 
 let segmenterPromise: Promise<ImageSegmenter> | null = null;
 
-/** Start the download early (during the loading screen); one model per page. */
+/**
+ * Start the download early (during the loading screen); one model per page.
+ * CPU, not GPU: the GPU delegate's masks are WebGL textures, and reading four
+ * of them back took 2.3-4.1 s per tile (measured), far longer than inference.
+ */
 export function preloadClothesSegmenter(): Promise<ImageSegmenter> {
   if (!segmenterPromise) {
     segmenterPromise = (async () => {
       const { FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision');
       const fileset = await FilesetResolver.forVisionTasks(WASM_BASE_URL);
-      const create = (delegate: 'GPU' | 'CPU') =>
-        ImageSegmenter.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: MODEL_URL, delegate },
-          runningMode: 'IMAGE',
-          outputConfidenceMasks: true,
-          outputCategoryMask: false,
-        });
-      try {
-        return await create('GPU');
-      } catch {
-        return create('CPU');
-      }
+      return ImageSegmenter.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
+        runningMode: 'IMAGE',
+        outputConfidenceMasks: true,
+        outputCategoryMask: false,
+      });
     })();
     segmenterPromise.catch(() => {
       segmenterPromise = null;
@@ -102,8 +103,8 @@ export async function segmentPerson(image: HTMLCanvasElement): Promise<PersonMas
   const tiles = Math.max(1, Math.ceil((height - side) / (side * 0.6)) + 1);
   const step = tiles > 1 ? (height - side) / (tiles - 1) : 0;
   const tile = document.createElement('canvas');
-  tile.width = side;
-  tile.height = side;
+  tile.width = MODEL_INPUT_PX;
+  tile.height = MODEL_INPUT_PX;
   const context = tile.getContext('2d');
   if (!context) {
     throw new Error('No 2D canvas for segmentation.');
@@ -117,8 +118,12 @@ export async function segmentPerson(image: HTMLCanvasElement): Promise<PersonMas
   try {
     for (let t = 0; t < tiles; t += 1) {
       const top = Math.round(t * step);
-      context.clearRect(0, 0, side, side);
-      context.drawImage(image, 0, top, width, side, 0, 0, side, side);
+      if (t > 0) {
+        // One tile per task: the result screen keeps animating between tiles.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      context.clearRect(0, 0, MODEL_INPUT_PX, MODEL_INPUT_PX);
+      context.drawImage(image, 0, top, width, side, 0, 0, MODEL_INPUT_PX, MODEL_INPUT_PX);
       const result = segmenter.segment(tile);
       const masks = result.confidenceMasks ?? [];
       try {
