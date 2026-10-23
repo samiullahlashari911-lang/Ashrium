@@ -29,6 +29,8 @@ MAX_PUSH_M = 0.15
 MAX_PUSH_STEP_M = 0.02
 # A clear panel is pulled in until its nearest point is this far from the skin.
 HUG_M = 0.02
+# Rounds of pushing start triangles out of the body.
+CROSSING_ROUNDS = 6
 # Bottoms: the seat band sits this far below the waist; hands hang beside it in
 # A-pose (> 0.3 m off the midline), the torso stays inside this half-width.
 SEAT_BELOW_WAIST_M = 0.08
@@ -57,10 +59,17 @@ class Body:
         self.faces = faces.reshape(-1, 3)
         self.normals = body_normals(positions, self.faces)
         self.incident = vertex_faces(self.faces, positions.shape[0])
+        try:
+            from scipy.spatial import cKDTree
+
+            # Built once: placement asks for distances ~30 times per drape.
+            self.tree = cKDTree(positions)
+        except ImportError:  # local tests only; the Modal image ships scipy
+            self.tree = None
 
     def distance(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Signed distance (outside > 0) and the closest surface point."""
-        return signed_distance_to_mesh(points, self.positions, self.faces, self.incident)
+        return signed_distance_to_mesh(points, self.positions, self.faces, self.incident, self.tree)
 
     def outward(self, points: np.ndarray, distance: np.ndarray, closest: np.ndarray) -> np.ndarray:
         """Unit direction from the surface out through each point."""
@@ -226,6 +235,52 @@ def orient_panels(
     return welded_out, panel_out, [int(index) for index in np.nonzero(flip)[0]]
 
 
+def clear_crossing_triangles(positions: np.ndarray, triangles: np.ndarray, body: "Body") -> int:
+    """Push out the corners of every triangle that passes through the body; returns how many were moved.
+
+    Welded seams can join two points that are each clear of the skin with an edge
+    that cuts through the back of the armpit. The solver then sews that cloth
+    through the body and it tears (cloth 45-50 mm inside, 2026-10-23). Checks the
+    edge midpoints and centre of each triangle (cloth edges are ~1.5 cm).
+    """
+    # Edge midpoints and the centroid, as barycentric weights.
+    bary = np.array([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5], [0.5, 0.0, 0.5], [1 / 3, 1 / 3, 1 / 3]])
+    # A triangle can only reach the skin if a corner is closer than its longest edge.
+    corner_distance, _ = body.distance(positions)
+    corners = positions[triangles]
+    longest = np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=2).max(axis=1)
+    candidates = np.flatnonzero(corner_distance[triangles].min(axis=1) < longest + CLEAR_M * 0.5)
+    moved = 0
+    for _round in range(CROSSING_ROUNDS):
+        corners = positions[triangles[candidates]]
+        samples = np.einsum("sk,tkd->tsd", bary, corners)
+        distance, closest = body.distance(samples.reshape(-1, 3))
+        distance = distance.reshape(len(candidates), -1)
+        deepest = distance.argmin(axis=1)
+        hits = np.flatnonzero(distance[np.arange(len(candidates)), deepest] < CLEAR_M * 0.5)
+        if hits.size == 0:
+            break
+        crossing = candidates[hits]
+        rows = hits * bary.shape[0] + deepest[hits]
+        depth = distance.reshape(-1)[rows]
+        direction = body.outward(samples.reshape(-1, 3)[rows], depth, closest[rows])
+        push = np.zeros_like(positions)
+        amount = np.zeros(positions.shape[0])
+        for corner in range(3):
+            vertices = triangles[crossing, corner]
+            step = (CLEAR_M - depth)[:, None] * direction
+            better = np.linalg.norm(step, axis=1) > amount[vertices]
+            push[vertices[better]] = step[better]
+            amount[vertices[better]] = np.linalg.norm(step[better], axis=1)
+        positions += push
+        moved += int(crossing.size)
+        # Next round: only triangles that share a vertex with one just moved.
+        touched = np.zeros(positions.shape[0], dtype=bool)
+        touched[np.unique(triangles[crossing])] = True
+        candidates = np.flatnonzero(touched[triangles].any(axis=1))
+    return moved
+
+
 def _anchor_top(
     positions: np.ndarray,
     panel_of_vertex: np.ndarray,
@@ -348,6 +403,7 @@ def arrange_on_body(
         & (welded_triangles[:, 1] != welded_triangles[:, 2])
         & (welded_triangles[:, 2] != welded_triangles[:, 0])
     )
+    crossing = clear_crossing_triangles(welded, welded_triangles[keep], body)
     flattened = relax_flat_triangles(welded, welded_triangles[keep])
     oriented, panel_oriented, flipped = orient_panels(
         welded_triangles[keep],
@@ -373,6 +429,7 @@ def arrange_on_body(
             "lift_m": round(float(lift), 4),
             "panel_push_m": pushes,
             "pushed_after_weld": int(inside.sum()),
+            "crossing_triangles_moved": crossing,
             "welded_vertex_count": welded_count,
             "dropped_triangles": int((~keep).sum()),
             "flipped_panels": [names[index] for index in flipped],

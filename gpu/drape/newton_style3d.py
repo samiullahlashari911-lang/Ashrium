@@ -19,9 +19,12 @@ import numpy as np
 from cuda_gate import exclusive_capture
 
 FPS = 60
-SUBSTEPS = 4
+# 8 substeps and a 40-frame sew: with 4 / 20 the sewing pulled underarm cloth
+# through the body on 3 of 3 outline-fitted male bodies (torn, 45-50 mm inside);
+# with these plus the start-overlap clearing in arrange.py, 10 of 10 bodies passed.
+SUBSTEPS = 8
 ITERATIONS = 10
-SEW_FRAMES = 20
+SEW_FRAMES = 40
 MIN_SETTLE_FRAMES = 45
 MAX_SETTLE_FRAMES = 240
 # Settled when 95% of the cloth moves under 0.2 mm per frame (12 mm/s): a

@@ -14,6 +14,8 @@ export interface TryOnAttempt {
   shown: boolean | null;
   /** Where the drape's time went (server total, the GPU call, the GPU's own stages). */
   ms?: Record<string, number>;
+  /** The GPU's fail-level quality codes when the drape was rejected (e.g. `torn`). */
+  problems?: string[];
 }
 
 /** A job's outcome log stays small: the latest tries only. */
@@ -41,7 +43,14 @@ export async function recordTryOnOutcome(
   jobId: string,
   tenantId: string,
   update:
-    | { kind: 'drape'; sku: string; size: string | null; drape: TryOnDrape; ms?: Record<string, number> }
+    | {
+      kind: 'drape';
+      sku: string;
+      size: string | null;
+      drape: TryOnDrape;
+      ms?: Record<string, number>;
+      problems?: string[];
+    }
     | { kind: 'shown'; sku: string; size: string | null; shown: boolean },
 ): Promise<void> {
   try {
@@ -66,6 +75,7 @@ export async function recordTryOnOutcome(
         drape: update.drape,
         shown: null,
         ...(update.ms ? { ms: update.ms } : {}),
+        ...(update.problems ? { problems: update.problems } : {}),
       });
     } else {
       const open = [...attempts]

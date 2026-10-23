@@ -74,5 +74,51 @@ class QualityTests(unittest.TestCase):
         self.assertIn("slid_down", {p["code"] for p in problems})
 
 
+
+def _sphere(radius: float, rings: int = 24, segments: int = 48) -> tuple[np.ndarray, np.ndarray]:
+    """Closed UV sphere, outward winding."""
+    points = [(0.0, radius, 0.0)]
+    for ring in range(1, rings):
+        theta = np.pi * ring / rings
+        for segment in range(segments):
+            phi = 2 * np.pi * segment / segments
+            points.append((radius * np.sin(theta) * np.cos(phi), radius * np.cos(theta), radius * np.sin(theta) * np.sin(phi)))
+    points.append((0.0, -radius, 0.0))
+    bottom = len(points) - 1
+    ring_start = lambda ring: 1 + (ring - 1) * segments  # noqa: E731
+    faces = []
+    for segment in range(segments):
+        nxt = (segment + 1) % segments
+        faces.append((0, ring_start(1) + nxt, ring_start(1) + segment))
+        faces.append((bottom, ring_start(rings - 1) + segment, ring_start(rings - 1) + nxt))
+    for ring in range(1, rings - 1):
+        for segment in range(segments):
+            nxt = (segment + 1) % segments
+            a, b = ring_start(ring) + segment, ring_start(ring) + nxt
+            c, d = ring_start(ring + 1) + segment, ring_start(ring + 1) + nxt
+            faces += [(a, b, d), (a, d, c)]
+    return np.asarray(points, dtype=np.float64), np.asarray(faces, dtype=np.int64)
+
+
+class StartOverlapTests(unittest.TestCase):
+    def test_a_triangle_cutting_through_the_body_is_pushed_clear(self) -> None:
+        from drape.arrange import CLEAR_M, Body, clear_crossing_triangles
+
+        vertices, faces = _sphere(0.1)
+        body = Body(vertices, faces)
+        # Corners 3 cm outside the sphere, but the triangle's middle passes 4 cm inside it.
+        positions = np.array([[0.13, 0.0, -0.02], [0.13, 0.0, 0.02], [-0.06, 0.13, 0.0], [0.5, 0.5, 0.5]])
+        triangles = np.array([[0, 1, 2]])
+        middle = positions[triangles[0]].mean(axis=0, keepdims=True)
+        self.assertLess(float(body.distance(middle)[0][0]), 0.0)
+
+        moved = clear_crossing_triangles(positions, triangles, body)
+
+        self.assertGreater(moved, 0)
+        middle = positions[triangles[0]].mean(axis=0, keepdims=True)
+        self.assertGreater(float(body.distance(middle)[0][0]), CLEAR_M * 0.4)
+        self.assertTrue(np.allclose(positions[3], [0.5, 0.5, 0.5]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -392,6 +392,7 @@ export async function resolveFitDrape(input: ResolveFitDrapeInput): Promise<FitD
           ? 'cache'
           : result.unavailableReason ?? 'unavailable',
       ms: { ...trace.ms, total: Date.now() - started },
+      ...(trace.problems ? { problems: trace.problems } : {}),
     });
     return result;
   } catch (error) {
@@ -411,6 +412,7 @@ interface DrapeTrace {
   size: string | null;
   startedAt: number;
   ms: Record<string, number>;
+  problems?: string[];
 }
 
 async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace): Promise<FitDrapeResolve> {
@@ -542,6 +544,7 @@ async function resolveFitDrapeFor(input: ResolveFitDrapeInput, trace: DrapeTrace
       // Cloth that only fails by stretching past its fabric cannot close around
       // this body: the size is too small (the size number itself is unchanged).
       const failures = drape.problems.filter((problem) => problem.level === 'fail');
+      trace.problems = failures.map((problem) => problem.code);
       const tooTight = failures.length > 0 && failures.every((problem) => problem.code === 'overstretched');
       return unavailable(MHR_TOPOLOGY_VERSION, null, tooTight ? 'too_small' : 'drape_quality');
     }
