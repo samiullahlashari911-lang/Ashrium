@@ -74,6 +74,19 @@ function drapeReady(entry: DrapeEntry | undefined): entry is FitResolveResponse 
   return typeof entry === 'object' && entry !== null && entry.payloadBase64 !== null;
 }
 
+/** The product photo's garment is taken as the chart's middle size, laid flat: half its chest (a top) or hip (a bottom). */
+function photoWidthCm(garment: StorefrontGarment | null | undefined): number | null {
+  const sizes = garment?.sizeVariants ?? [];
+  if (sizes.length === 0) {
+    return null;
+  }
+  const girths = sizes
+    .map((size) => (garment?.category === 'pant' ? size.hipCm : size.chestCm))
+    .filter((girth) => girth > 0)
+    .sort((a, b) => a - b);
+  return girths.length > 0 ? girths[Math.floor((girths.length - 1) / 2)] / 2 : null;
+}
+
 export function StorefrontViewport({
   garments,
   initialSku,
@@ -401,6 +414,7 @@ export function StorefrontViewport({
         albedoUrl: printQaPassed ? activeGarment?.albedoUrl ?? null : null,
         printQaPassed,
         colorHex: activeGarment ? colourwayHex(activeGarment.name) : null,
+        photoWidthCm: photoWidthCm(activeGarment),
       }
     : null;
 

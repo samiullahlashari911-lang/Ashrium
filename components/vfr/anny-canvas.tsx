@@ -66,6 +66,8 @@ export interface AnnyCanvasGarment {
   printQaPassed?: boolean;
   /** Colour from the colourway name (lib/graphics/colourway.ts); wins over the product photo. */
   colorHex?: string | null;
+  /** The photographed garment's flat width (cm, middle size): sizes its fabric lifted from the photo. */
+  photoWidthCm?: number | null;
 }
 
 export type PaintUnavailableReason = 'not_painted' | 'face_not_found';

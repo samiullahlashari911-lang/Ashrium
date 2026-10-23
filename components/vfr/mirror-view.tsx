@@ -24,6 +24,8 @@ import {
   type PhotoLighting,
 } from '@/lib/graphics/photo-lighting';
 import { closeGarmentGaps, collarGapBand, trimGarmentSpikes } from '@/lib/graphics/garment-gaps';
+import type { GarmentLook, RgbaImage } from '@/lib/graphics/garment-look';
+import { drapeLookAttributes } from '@/lib/graphics/garment-print';
 import { compositeSimPositions, decodeSimDelta, simDeltaFromBase64 } from '@/lib/graphics/meshopt-delta';
 import {
   bodyFramePixels,
@@ -35,6 +37,7 @@ import {
 import { evaluatePrintQaFromImage, type PrintQaResult } from '@/lib/graphics/print-qa';
 import { DEFAULT_EASE_CM, mapRadialClearanceToColor } from '@/lib/graphics/radial-heatmap';
 import { preloadClothesSegmenter, resizeMask, segmentPerson, type PersonMasks } from '@/lib/widget/clothes-segmenter';
+import { productLook } from '@/lib/widget/product-look';
 import type { OnDevicePhoto, OnDevicePhotos } from '@/lib/widget/webp-encode';
 import type { SimDrapeMesh } from '@/types/graphics';
 import { MHR_HULL_GLB_PUBLIC_PATH, MHR_VERTEX_COUNT, type FitParametricVector } from '@/types/hmr';
@@ -76,6 +79,24 @@ const DEFAULT_AMBIENT_SHARE = 0.42;
 
 /** Fallback fabric when the product image gives no colour (print QA off). */
 const NEUTRAL_FABRIC = new THREE.Color().setRGB(0.32, 0.33, 0.36, THREE.SRGBColorSpace);
+/** The photographed garment's flat width when the size chart gives none (cm). */
+const DEFAULT_PHOTO_WIDTH_CM = 52;
+/** The variant's colour replaces the photo's when they differ by more than this (sRGB distance). */
+const RECOLOUR_DISTANCE = 0.12;
+
+/** The product photo's pixels as a WebGL texture (sRGB, decoded to linear by the GPU). */
+function lookTexture(image: RgbaImage, repeat: boolean): THREE.DataTexture {
+  const texture = new THREE.DataTexture(image.data, image.width, image.height, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  texture.wrapT = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 /** Space around the shopper in the cropped photo (fraction of their height). */
 const CROP_MARGIN = 0.08;
 
@@ -506,7 +527,13 @@ attribute float aOcclusion;
 attribute vec2 aPatternUv;
 attribute float aRim;
 attribute vec3 aFormNormal;
+attribute vec2 aPrintUv;
+attribute float aPrintWeight;
+attribute float aSeam;
 varying vec3 vFormNormal;
+varying vec2 vPrintUv;
+varying float vPrintWeight;
+varying float vSeam;
 varying vec3 vNormalView;
 varying vec3 vColor;
 varying float vOcclusion;
@@ -519,6 +546,9 @@ void main() {
   vPatternUv = aPatternUv;
   vRim = aRim;
   vFormNormal = aFormNormal;
+  vPrintUv = aPrintUv;
+  vPrintWeight = aPrintWeight;
+  vSeam = aSeam;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
@@ -535,6 +565,17 @@ uniform float uPhotoLightMix;
 uniform vec2 uResolution;
 uniform vec3 uLightTint;
 uniform float uHeat;
+// The real garment, from its product photo (lib/graphics/garment-look.ts).
+uniform float uUseLook;
+uniform sampler2D uFabric;
+uniform float uFabricScale;
+uniform sampler2D uFront;
+uniform float uFrontMix;
+uniform vec3 uFabricMean;
+uniform vec3 uRecolour;
+varying vec2 vPrintUv;
+varying float vPrintWeight;
+varying float vSeam;
 varying vec3 vNormalView;
 varying vec3 vColor;
 varying float vOcclusion;
@@ -581,10 +622,23 @@ void main() {
   // Jersey: vertical wales ~2 mm apart plus a soft slub, in pattern metres.
   float wales = 0.5 + 0.5 * sin(vPatternUv.x * 3000.0);
   float slub = noise(vPatternUv * 260.0);
-  float knit = 1.0 + ((wales - 0.5) * 0.022 + (slub - 0.5) * 0.06) * (1.0 - uHeat);
+  float knit = 1.0 + ((wales - 0.5) * 0.022 + (slub - 0.5) * 0.06) * (1.0 - uHeat) * (1.0 - uUseLook);
 
+  // The product's own fabric, tiled at its true size along each piece's grain,
+  // its front (print, buttons, pockets) over the front torso, a seam line where
+  // two pieces are sewn, in the colour of the variant chosen.
+  vec3 albedo = vColor;
+  if (uUseLook > 0.5 && uHeat < 0.5) {
+    vec3 fabric = texture2D(uFabric, vPatternUv * uFabricScale).rgb;
+    vec4 front = texture2D(uFront, vPrintUv);
+    vec3 cloth = mix(fabric, front.rgb, uFrontMix * vPrintWeight * front.a);
+    // Across a seam the pattern jumps between pieces: the fabric's own colour, no
+    // darkening (darker seams read as gouges at the armholes in the blind review).
+    cloth = mix(cloth, uFabricMean, clamp(vSeam, 0.0, 1.0) * 0.6);
+    albedo = cloth * uRecolour;
+  }
   // White cloth is never paper white in a photo: keep headroom for the light.
-  vec3 base = clamp(vColor, vec3(0.035), vec3(0.86));
+  vec3 base = clamp(albedo, vec3(0.035), vec3(0.86));
   float edge = pow(1.0 - max(n.z, 0.0), 2.5);
   // Dark cloth catches a soft highlight on its lit folds, or it reads as a hole.
   // Cotton's soft sheen: brightest where the cloth turns away and catches the light.
@@ -616,6 +670,8 @@ export const MirrorView: FC<MirrorViewProps> = ({
   const [view, setView] = useState<MirrorViewName>('front');
   const [body, setBody] = useState<BodyAssets | null>(null);
   const [albedo, setAlbedo] = useState<PrintQaResult | null>(null);
+  /** The real garment's fabric and front, lifted from its product photo on this device. */
+  const [look, setLook] = useState<GarmentLook | null>(null);
   /** Clothes / skin / background masks per view; 'failed' when the segmenter could not run. */
   const [personMasks, setPersonMasks] = useState<Partial<Record<MirrorViewName, PersonMasks | 'failed'>>>({});
   /** The shopper's own clothes could not be taken out cleanly: one tip, never a smeared photo. */
@@ -690,6 +746,23 @@ export const MirrorView: FC<MirrorViewProps> = ({
       cancelled = true;
     };
   }, [garment?.albedoUrl, garment?.printQaPassed]);
+
+  useEffect(() => {
+    const url = garment?.albedoUrl;
+    if (!url || garment?.printQaPassed === false || !albedo?.passed) {
+      setLook(null);
+      return;
+    }
+    let cancelled = false;
+    void productLook(url, garment?.category ?? null, garment?.photoWidthCm ?? DEFAULT_PHOTO_WIDTH_CM).then((lifted) => {
+      if (!cancelled) {
+        setLook(lifted);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [albedo?.passed, garment?.albedoUrl, garment?.category, garment?.photoWidthCm, garment?.printQaPassed]);
 
   // Fit line from the drape's clearance (never changes the size).
   useEffect(() => {
@@ -900,14 +973,46 @@ export const MirrorView: FC<MirrorViewProps> = ({
           colours[i * 3 + 2] = linear.b;
         }
       }
+      // The real garment from its product photo: where its front goes, and its seams.
+      const patternUv = drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2);
+      const lookAttributes = look && !showClearanceHeatmap
+        ? drapeLookAttributes({
+          draped,
+          uv: patternUv,
+          indices: drape.indices,
+          vertexCount: count,
+          bodyPositions: body.positions,
+          bodyNormals: body.normals,
+          bodyParts: body.parts,
+          category: garment?.category ?? null,
+          frontRows: look.frontRows,
+          frontWidth: look.front?.width ?? 0,
+          frontHeight: look.front?.height ?? 0,
+        })
+        : null;
+      const fabricTexture = look && lookAttributes ? lookTexture(look.fabric, true) : null;
+      const frontTexture = look?.front && lookAttributes ? lookTexture(look.front, false) : null;
+      const lookMean = new THREE.Color().setRGB(...(look?.meanRgb ?? [0.5, 0.5, 0.5]), THREE.SRGBColorSpace);
+      // The photo shows one colourway; the variant chosen keeps the fabric and takes its own colour.
+      const variant = garment?.colorHex ? new THREE.Color(garment.colorHex) : null;
+      const variantSrgb = variant?.clone().convertLinearToSRGB();
+      const recolour = variant && variantSrgb && look
+        && Math.hypot(variantSrgb.r - look.meanRgb[0], variantSrgb.g - look.meanRgb[1], variantSrgb.b - look.meanRgb[2]) > RECOLOUR_DISTANCE
+        ? new THREE.Vector3(
+          Math.min(6, variant.r / Math.max(lookMean.r, 0.02)),
+          Math.min(6, variant.g / Math.max(lookMean.g, 0.02)),
+          Math.min(6, variant.b / Math.max(lookMean.b, 0.02)),
+        )
+        : new THREE.Vector3(1, 1, 1);
+
       const garmentGeometry = new THREE.BufferGeometry();
       garmentGeometry.setAttribute('aOcclusion', new THREE.BufferAttribute(occlusion, 1));
       garmentGeometry.setAttribute('aRim', new THREE.BufferAttribute(rim, 1));
       garmentGeometry.setAttribute('aFormNormal', new THREE.BufferAttribute(formView, 3));
-      garmentGeometry.setAttribute(
-        'aPatternUv',
-        new THREE.BufferAttribute(drape.uv.length === count * 2 ? drape.uv : new Float32Array(count * 2), 2),
-      );
+      garmentGeometry.setAttribute('aPatternUv', new THREE.BufferAttribute(patternUv, 2));
+      garmentGeometry.setAttribute('aPrintUv', new THREE.BufferAttribute(lookAttributes?.printUv ?? new Float32Array(count * 2), 2));
+      garmentGeometry.setAttribute('aPrintWeight', new THREE.BufferAttribute(lookAttributes?.printWeight ?? new Float32Array(count), 1));
+      garmentGeometry.setAttribute('aSeam', new THREE.BufferAttribute(lookAttributes?.seam ?? new Float32Array(count), 1));
       garmentGeometry.setAttribute('position', new THREE.BufferAttribute(garmentPositions, 3));
       garmentGeometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       garmentGeometry.setAttribute('aColor', new THREE.BufferAttribute(colours, 3));
@@ -927,6 +1032,13 @@ export const MirrorView: FC<MirrorViewProps> = ({
           uLightTint: { value: new THREE.Vector3(...lightTint) },
           uExposure: { value: photoExposure(frame, crop) },
           uHeat: { value: showClearanceHeatmap ? 1 : 0 },
+          uUseLook: { value: fabricTexture ? 1 : 0 },
+          uFabric: { value: fabricTexture },
+          uFabricScale: { value: look ? 1 / Math.max(look.fabricMetres, 0.01) : 1 },
+          uFront: { value: frontTexture ?? fabricTexture },
+          uFrontMix: { value: frontTexture ? 1 : 0 },
+          uFabricMean: { value: new THREE.Vector3(lookMean.r, lookMean.g, lookMean.b) },
+          uRecolour: { value: recolour },
         },
         vertexShader: GARMENT_VERTEX,
         fragmentShader: GARMENT_FRAGMENT,
@@ -1055,6 +1167,8 @@ export const MirrorView: FC<MirrorViewProps> = ({
       garmentGeometry.dispose();
       garmentMaterial.dispose();
       shadingTexture?.dispose();
+      fabricTexture?.dispose();
+      frontTexture?.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
     } catch (error) {
@@ -1063,7 +1177,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
       renderer?.forceContextLoss();
       callbacks.current.onGarmentShown?.(false);
     }
-  }, [albedo, body, drape, garment?.category, garment?.colorHex, garment?.easeCm, masks, photoUv, photos, showClearanceHeatmap, view]);
+  }, [albedo, body, drape, garment?.category, garment?.colorHex, garment?.easeCm, look, masks, photoUv, photos, showClearanceHeatmap, view]);
 
   const hasSide = Boolean(photos?.side && photoUv);
 
