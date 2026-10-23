@@ -246,3 +246,22 @@ export function sideCameraSign(bodyPositions: Float32Array, sideWeight: ArrayLik
 export function viewDepth(view: MirrorView, sideSign: 1 | -1, x: number, z: number): number {
   return view === 'front' ? z : sideSign * x;
 }
+
+/**
+ * The body triangles the photo saw (any corner with a visibility weight above
+ * 0). Depth is the canonical pose's, not the photo's: on the side photo's raised
+ * arm, the arm's unseen far side ranks in front of the sleeve the camera does
+ * see and cut it out to a rim (2026-10-23). Unseen body never hides the garment.
+ */
+export function seenTriangles(triangles: Uint32Array, weight: ArrayLike<number>): Uint32Array {
+  const kept: number[] = [];
+  for (let t = 0; t < triangles.length; t += 3) {
+    const a = triangles[t];
+    const b = triangles[t + 1];
+    const c = triangles[t + 2];
+    if (weight[a] > 0 || weight[b] > 0 || weight[c] > 0) {
+      kept.push(a, b, c);
+    }
+  }
+  return Uint32Array.from(kept);
+}

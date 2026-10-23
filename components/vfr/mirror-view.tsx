@@ -30,6 +30,7 @@ import { compositeSimPositions, decodeSimDelta, simDeltaFromBase64 } from '@/lib
 import {
   bodyFramePixels,
   createPatchProjector,
+  seenTriangles,
   sideCameraSign,
   viewDepth,
   type MirrorView as MirrorViewName,
@@ -872,8 +873,8 @@ export const MirrorView: FC<MirrorViewProps> = ({
       const camera = new THREE.OrthographicCamera(crop.x, crop.x + crop.w, -crop.y, -(crop.y + crop.h), -10, 10);
       const scene = new THREE.Scene();
 
-      // The fitted body, depth only: it hides the garment's far side (the back
-      // of the collar behind the neck, the sleeve behind the arm).
+      // The fitted body the photo saw, depth only: it hides the garment's far
+      // side (the back of the collar behind the neck, the sleeve behind the arm).
       const bodyCount = body.positions.length / 3;
       const occluderPositions = new Float32Array(bodyCount * 3);
       for (let i = 0; i < bodyCount; i += 1) {
@@ -883,7 +884,10 @@ export const MirrorView: FC<MirrorViewProps> = ({
       }
       const occluderGeometry = new THREE.BufferGeometry();
       occluderGeometry.setAttribute('position', new THREE.BufferAttribute(occluderPositions, 3));
-      occluderGeometry.setIndex(new THREE.BufferAttribute(body.triangles, 1));
+      occluderGeometry.setIndex(new THREE.BufferAttribute(
+        seenTriangles(body.triangles, view === 'front' ? photoUv.front_weight : photoUv.side_weight),
+        1,
+      ));
       const occluderMaterial = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
       const occluder = new THREE.Mesh(occluderGeometry, occluderMaterial);
       occluder.renderOrder = -1;

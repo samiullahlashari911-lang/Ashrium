@@ -4,9 +4,17 @@ import { test } from 'node:test';
 import {
   bodyFramePixels,
   createPatchProjector,
+  seenTriangles,
   sideCameraSign,
   viewDepth,
 } from '@/lib/graphics/mirror-projection';
+
+test('body the photo never saw does not hide the garment (the raised arm cut the sleeve to a rim)', () => {
+  // Triangle 0 the camera saw at one corner, triangle 1 not at all (the arm's far side).
+  const triangles = new Uint32Array([0, 1, 2, 3, 4, 5]);
+  const weight = [0, 180, 0, 0, 0, 0];
+  assert.deepEqual(Array.from(seenTriangles(triangles, weight)), [0, 1, 2]);
+});
 
 function slab(): Float32Array {
   // A 40 x 160 x 20 cm block of "body" vertices, 2 cm apart.
