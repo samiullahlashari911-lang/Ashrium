@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 
-import { CaptureVoice, pickEnglishVoice } from '@/lib/widget/capture-voice';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { CaptureVoice, captureModeSpeaks, pickEnglishVoice } from '@/lib/widget/capture-voice';
 
 interface FakeUtterance {
   text: string;
@@ -104,4 +107,27 @@ test('an interrupting line is spoken a tick after cancel, and a routine repeat n
   assert.deepEqual(speech.spoken, ['Step back'], 'speaking in the same tick as cancel is dropped by Chrome');
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual(speech.spoken, ['Step back', 'Hold still']);
+});
+
+test('with someone helping, the capture stays silent: no intro, cues, results or priming', () => {
+  assert.equal(captureModeSpeaks('alone'), true);
+  assert.equal(captureModeSpeaks('helper'), false);
+
+  const speech = installSpeech();
+  const voice = new CaptureVoice();
+  voice.muted = !captureModeSpeaks('helper');
+  voice.intro('Front photo. Step back.');
+  voice.say('Step back', true);
+  voice.announce('Got it');
+  assert.deepEqual(speech.spoken, []);
+
+  const source = (file: string): string =>
+    readFileSync(path.join(process.cwd(), 'components/widget/guided-capture', file), 'utf8');
+  const viewport = source('capture-viewport.tsx');
+  assert.match(viewport, /const isMuted = !voiceGuidance \|\| readVoiceMuted\(\);/);
+  // No mute control when the voice is off for the whole capture.
+  assert.match(viewport, /setVoiceAvailable\(voiceGuidance && captureVoiceSupported\(\)\)/);
+  const capture = source('guided-capture.tsx');
+  assert.match(capture, /if \(captureModeSpeaks\(values\.captureMode\)\) \{\s+primeCaptureVoice\(\);/);
+  assert.match(capture, /voiceGuidance=\{captureModeSpeaks\(intake\.captureMode\)\}/);
 });

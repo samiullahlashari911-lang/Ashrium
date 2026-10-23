@@ -25,6 +25,7 @@ import {
   isConsentContinueEnabled,
   type ConsentContinueState,
 } from '@/lib/widget/consent-gate';
+import type { CaptureMode } from '@/lib/widget/capture-voice';
 import { HEIGHT_CM_DEFAULT, clampHeightCm } from '@/lib/widget/height-units';
 import { WEIGHT_KG_DEFAULT, clampWeightKg } from '@/lib/widget/weight-units';
 import type { CaptureSex } from '@/types/hmr';
@@ -33,6 +34,8 @@ export interface CaptureIntakeValues {
   heightCm: number;
   sex: CaptureSex;
   weightKg: number | null;
+  /** Alone keeps the spoken guidance; with a helper the capture is silent. */
+  captureMode: CaptureMode;
 }
 
 interface CaptureIntakeProps {
@@ -46,15 +49,34 @@ interface CaptureIntakeProps {
   showLookNotice?: boolean;
   /** This item has no 3D yet: the shopper learns before the photos that they get a size only. */
   sizeOnly?: boolean;
+  /** Ask who takes the photos (alone = voice on, helper = voice off). Off for gallery debug. */
+  askCaptureMode?: boolean;
 }
 
-/** Consent, then one "About you" page (height, body profile, optional weight): fewer taps before the camera. */
-type IntakePage = 'consent' | 'body';
+/** Consent, one "About you" page (height, body profile, optional weight), then who takes the photos. */
+type IntakePage = 'consent' | 'body' | 'mode';
 
 const SEX_OPTIONS: ReadonlyArray<{ value: CaptureSex; label: string }> = [
   { value: 'female', label: 'Female' },
   { value: 'male', label: 'Male' },
   { value: 'unspecified', label: 'Prefer not to say' },
+];
+
+const CAPTURE_MODE_OPTIONS: ReadonlyArray<{ value: CaptureMode; title: string; body: string; icon: string }> = [
+  {
+    value: 'alone',
+    title: 'By myself',
+    body: 'Prop your phone up and step back. We’ll say each step out loud.',
+    // a person beside a phone propped on a stand, sound waves
+    icon: 'M7 5.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4M7 7.5v7M4 10l3-2 3 2M5 22l2-7.5 2 7.5M15 6.5h4.5v9H15zM16.5 15.5l-1.5 6.5M18 15.5l1.5 6.5M14.5 3.5a3 3 0 0 1 5.5 0',
+  },
+  {
+    value: 'helper',
+    title: 'Someone is helping me',
+    body: 'They hold the phone and follow the screen. Voice guidance stays off.',
+    // two people side by side
+    icon: 'M8 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5M16.5 8.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4M3.5 21v-6a4.5 4.5 0 0 1 9 0v6M13.5 21v-4.5a3 3 0 0 1 6 0V21',
+  },
 ];
 
 const BULLET_ICONS: ReadonlyArray<string> = [
@@ -140,6 +162,7 @@ export function CaptureIntake({
   showStep = true,
   showLookNotice = false,
   sizeOnly = false,
+  askCaptureMode = true,
 }: CaptureIntakeProps): React.JSX.Element {
   const [page, setPage] = useState<IntakePage>('consent');
   const [heightCm, setHeightCm] = useState(HEIGHT_CM_DEFAULT);
@@ -148,6 +171,7 @@ export function CaptureIntake({
   const [showSexWhy, setShowSexWhy] = useState(false);
   const [weightKg, setWeightKg] = useState(WEIGHT_KG_DEFAULT);
   const [weightOpen, setWeightOpen] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode | null>(null);
   const [ageAttested, setAgeAttested] = useState(false);
   const [consent, setConsent] = useState(false);
   const [under16, setUnder16] = useState(false);
@@ -171,11 +195,22 @@ export function CaptureIntake({
       return;
     }
 
+    if (askCaptureMode && page === 'body') {
+      setError(null);
+      setPage('mode');
+      return;
+    }
+    if (askCaptureMode && captureMode === null) {
+      setError('Choose how you’re taking the photos.');
+      return;
+    }
+
     setError(null);
     onSubmit({
       heightCm: clampHeightCm(heightCm),
       sex,
       weightKg: weightOpen ? clampWeightKg(weightKg) : null,
+      captureMode: captureMode ?? 'alone',
     });
   };
 
@@ -195,7 +230,7 @@ export function CaptureIntake({
 
   const goBack = (): void => {
     setError(null);
-    setPage('consent');
+    setPage(page === 'mode' ? 'body' : 'consent');
   };
 
   if (illinoisBlocked || under16) {
@@ -218,7 +253,8 @@ export function CaptureIntake({
     );
   }
 
-  const ctaReady = page === 'consent' ? consentReady : heightTouched && sex !== null;
+  const ctaReady =
+    page === 'consent' ? consentReady : page === 'mode' ? captureMode !== null : heightTouched && sex !== null;
 
   return (
     <div className="mx-auto flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col text-ash-ink">
@@ -388,6 +424,63 @@ export function CaptureIntake({
           </>
         ) : null}
 
+        {page === 'mode' ? (
+          <>
+            <PageTitle title="Who’s taking the photos?">
+              <p className="text-sm leading-relaxed text-ash-muted">
+                Two photos, front and side. Pick what fits, so we guide you the right way.
+              </p>
+            </PageTitle>
+            <div role="radiogroup" aria-label="Who’s taking the photos" className="flex flex-col gap-3">
+              {CAPTURE_MODE_OPTIONS.map((option) => {
+                const selected = captureMode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => {
+                      setCaptureMode(option.value);
+                      setError(null);
+                    }}
+                    className={[
+                      'flex min-h-[104px] w-full items-center gap-4 rounded-3xl border p-4 text-left transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ash-accent/40',
+                      selected
+                        ? 'border-ash-accent bg-ash-accent-soft shadow-card'
+                        : 'border-ash-line bg-ash-surface hover:border-ash-subtle',
+                    ].join(' ')}
+                  >
+                    <span
+                      className={[
+                        'flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl transition-colors',
+                        selected ? 'bg-ash-accent text-white' : 'bg-ash-accent-soft text-ash-accent',
+                      ].join(' ')}
+                    >
+                      <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
+                        <path d={option.icon} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="text-[17px] font-semibold leading-snug text-ash-ink">{option.title}</span>
+                      <span className="text-[13px] leading-relaxed text-ash-muted">{option.body}</span>
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className={[
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
+                        selected ? 'border-ash-accent bg-ash-accent' : 'border-ash-subtle bg-ash-surface',
+                      ].join(' ')}
+                    >
+                      {selected ? <span className="h-2 w-2 rounded-full bg-white" /> : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
+
         {error ? <p role="alert" className="text-sm text-ash-tension">{error}</p> : null}
       </div>
 
@@ -432,7 +525,11 @@ export function CaptureIntake({
             </button>
           ) : (
             <p className="w-full py-4 text-center text-sm text-ash-subtle">
-              {heightTouched ? 'Pick a body profile to continue' : 'Scroll to your height to continue'}
+              {page === 'mode'
+                ? 'Choose one to continue'
+                : heightTouched
+                  ? 'Pick a body profile to continue'
+                  : 'Scroll to your height to continue'}
             </p>
           )}
         </div>

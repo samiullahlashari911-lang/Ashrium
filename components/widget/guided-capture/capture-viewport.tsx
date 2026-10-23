@@ -108,6 +108,8 @@ interface CaptureViewportProps {
   keepOnDeviceLook?: boolean;
   onBack: () => void;
   allowGallery?: boolean;
+  /** Spoken guidance for a shopper alone; off (and no mute control) when someone holds the phone. */
+  voiceGuidance?: boolean;
   flowStep: Extract<CaptureFlowStep, 'front' | 'side'>;
 }
 
@@ -179,6 +181,7 @@ export function CaptureViewport({
   allowGallery = false,
   flowStep,
   keepOnDeviceLook = false,
+  voiceGuidance = true,
 }: CaptureViewportProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -234,13 +237,13 @@ export function CaptureViewport({
   }, []);
 
   useEffect(() => {
-    const isMuted = readVoiceMuted();
+    const isMuted = !voiceGuidance || readVoiceMuted();
     voiceRef.current.muted = isMuted;
     setMuted(isMuted);
-    setVoiceAvailable(captureVoiceSupported());
+    setVoiceAvailable(voiceGuidance && captureVoiceSupported());
     const voice = voiceRef.current;
     return () => voice.stop();
-  }, []);
+  }, [voiceGuidance]);
 
   const toggleMuted = (): void => {
     const next = !muted;

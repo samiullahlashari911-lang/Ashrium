@@ -31,11 +31,12 @@ const overlaySource = readFileSync(
   'utf8',
 );
 
-test('progress line counts five steps after consent and fills on each Next', () => {
+test('progress line counts four steps after consent and fills on each Next', () => {
   assert.equal(captureFlowProgress('consent').current, 0);
   assert.equal(captureFlowProgress('consent').fraction, 0);
-  assert.equal(captureFlowProgress('body').statusLine, 'Step 1 of 3 · About you');
-  assert.match(captureFlowProgress('front').statusLine, /Step 2 of 3/);
+  assert.equal(captureFlowProgress('body').statusLine, 'Step 1 of 4 · About you');
+  assert.equal(captureFlowProgress('mode').statusLine, 'Step 2 of 4 · Photo setup');
+  assert.match(captureFlowProgress('front').statusLine, /Step 3 of 4/);
   assert.equal(captureFlowProgress('side').fraction, 1);
 });
 
@@ -58,6 +59,17 @@ test('intake is consent, then one page: height wheel, body profile, optional wei
   assert.match(intakeSource, /weightOpen \? clampWeightKg\(weightKg\) : null/, 'weight can be skipped');
   assert.match(intakeSource, /CaptureFlowMeter/);
   assert.match(intakeSource, /onConsentPassed/);
+});
+
+test('after About you the shopper picks who takes the photos, before the camera', () => {
+  assert.match(intakeSource, /setPage\('mode'\)/);
+  assert.match(intakeSource, /title: 'By myself'/);
+  assert.match(intakeSource, /title: 'Someone is helping me'/);
+  assert.match(intakeSource, /role="radiogroup" aria-label="Who’s taking the photos"/);
+  assert.match(intakeSource, /min-h-\[104px\]/, 'large tap targets');
+  assert.match(intakeSource, /captureMode: captureMode \?\? 'alone'/);
+  assert.match(intakeSource, /page === 'mode' \? captureMode !== null/, 'Next waits for a choice');
+  assert.match(intakeSource, /setPage\(page === 'mode' \? 'body' : 'consent'\)/, 'Back returns to About you');
 });
 
 test('weight wheel stores kilograms for both units', () => {

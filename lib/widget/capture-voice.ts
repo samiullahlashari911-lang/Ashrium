@@ -10,6 +10,14 @@
  * after a first utterance inside a tap, and plays it quietly unless a media
  * element was started in that tap (`primeCaptureVoice`).
  */
+/** Who takes the photos: alone, the phone propped up (spoken guidance), or a helper holding it (silent). */
+export type CaptureMode = 'alone' | 'helper';
+
+/** Only a shopper alone needs the voice: a helper holding the phone reads the screen. */
+export function captureModeSpeaks(mode: CaptureMode): boolean {
+  return mode === 'alone';
+}
+
 const MUTE_KEY = 'ashrium.capture.voiceMuted';
 /** An unresolved instruction is repeated this often. */
 const REPEAT_MS = 10000;

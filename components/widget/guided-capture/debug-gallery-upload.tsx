@@ -107,6 +107,7 @@ export function DebugGalleryUpload({ tenantId }: DebugGalleryUploadProps): React
           heading="Debug measurements"
           submitLabel="Continue to gallery files"
           showStep={false}
+          askCaptureMode={false}
           onSubmit={setIntake}
         />
       ) : (

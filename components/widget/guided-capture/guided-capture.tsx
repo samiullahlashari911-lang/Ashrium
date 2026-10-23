@@ -11,7 +11,7 @@ import {
   SHOPPER_GPU_TIMEOUT_MESSAGE,
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
-import { primeCaptureVoice } from '@/lib/widget/capture-voice';
+import { captureModeSpeaks, primeCaptureVoice } from '@/lib/widget/capture-voice';
 import { preloadClothesSegmenter } from '@/lib/widget/clothes-segmenter';
 import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
 import {
@@ -425,7 +425,9 @@ export function GuidedCapture({
           onConsentPassed={() => setGpuArmed(true)}
           onSubmit={(values) => {
             // Inside the tap: phones only speak after a first utterance in a gesture.
-            primeCaptureVoice();
+            if (captureModeSpeaks(values.captureMode)) {
+              primeCaptureVoice();
+            }
             setIntake(values);
             setStep('front');
           }}
@@ -446,6 +448,7 @@ export function GuidedCapture({
           pose={pose}
           allowGallery={allowGallery}
           keepOnDeviceLook={keepOnDeviceLook}
+          voiceGuidance={captureModeSpeaks(intake.captureMode)}
           flowStep={step}
           onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
           onBack={() => {
