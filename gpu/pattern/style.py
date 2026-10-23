@@ -70,7 +70,11 @@ def parse_style(category: str, product_text: str) -> dict[str, Any]:
     reason = detect_unsupported(category, product_text)
     text = _corpus(product_text)
     sleeveless = bool(_SLEEVELESS.search(text))
-    sleeve_length = 0.3
+    # Fraction of (arm length - armhole) for the sleeve tube. 0.3 ended the
+    # crewneck's sleeve at 87% of the shopper's upper arm (near the elbow) once
+    # the dropped shoulder and cap were added; 0.15 ends it mid-bicep, like a
+    # real tee. Below ~0.12 GarmentCode's 5 cm minimum takes over.
+    sleeve_length = 0.15
     if sleeveless:
         sleeve_length = 0.1
     elif _LONG_SLEEVE.search(text) or _PULLOVER.search(text) or category == "outerwear":
