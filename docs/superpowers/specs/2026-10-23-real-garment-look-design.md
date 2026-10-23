@@ -33,6 +33,9 @@ used for that mean colour.
    (front width ≈ chest / 2).
 3. **Front print map:** the de-lit garment region with an alpha where the
    garment is seen (hands/bags/hair = 0), plus per-row left/right edges.
+   **Product shots only** (2026-10-23, owner's try-on): on a model photo a
+   necklace, hair and deep folds pass as prints (a gold chain landed on the
+   shopper's chest), so a model photo gives fabric and colour, no front.
 4. **Mirror shader:** fabric tiled in pattern space (grain follows each
    piece); front-facing torso vertices of the draped garment get print
    coordinates by matching the drape's front silhouette rows to the photo's

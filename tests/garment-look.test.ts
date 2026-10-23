@@ -76,6 +76,24 @@ test('a product shot without a person is found against its backdrop', () => {
   assert.equal(region[5 * W + 5], 0);
 });
 
+test('details come from a product shot, never from a model photo', () => {
+  // The tee alone (no hand, no trousers), worn by a model or shot on the backdrop.
+  const { image, clothes } = photo();
+  const data = new Uint8ClampedArray(image.data);
+  for (let i = 0; i < W * H; i += 1) {
+    const y = Math.floor(i / W);
+    const colour = y >= 50 ? WALL : data[i * 4] === SKIN[0] && data[i * 4 + 1] === SKIN[1] ? PINK : null;
+    if (colour) {
+      data.set(colour, i * 4);
+      clothes[i] = y >= 50 ? 0 : 1;
+    }
+  }
+  const tee = { width: W, height: H, data };
+  // On a model, a necklace or hair over the tee would pass as a print.
+  assert.equal(extractGarmentLook(tee, clothes, 'tee', 50)?.front, null);
+  assert.ok(extractGarmentLook(tee, new Float32Array(W * H), 'tee', 50)?.front, 'a product shot keeps its front details');
+});
+
 test('the fabric tile wraps seamlessly and keeps the knit', () => {
   const size = 16;
   const delit = new Float32Array(W * H * 3);

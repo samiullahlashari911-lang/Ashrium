@@ -110,6 +110,8 @@ interface CaptureViewportProps {
   allowGallery?: boolean;
   /** Spoken guidance for a shopper alone; off (and no mute control) when someone holds the phone. */
   voiceGuidance?: boolean;
+  /** Someone else holds the phone: the back camera, shown as is (not mirrored like a selfie). */
+  rearCamera?: boolean;
   flowStep: Extract<CaptureFlowStep, 'front' | 'side'>;
 }
 
@@ -137,7 +139,7 @@ function stopStream(stream: MediaStream | null): void {
 }
 
 /** The shopper checks the photo (head included, on this device only) before it is used. */
-function ReviewPhoto({ pending, view }: { pending: PendingCapture; view: CaptureView }): React.JSX.Element {
+function ReviewPhoto({ pending, view, mirrored }: { pending: PendingCapture; view: CaptureView; mirrored: boolean }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frame = pending.photo?.frame ?? null;
 
@@ -160,7 +162,7 @@ function ReviewPhoto({ pending, view }: { pending: PendingCapture; view: Capture
       ref={canvasRef}
       role="img"
       aria-label={`Your ${view} photo`}
-      className="absolute inset-0 h-full w-full -scale-x-100 object-contain"
+      className={`absolute inset-0 h-full w-full object-contain ${mirrored ? '-scale-x-100' : ''}`}
     />
   ) : (
     <div
@@ -182,7 +184,9 @@ export function CaptureViewport({
   flowStep,
   keepOnDeviceLook = false,
   voiceGuidance = true,
+  rearCamera = false,
 }: CaptureViewportProps): React.JSX.Element {
+  const mirrored = !rearCamera;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -370,7 +374,7 @@ export function CaptureViewport({
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
-            facingMode: { ideal: 'user' },
+            facingMode: { ideal: rearCamera ? 'environment' : 'user' },
             // The try-on is drawn on this frame; pose runs on a small copy.
             width: { ideal: 1920 },
             height: { ideal: 1440 },
@@ -408,7 +412,7 @@ export function CaptureViewport({
       stopStream(streamRef.current);
       streamRef.current = null;
     };
-  }, [allowGallery, pending, source]);
+  }, [allowGallery, pending, rearCamera, source]);
 
   useEffect(() => {
     let frameId = 0;
@@ -489,7 +493,7 @@ export function CaptureViewport({
             videoHeight: video.videoHeight,
             viewWidth: box.width,
             viewHeight: box.height,
-            mirrored: true,
+            mirrored,
           },
           outline: outlineFrameRef.current ?? undefined,
           motion,
@@ -499,7 +503,7 @@ export function CaptureViewport({
           const facing = sideFacingRawRight(smoothed);
           // Raw-right is screen-left on the mirrored preview; the outline faces screen-right.
           if (facing !== null) {
-            setSideGuideMirrored(facing);
+            setSideGuideMirrored(mirrored ? facing : !facing);
           }
         }
       } else {
@@ -603,7 +607,7 @@ export function CaptureViewport({
     }
 
     return () => cancelAnimationFrame(frameId);
-  }, [fallBackToLite, keepOnDeviceLook, landmarkerRef, model, pending, ready, resetHold, view, viewportActive]);
+  }, [fallBackToLite, keepOnDeviceLook, landmarkerRef, mirrored, model, pending, ready, resetHold, view, viewportActive]);
 
   const title = view === 'front' ? 'Front photo' : 'Side photo';
   const hint =
@@ -731,7 +735,7 @@ export function CaptureViewport({
         className="relative mx-4 mb-2 mt-4 min-h-[240px] flex-1 overflow-hidden rounded-[28px] bg-[#17151C] shadow-lift"
       >
         {pending ? (
-          <ReviewPhoto pending={pending} view={view} />
+          <ReviewPhoto pending={pending} view={view} mirrored={mirrored} />
         ) : (
           <>
             <video
@@ -739,9 +743,10 @@ export function CaptureViewport({
               playsInline
               muted
               className={[
-                // Mirrored like a selfie so stepping left moves left on screen.
+                // Front camera: mirrored like a selfie so stepping left moves left on screen.
                 // Display only: capture and pose use the raw camera frame.
-                'absolute inset-0 h-full w-full -scale-x-100 object-cover',
+                'absolute inset-0 h-full w-full object-cover',
+                mirrored ? '-scale-x-100' : '',
                 source === 'gallery' ? 'invisible' : '',
               ].join(' ')}
             />

@@ -449,6 +449,7 @@ export function GuidedCapture({
           allowGallery={allowGallery}
           keepOnDeviceLook={keepOnDeviceLook}
           voiceGuidance={captureModeSpeaks(intake.captureMode)}
+          rearCamera={intake.captureMode === 'helper'}
           flowStep={step}
           onCaptured={step === 'front' ? handleFrontCaptured : handleSideCaptured}
           onBack={() => {

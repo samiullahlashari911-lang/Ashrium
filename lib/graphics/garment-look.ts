@@ -189,6 +189,8 @@ export interface GarmentRegion {
   /** Pixels where the photo really shows the garment (no hands, bags, hair). */
   seen: Uint8Array;
   seedRgb: [number, number, number];
+  /** No one wears it: the segmenter saw no clothes, so the backdrop gave the outline. */
+  productShot: boolean;
 }
 
 /**
@@ -240,7 +242,7 @@ export function findGarment(image: RgbaImage, clothes: Float32Array | null, cate
   }
   const seed = new Uint8Array(n);
   if (bottom < 0) {
-    return { region: seed, seen: seed, seedRgb: [0.5, 0.5, 0.5] };
+    return { region: seed, seen: seed, seedRgb: [0.5, 0.5, 0.5], productShot };
   }
   const span = Math.max(1, bottom - top);
   const rowColour: Array<[number, number, number] | null> = [];
@@ -335,7 +337,7 @@ export function findGarment(image: RgbaImage, clothes: Float32Array | null, cate
     // (a print is clothes; a hand or a bag is not). A product shot shows all of it.
     seen[i] = region[i] && (productShot || candidates[i]) ? 1 : 0;
   }
-  return { region, seen, seedRgb: [seedRgb[0] / 255, seedRgb[1] / 255, seedRgb[2] / 255] };
+  return { region, seen, seedRgb: [seedRgb[0] / 255, seedRgb[1] / 255, seedRgb[2] / 255], productShot };
 }
 
 /** Light removed: each pixel divided by the garment's smooth shading around it, times the garment's median brightness. */
@@ -631,7 +633,7 @@ export function extractGarmentLook(
   garmentWidthCm: number,
 ): GarmentLook | null {
   const { width, height } = image;
-  const { region, seen, seedRgb } = findGarment(image, clothes, category);
+  const { region, seen, seedRgb, productShot } = findGarment(image, clothes, category);
   let area = 0;
   for (let i = 0; i < seen.length; i += 1) {
     area += seen[i];
@@ -651,7 +653,10 @@ export function extractGarmentLook(
     return null;
   }
   const metresPerPx = garmentWidthCm / 100 / garmentPx;
-  const usable = frontUsable(region, seen, mapped.front, width, category);
+  // On a model, her necklace, hair and the photo's deep folds pass as prints
+  // (owner's try-on, 2026-10-23: a gold chain on the shopper's chest), so the
+  // details come only from a product shot; a model photo gives fabric and colour.
+  const usable = clothes !== null && productShot && frontUsable(region, seen, mapped.front, width, category);
   if (usable) {
     keepDetails(mapped.front, garmentPx);
   }
