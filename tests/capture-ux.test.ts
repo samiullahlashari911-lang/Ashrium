@@ -34,10 +34,8 @@ const overlaySource = readFileSync(
 test('progress line counts five steps after consent and fills on each Next', () => {
   assert.equal(captureFlowProgress('consent').current, 0);
   assert.equal(captureFlowProgress('consent').fraction, 0);
-  assert.equal(captureFlowProgress('height').statusLine, 'Step 1 of 5 · Height');
-  assert.equal(captureFlowProgress('sex').current, 2);
-  assert.equal(captureFlowProgress('weight').current, 3);
-  assert.match(captureFlowProgress('front').statusLine, /Step 4 of 5/);
+  assert.equal(captureFlowProgress('body').statusLine, 'Step 1 of 3 · About you');
+  assert.match(captureFlowProgress('front').statusLine, /Step 2 of 3/);
   assert.equal(captureFlowProgress('side').fraction, 1);
 });
 
@@ -51,14 +49,13 @@ test('height dial covers centimetres and feet-inches around the default', () => 
   assert.ok(heightDialValues('ft_in').includes(170));
 });
 
-test('intake walks consent, height wheel, body profile, optional weight wheel', () => {
+test('intake is consent, then one page: height wheel, body profile, optional weight wheel', () => {
   assert.match(intakeSource, /HeightDial/);
   assert.match(intakeSource, /WeightDial/);
-  assert.match(intakeSource, /setPage\('sex'\)/);
-  assert.match(intakeSource, /setPage\('weight'\)/);
+  assert.match(intakeSource, /setPage\('body'\)/);
   assert.match(intakeSource, /Prefer not to say/);
   assert.match(intakeSource, /Why we ask/);
-  assert.match(intakeSource, /finish\(false\)/, 'weight can be skipped');
+  assert.match(intakeSource, /weightOpen \? clampWeightKg\(weightKg\) : null/, 'weight can be skipped');
   assert.match(intakeSource, /CaptureFlowMeter/);
   assert.match(intakeSource, /onConsentPassed/);
 });

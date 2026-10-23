@@ -5,13 +5,12 @@ import type { PoseLandmarker } from '@mediapipe/tasks-vision';
 
 import type { PoseLandmarkSample } from '@/lib/widget/pose-gates';
 
-const MEDIAPIPE_VERSION = '1.0.1';
-const WASM_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
-const MODEL_BASE_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker';
+/** Served from our own origin (`public/mediapipe/`, tasks-vision 1.0.1): the camera is ready in seconds, not after a 30-70 s third-party download. */
+const WASM_BASE_URL = '/mediapipe';
 /** Steadier points for the gate and the avatar fit; `lite` only when the phone is too slow for it. */
 const POSE_MODEL_URLS = {
-  full: `${MODEL_BASE_URL}/pose_landmarker_full/float16/1/pose_landmarker_full.task`,
-  lite: `${MODEL_BASE_URL}/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
+  full: '/mediapipe/pose_landmarker_full.task',
+  lite: '/mediapipe/pose_landmarker_lite.task',
 } as const;
 
 export type PoseModel = keyof typeof POSE_MODEL_URLS;

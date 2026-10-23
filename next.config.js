@@ -5,6 +5,16 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // On-device models (pose, clothes): fixed version, cache on the phone for good.
+        source: '/mediapipe/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
         source: '/vfr-widget.js',
         headers: [
           {

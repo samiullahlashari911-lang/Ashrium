@@ -12,6 +12,7 @@ import {
 } from '@/lib/ml/session-gpu';
 import { watchFitJob } from '@/lib/supabase/fit-job-realtime';
 import { primeCaptureVoice } from '@/lib/widget/capture-voice';
+import { preloadClothesSegmenter } from '@/lib/widget/clothes-segmenter';
 import { CAPTURE_OUTLINES } from '@/lib/widget/capture-outlines';
 import {
   releaseOnDevicePhoto,
@@ -169,6 +170,10 @@ export function GuidedCapture({
       setSidePhoto(photo ?? null);
       setSideGate(gate);
       setStep('uploading');
+      if (photo) {
+        // The result's clothes model loads while the GPU builds the body (~30 s sooner).
+        void preloadClothesSegmenter().catch(() => undefined);
+      }
 
       void uploadDualWebpAndDispatch(embedToken, {
         frontBlob,

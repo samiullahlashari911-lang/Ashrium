@@ -301,3 +301,50 @@ export async function sleepGpuIfNoActiveFitJobs(): Promise<void> {
 
   await setModalSessionGpu('sleep');
 }
+
+/** Operator demo window (`POST /api/v1/hmr/keepalive {action: 'demo'}`): one lease, never a shopper's. */
+export const DEMO_GPU_SESSION_KEY = 'operator-demo-window';
+export const DEMO_GPU_WINDOW_MAX_MINUTES = 10;
+
+/**
+ * Keep one GPU warm for `minutes` (a live pitch): a lease like a shopper's, so
+ * finished try-ons inside the window do not put it to sleep, and the window's
+ * own expiry does (`watchDemoGpuWindow`).
+ */
+export async function openDemoGpuWindow(
+  tenantId: string,
+  minutes: number,
+): Promise<{ expiresAt: string; minInstancesUpdated: boolean }> {
+  const span = Math.min(DEMO_GPU_WINDOW_MAX_MINUTES, Math.max(1, minutes));
+  const expiresAt = new Date(Date.now() + span * 60_000).toISOString();
+  const supabase = createServiceClient();
+  const { error } = await supabase.from('shopper_gpu_sessions').upsert(
+    { tenant_id: tenantId, session_key: DEMO_GPU_SESSION_KEY, expires_at: expiresAt },
+    { onConflict: 'tenant_id,session_key' },
+  );
+  if (error) {
+    throw new Error(error.message);
+  }
+  const scaled = await scaleShopperGpuToOccupancy();
+  return { expiresAt, minInstancesUpdated: scaled.minInstancesUpdated };
+}
+
+/** When the demo window ends (ms epoch), or null when none is open. */
+export async function demoGpuWindowEndsAt(): Promise<number | null> {
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from('shopper_gpu_sessions')
+    .select('expires_at')
+    .eq('session_key', DEMO_GPU_SESSION_KEY)
+    .gt('expires_at', new Date().toISOString())
+    .order('expires_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const endsAt = data ? Date.parse(data.expires_at) : Number.NaN;
+  return Number.isFinite(endsAt) ? endsAt : null;
+}
+
+export async function closeDemoGpuWindow(): Promise<void> {
+  const supabase = createServiceClient();
+  await supabase.from('shopper_gpu_sessions').delete().eq('session_key', DEMO_GPU_SESSION_KEY);
+}

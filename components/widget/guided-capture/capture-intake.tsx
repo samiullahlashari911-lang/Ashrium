@@ -48,18 +48,13 @@ interface CaptureIntakeProps {
   sizeOnly?: boolean;
 }
 
-type IntakePage = 'consent' | 'height' | 'sex' | 'weight';
+/** Consent, then one "About you" page (height, body profile, optional weight): fewer taps before the camera. */
+type IntakePage = 'consent' | 'body';
 
-const PREVIOUS_PAGE: Record<Exclude<IntakePage, 'consent'>, IntakePage> = {
-  height: 'consent',
-  sex: 'height',
-  weight: 'sex',
-};
-
-const SEX_OPTIONS: ReadonlyArray<{ value: CaptureSex; label: string; hint: string }> = [
-  { value: 'female', label: 'Female', hint: 'Female capture outline' },
-  { value: 'male', label: 'Male', hint: 'Male capture outline' },
-  { value: 'unspecified', label: 'Prefer not to say', hint: 'Neutral capture outline' },
+const SEX_OPTIONS: ReadonlyArray<{ value: CaptureSex; label: string }> = [
+  { value: 'female', label: 'Female' },
+  { value: 'male', label: 'Male' },
+  { value: 'unspecified', label: 'Prefer not to say' },
 ];
 
 const BULLET_ICONS: ReadonlyArray<string> = [
@@ -152,7 +147,7 @@ export function CaptureIntake({
   const [sex, setSex] = useState<CaptureSex | null>(null);
   const [showSexWhy, setShowSexWhy] = useState(false);
   const [weightKg, setWeightKg] = useState(WEIGHT_KG_DEFAULT);
-  const [weightTouched, setWeightTouched] = useState(false);
+  const [weightOpen, setWeightOpen] = useState(false);
   const [ageAttested, setAgeAttested] = useState(false);
   const [consent, setConsent] = useState(false);
   const [under16, setUnder16] = useState(false);
@@ -170,10 +165,9 @@ export function CaptureIntake({
   const consentReady = isConsentContinueEnabled(consentState);
   const consentHint = consentContinueGuidance(consentState);
 
-  const finish = (includeWeight: boolean): void => {
+  const finish = (): void => {
     if (sex === null) {
-      setError('Choose an option to continue.');
-      setPage('sex');
+      setError('Choose a body profile to continue.');
       return;
     }
 
@@ -181,7 +175,7 @@ export function CaptureIntake({
     onSubmit({
       heightCm: clampHeightCm(heightCm),
       sex,
-      weightKg: includeWeight ? clampWeightKg(weightKg) : null,
+      weightKg: weightOpen ? clampWeightKg(weightKg) : null,
     });
   };
 
@@ -192,33 +186,16 @@ export function CaptureIntake({
         return;
       }
       setError(null);
-      setPage('height');
+      setPage('body');
       onConsentPassed?.();
       return;
     }
-    if (page === 'height') {
-      setError(null);
-      setPage('sex');
-      return;
-    }
-    if (page === 'sex') {
-      if (sex === null) {
-        setError('Choose an option to continue.');
-        return;
-      }
-      setError(null);
-      setPage('weight');
-      return;
-    }
-    finish(true);
+    finish();
   };
 
   const goBack = (): void => {
-    if (page === 'consent') {
-      return;
-    }
     setError(null);
-    setPage(PREVIOUS_PAGE[page]);
+    setPage('consent');
   };
 
   if (illinoisBlocked || under16) {
@@ -241,11 +218,7 @@ export function CaptureIntake({
     );
   }
 
-  const ctaReady =
-    page === 'consent' ? consentReady
-      : page === 'height' ? heightTouched
-        : page === 'sex' ? sex !== null
-          : weightTouched;
+  const ctaReady = page === 'consent' ? consentReady : heightTouched && sex !== null;
 
   return (
     <div className="mx-auto flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col text-ash-ink">
@@ -331,28 +304,22 @@ export function CaptureIntake({
           </>
         ) : null}
 
-        {page === 'height' ? (
+        {page === 'body' ? (
           <>
-            <PageTitle title="How tall are you?">
+            <PageTitle title="About you">
               <p className="text-sm leading-relaxed text-ash-muted">
-                Your body is measured at this exact height. Scroll or tap to choose.
+                Your body is measured at this exact height.
               </p>
             </PageTitle>
-            <div className="flex flex-1 flex-col justify-center">
-              <HeightDial
-                heightCm={heightCm}
-                onChange={setHeightCm}
-                onInteract={() => setHeightTouched(true)}
-              />
-            </div>
-          </>
-        ) : null}
+            <HeightDial
+              heightCm={heightCm}
+              onChange={setHeightCm}
+              onInteract={() => setHeightTouched(true)}
+            />
 
-        {page === 'sex' ? (
-          <>
-            <PageTitle title="Your body profile">
+            <section className="flex flex-col gap-3">
               <div className="flex items-center gap-2">
-                <p className="text-sm leading-relaxed text-ash-muted">Which describes you?</p>
+                <h2 className="text-sm font-semibold text-ash-ink">Body profile</h2>
                 <button
                   type="button"
                   onClick={() => setShowSexWhy((open) => !open)}
@@ -365,71 +332,59 @@ export function CaptureIntake({
                   Why we ask
                 </button>
               </div>
-            </PageTitle>
-            {showSexWhy ? (
-              <p className="ash-rise rounded-2xl bg-ash-accent-soft px-4 py-3 text-[13px] leading-relaxed text-ash-ink">
-                {SEX_WHY_COPY}
-              </p>
-            ) : null}
-            <fieldset className="flex flex-col gap-3">
-              <legend className="sr-only">Sex</legend>
-              {SEX_OPTIONS.map((option) => {
-                const selected = sex === option.value;
-                return (
-                  <label
-                    key={option.value}
-                    className={[
-                      'flex cursor-pointer items-center justify-between gap-4 rounded-2xl border px-5 py-4 transition duration-200 active:scale-[0.99]',
-                      selected
-                        ? 'border-ash-accent bg-ash-accent-soft shadow-[0_6px_20px_rgba(106,76,245,0.14)]'
-                        : 'border-ash-line bg-ash-surface hover:border-ash-subtle',
-                    ].join(' ')}
-                  >
-                    <input
-                      type="radio"
-                      name="sex"
-                      value={option.value}
-                      checked={selected}
-                      onChange={() => {
+              {showSexWhy ? (
+                <p className="ash-rise rounded-2xl bg-ash-accent-soft px-4 py-3 text-[13px] leading-relaxed text-ash-ink">
+                  {SEX_WHY_COPY}
+                </p>
+              ) : null}
+              <div role="radiogroup" aria-label="Body profile" className="flex flex-wrap gap-2">
+                {SEX_OPTIONS.map((option) => {
+                  const selected = sex === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => {
                         setSex(option.value);
                         setError(null);
                       }}
-                      className="sr-only"
-                    />
-                    <span className="flex flex-col">
-                      <span className="text-[15px] font-semibold text-ash-ink">{option.label}</span>
-                      <span className="text-xs text-ash-muted">{option.hint}</span>
-                    </span>
-                    <span
-                      aria-hidden="true"
                       className={[
-                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition',
-                        selected ? 'border-ash-accent bg-ash-accent text-white' : 'border-ash-line text-transparent',
+                        'min-h-11 rounded-full border px-4 text-[14px] font-semibold transition active:scale-[0.98]',
+                        selected
+                          ? 'border-ash-accent bg-ash-accent-soft text-ash-accent'
+                          : 'border-ash-line bg-ash-surface text-ash-ink hover:border-ash-subtle',
                       ].join(' ')}
                     >
-                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5">
-                        <path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </span>
-                  </label>
-                );
-              })}
-            </fieldset>
-          </>
-        ) : null}
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
 
-        {page === 'weight' ? (
-          <>
-            <PageTitle eyebrow="Optional" title="What do you weigh?">
-              <p className="text-sm leading-relaxed text-ash-muted">{WEIGHT_WHY_COPY}</p>
-            </PageTitle>
-            <div className="flex flex-1 flex-col justify-center">
-              <WeightDial
-                weightKg={weightKg}
-                onChange={setWeightKg}
-                onInteract={() => setWeightTouched(true)}
-              />
-            </div>
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-ash-ink">
+                  Weight <span className="font-normal text-ash-muted">(optional)</span>
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setWeightOpen((open) => !open)}
+                  aria-expanded={weightOpen}
+                  className="min-h-11 px-1 text-[13px] font-semibold text-ash-accent"
+                >
+                  {weightOpen ? 'Skip weight' : 'Add weight'}
+                </button>
+              </div>
+              {weightOpen ? (
+                <div className="ash-rise flex flex-col gap-3">
+                  <p className="text-[13px] leading-relaxed text-ash-muted">{WEIGHT_WHY_COPY}</p>
+                  <WeightDial weightKg={weightKg} onChange={setWeightKg} />
+                </div>
+              ) : null}
+            </section>
           </>
         ) : null}
 
@@ -453,11 +408,6 @@ export function CaptureIntake({
           </>
         ) : null}
         <div className="flex gap-3">
-          {page === 'weight' ? (
-            <button type="button" onClick={() => finish(false)} className="ash-cta-secondary flex-1 py-4">
-              Skip
-            </button>
-          ) : null}
           {page === 'consent' ? (
             <button
               type="button"
@@ -475,16 +425,16 @@ export function CaptureIntake({
               onClick={advance}
               className="ash-cta ash-rise flex-1 py-4"
             >
-              {page === 'weight' ? submitLabel : 'Next'}
+              {submitLabel}
               <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                 <path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-          ) : page !== 'weight' ? (
+          ) : (
             <p className="w-full py-4 text-center text-sm text-ash-subtle">
-              {page === 'height' ? 'Scroll to your height to continue' : 'Pick one to continue'}
+              {heightTouched ? 'Pick a body profile to continue' : 'Scroll to your height to continue'}
             </p>
-          ) : null}
+          )}
         </div>
       </footer>
     </div>

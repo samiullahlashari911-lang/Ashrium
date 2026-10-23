@@ -60,7 +60,7 @@ test('intake and gallery do not use a <form> that Chrome can block in an iframe'
   assert.match(intakeSource, /type="button"/);
   assert.doesNotMatch(intakeSource, /type="submit"/);
   assert.match(intakeSource, /isConsentContinueEnabled/);
-  assert.match(intakeSource, /setPage\('height'\)/);
+  assert.match(intakeSource, /setPage\('body'\)/);
   assert.match(intakeSource, /HeightDial/);
   assert.doesNotMatch(intakeSource, /grid-cols-3/);
 });

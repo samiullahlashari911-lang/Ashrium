@@ -17,6 +17,11 @@ import {
   readVoiceMuted,
   writeVoiceMuted,
 } from '@/lib/widget/capture-voice';
+import {
+  applyLightCurveToCanvas,
+  measureLightCurve,
+  type LightCurve,
+} from '@/lib/widget/frame-light';
 import { FRAME_QUALITY_COPY, assessCanvasQuality } from '@/lib/widget/frame-quality';
 import {
   evaluatePoseGate,
@@ -32,6 +37,7 @@ import {
   type GateHoldState,
 } from '@/lib/widget/pose-smoothing';
 import {
+  bodyKeepBox,
   captureOnDevicePhoto,
   encodeImageFileToWebp,
   encodeVideoFrameToWebp,
@@ -47,17 +53,19 @@ const ALIGNED_HOLD_MS = 1200;
  */
 const QUALITY_RETRY_MS = 1500;
 /** A live photo is kept after this review time unless the shopper taps Retake (they stand far away). */
-const AUTO_ACCEPT_MS = 4000;
-/** While the pose model loads, the shopper hears this often that it is still coming. */
-const LOADING_REMINDER_MS = 12000;
+const AUTO_ACCEPT_MS = 2500;
+/** If the pose model is still loading after this, the shopper hears it once. */
+const LOADING_NOTICE_MS = 10000;
+/** The room's light is re-measured this often for pose detection (dim, backlit, washed out). */
+const DETECT_LIGHT_EVERY_MS = 700;
 
 /** Said when each photo step opens: the shopper may already be too far away to read. */
 const STEP_INTRO: Record<CaptureView, string> = {
   front:
-    'Front photo. Prop your phone up at about waist height, then step back until your whole body, head to feet, '
-    + 'fits inside the outline. Keep your arms slightly away from your sides. We take the photo for you.',
+    'Front photo. Prop your phone at waist height and step back until your whole body fits the outline, '
+    + 'arms a little out. The photo takes itself.',
   side:
-    'Side photo. Turn to your side, and hold both arms straight out in front of you at shoulder height.',
+    'Side photo. Turn to your side and hold both arms straight out in front, at shoulder height.',
 };
 const NOSE = 0;
 const LEFT_SHOULDER = 11;
@@ -182,6 +190,7 @@ export function CaptureViewport({
   const smootherRef = useRef(new PoseSmoother());
   const holdRef = useRef<GateHoldState>(INITIAL_GATE_HOLD);
   const detectCostRef = useRef({ samples: 0, meanMs: 0 });
+  const detectLightRef = useRef<{ curve: LightCurve; at: number }>({ curve: null, at: -Infinity });
   const voiceRef = useRef(new CaptureVoice());
   const capturingRef = useRef(false);
   const lastVideoTimeRef = useRef(-1);
@@ -254,10 +263,10 @@ export function CaptureViewport({
     if (ready) {
       return;
     }
-    const intervalId = window.setInterval(() => {
-      voiceRef.current.say('Still getting ready. Stay in front of the camera.');
-    }, LOADING_REMINDER_MS);
-    return () => window.clearInterval(intervalId);
+    const timeoutId = window.setTimeout(() => {
+      voiceRef.current.say('Almost ready. Stay in front of the camera.');
+    }, LOADING_NOTICE_MS);
+    return () => window.clearTimeout(timeoutId);
   }, [ready]);
 
   const acceptPending = useCallback((capture: PendingCapture): void => {
@@ -443,7 +452,13 @@ export function CaptureViewport({
 
       let rawPose: PoseLandmarkSample[] | undefined;
       try {
-        detectCanvas.getContext('2d')?.drawImage(video, 0, 0, detectWidth, detectHeight);
+        detectCanvas.getContext('2d', { willReadFrequently: true })?.drawImage(video, 0, 0, detectWidth, detectHeight);
+        // Level a dim, backlit or washed-out room so the pose model still finds the body.
+        const light = detectLightRef.current;
+        if (now - light.at > DETECT_LIGHT_EVERY_MS) {
+          detectLightRef.current = { curve: measureLightCurve(detectCanvas, detectWidth, detectHeight), at: now };
+        }
+        applyLightCurveToCanvas(detectCanvas, detectLightRef.current.curve);
         const result = landmarker.detectForVideo(detectCanvas, now);
         rawPose = result.landmarks[0] as PoseLandmarkSample[] | undefined;
       } catch {
@@ -525,8 +540,15 @@ export function CaptureViewport({
 
       const pose = rawPose;
       capturingRef.current = true;
+      // One exposure correction, measured on the body, for the upload and the on-device photo.
+      const captureLight = measureLightCurve(
+        video,
+        video.videoWidth,
+        video.videoHeight,
+        bodyKeepBox(pose, video.videoWidth, video.videoHeight),
+      );
       const photo = keepOnDeviceLook
-        ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight)
+        ? captureOnDevicePhoto(video, pose, video.videoWidth, video.videoHeight, captureLight)
         : null;
       // A frame too dark or blurred to draw the try-on on: the next aligned frames
       // are tried; only a run of them restarts the hold, with the reason.
@@ -543,7 +565,7 @@ export function CaptureViewport({
         return;
       }
       qualityMissSinceRef.current = null;
-      void encodeVideoFrameToWebp(video, pose)
+      void encodeVideoFrameToWebp(video, pose, captureLight)
         .then((blob) => {
           setHoldProgress(1);
           setFlash(true);

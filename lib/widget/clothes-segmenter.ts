@@ -8,10 +8,9 @@ import type { ImageSegmenter } from '@mediapipe/tasks-vision';
  * masks never leave this device.
  */
 
-const MEDIAPIPE_VERSION = '1.0.1';
-const WASM_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
-const MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite';
+/** Served from our own origin (`public/mediapipe/`, tasks-vision 1.0.1): no third-party CDN on the phone. */
+const WASM_BASE_URL = '/mediapipe';
+const MODEL_URL = '/mediapipe/selfie_multiclass_256x256.tflite';
 
 /** Model categories (selfie_multiclass_256x256). */
 const CATEGORY = { background: 0, hair: 1, bodySkin: 2, faceSkin: 3, clothes: 4, others: 5 } as const;

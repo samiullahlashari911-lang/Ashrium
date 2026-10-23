@@ -12,7 +12,7 @@
  */
 const MUTE_KEY = 'ashrium.capture.voiceMuted';
 /** An unresolved instruction is repeated this often. */
-const REPEAT_MS = 7000;
+const REPEAT_MS = 10000;
 /** A changed instruction is spoken at once, unless it is the line just said. */
 const FORCED_REPEAT_MS = 2500;
 /** Gap between `cancel()` and the next `speak()` (Chrome drops a same-tick speak). */

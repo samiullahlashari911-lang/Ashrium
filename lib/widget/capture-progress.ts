@@ -1,22 +1,18 @@
 /** Counted steps after consent; consent itself is the threshold, not a step. */
-export const CAPTURE_FLOW_TOTAL_STEPS = 5;
+export const CAPTURE_FLOW_TOTAL_STEPS = 3;
 
-export type CaptureFlowStep = 'consent' | 'height' | 'sex' | 'weight' | 'front' | 'side';
+export type CaptureFlowStep = 'consent' | 'body' | 'front' | 'side';
 
 const STEP_INDEX: Record<CaptureFlowStep, number> = {
   consent: 0,
-  height: 1,
-  sex: 2,
-  weight: 3,
-  front: 4,
-  side: 5,
+  body: 1,
+  front: 2,
+  side: 3,
 };
 
 const STEP_TITLE: Record<CaptureFlowStep, string> = {
   consent: 'Consent',
-  height: 'Height',
-  sex: 'Body profile',
-  weight: 'Weight',
+  body: 'About you',
   front: 'Front photo',
   side: 'Side photo',
 };

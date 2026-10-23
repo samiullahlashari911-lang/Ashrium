@@ -1,3 +1,4 @@
+import { applyLightCurveToCanvas, type LightCurve } from '@/lib/widget/frame-light';
 import type { PoseLandmarkSample } from '@/lib/widget/pose-gates';
 
 const WEBP_MAX_EDGE_PX = 1024;
@@ -121,6 +122,7 @@ function drawToWebpCanvas(
   sourceWidth: number,
   sourceHeight: number,
   keepBox?: HeadlessKeepBox,
+  light: LightCurve = null,
 ): HTMLCanvasElement {
   const sx = keepBox?.x ?? 0;
   const sy = keepBox?.y ?? 0;
@@ -137,6 +139,7 @@ function drawToWebpCanvas(
   }
 
   context.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  applyLightCurveToCanvas(canvas, light);
   return canvas;
 }
 
@@ -160,6 +163,8 @@ function canvasToWebp(canvas: HTMLCanvasElement): Promise<Blob> {
 export async function encodeVideoFrameToWebp(
   video: HTMLVideoElement,
   landmarks: readonly PoseLandmarkSample[],
+  /** The capture's exposure correction (`frame-light.ts`), shared with the on-device photo. */
+  light: LightCurve = null,
 ): Promise<Blob> {
   if (video.videoWidth <= 0 || video.videoHeight <= 0) {
     throw new Error('Camera frame is not ready.');
@@ -170,7 +175,7 @@ export async function encodeVideoFrameToWebp(
     throw new Error('Head crop failed. Face landmarks were not detected.');
   }
 
-  return canvasToWebp(drawToWebpCanvas(video, video.videoWidth, video.videoHeight, keepBox));
+  return canvasToWebp(drawToWebpCanvas(video, video.videoWidth, video.videoHeight, keepBox, light));
 }
 
 /**
@@ -195,6 +200,7 @@ export function captureOnDevicePhoto(
   landmarks: readonly PoseLandmarkSample[],
   imageWidth: number,
   imageHeight: number,
+  light: LightCurve = null,
 ): OnDevicePhoto | null {
   // The same box as the upload, so GPU photo coordinates map back exactly.
   const sourceBox = bodyKeepBox(landmarks, imageWidth, imageHeight);
@@ -211,6 +217,7 @@ export function captureOnDevicePhoto(
     return null;
   }
   context.drawImage(source, 0, 0, frame.width, frame.height);
+  applyLightCurveToCanvas(frame, light);
   return {
     frame,
     keepBox: {

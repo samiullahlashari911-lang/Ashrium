@@ -85,6 +85,24 @@ test('session GPU scale refuses merchants and open POSTs', async () => {
   );
   assert.equal(wrongBearer.status, 401);
 
+  // The demo window is operator-only too, and needs the tenant it is for.
+  const demoNoBearer = await postKeepAlive(
+    new Request('http://localhost/api/v1/hmr/keepalive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'demo', minutes: 6 }),
+    }),
+  );
+  assert.equal(demoNoBearer.status, 401);
+  const demoNoTenant = await postKeepAlive(
+    new Request('http://localhost/api/v1/hmr/keepalive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer operator-secret-16ch' },
+      body: JSON.stringify({ action: 'demo', minutes: 6 }),
+    }),
+  );
+  assert.equal(demoNoTenant.status, 400);
+
   if (previousCron === undefined) {
     delete process.env.CRON_SECRET;
   } else {
