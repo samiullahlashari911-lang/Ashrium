@@ -34,7 +34,7 @@ const STEPS = [
 const QUESTIONS = [
   {
     q: 'What does the shopper do?',
-    a: 'Tap “Try it on in 3D” above Add to cart, agree, set height and body profile (weight is optional), then take a front and a side photo. The camera guides them and captures automatically.',
+    a: 'Tap “See how it fits on me” above Add to cart, agree, set height and body profile (weight is optional), then take a front and a side photo. The camera guides them and captures automatically.',
   },
   {
     q: 'How long does it take?',
@@ -298,7 +298,7 @@ export function MarketingHome(): JSX.Element {
             <div className="flex max-w-2xl flex-col gap-3">
               <Eyebrow>How it works</Eyebrow>
               <h2 id="how-title" className="text-balance text-3xl font-semibold tracking-tight sm:text-[40px] sm:leading-tight">
-                About a minute from “Try it on” to “Add to cart”.
+                About a minute from “See how it fits on me” to “Add to cart”.
               </h2>
             </div>
             <ol className="mt-10 grid gap-5 md:grid-cols-3">

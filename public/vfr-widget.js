@@ -186,7 +186,7 @@
   buttonHost.style.cssText = 'display:none;width:100%;margin:0 0 12px';
   var button = document.createElement('button');
   button.type = 'button';
-  button.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="flex:none"><path d="M12 6a2 2 0 1 0-2-2M12 6v2m0 0L3.5 14.2A1.5 1.5 0 0 0 4.4 17h15.2a1.5 1.5 0 0 0 .9-2.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Try it on in 3D</span>';
+  button.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="flex:none"><path d="M12 6a2 2 0 1 0-2-2M12 6v2m0 0L3.5 14.2A1.5 1.5 0 0 0 4.4 17h15.2a1.5 1.5 0 0 0 .9-2.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>See how it fits on me</span>';
   button.style.cssText = [
     'display:flex;align-items:center;justify-content:center;gap:8px;width:100%;box-sizing:border-box;border:0;',
     'border-radius:14px;padding:14px 18px;background:#6A4CF5;color:#fff;font:600 15px/1.1 system-ui,sans-serif;',
