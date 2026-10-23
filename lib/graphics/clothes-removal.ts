@@ -71,6 +71,11 @@ export interface ClothesRemovalInput {
    * the segmenter and stayed on the arm as a ghost.
    */
   bodyCertain?: Uint8Array;
+  /**
+   * 1 on the head. Given, an old cuff left on the edge of the hand (kept zone)
+   * goes with its sleeve, a few pixels into the hand; never on the head.
+   */
+  head?: Uint8Array;
   /** Deterministic grain in tests. */
   random?: () => number;
 }
@@ -93,6 +98,8 @@ const MAX_UNSURE_RATIO = 0.6;
 const SOURCE_SURE = 0.6;
 /** Old-garment edge halo taken with it (pixels). */
 const HALO_PX = 2;
+/** An old cuff is followed this far into the hand (pixels). */
+const CUFF_REACH_PX = 3;
 /** Fewer source pixels than this and that fill is not attempted. */
 const MIN_SOURCES = 40;
 /** Fill grain (0-255), so a fill is not flatter than the photo around it. */
@@ -407,6 +414,41 @@ export function removeReplacedClothes(rawInput: ClothesRemovalInput): ClothesRem
     }
   }
 
+  // An old cuff on the hand's edge (the segmenter calls its shadow line skin):
+  // a grey line round the wrist stayed behind. The wrist's first pixels next to
+  // the removed sleeve are refilled as skin (same tone either way).
+  // Grown only from the sleeve (upper zone), so shoes beside a trouser hem stay.
+  const head = input.head;
+  const cuff = new Uint8Array(count);
+  if (head && replacesTop) {
+    for (let pass = 0; pass < CUFF_REACH_PX; pass += 1) {
+      const grown = remove.slice();
+      for (let y = 1; y < height - 1; y += 1) {
+        for (let x = 1; x < width - 1; x += 1) {
+          const pixel = y * width + x;
+          if (
+            remove[pixel]
+            || zone[pixel] === FILL_ZONE.lower
+            || head[pixel]
+            || background[pixel] >= CLOTHES_SURE
+            || garment[pixel] >= 250
+          ) {
+            continue;
+          }
+          // The fitted hand can sit a few pixels off the photo's: grown from the
+          // sleeve's skin fill whatever the zone, and filled as skin.
+          const fromSleeve = (next: number): boolean =>
+            remove[next] > 0 && (zone[next] === FILL_ZONE.upper || cuff[next] > 0);
+          if (fromSleeve(pixel - 1) || fromSleeve(pixel + 1) || fromSleeve(pixel - width) || fromSleeve(pixel + width)) {
+            grown[pixel] = 1;
+            cuff[pixel] = 1;
+          }
+        }
+      }
+      remove.set(grown);
+    }
+  }
+
   // Its anti-aliased edge goes with it (never into skin, the head or the new garment).
   for (let pass = 0; pass < HALO_PX; pass += 1) {
     const grown = remove.slice();
@@ -426,6 +468,9 @@ export function removeReplacedClothes(rawInput: ClothesRemovalInput): ClothesRem
 
   const kindOf = (pixel: number): FillKind => {
     const z = zone[pixel];
+    if (cuff[pixel]) {
+      return 'skin';
+    }
     if (z === FILL_ZONE.outside) {
       return 'background';
     }

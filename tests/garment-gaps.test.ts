@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { closeGarmentGaps } from '@/lib/graphics/garment-gaps';
+import { closeGarmentGaps, trimGarmentSpikes } from '@/lib/graphics/garment-gaps';
 
 /** A grey garment layer with a 4 px notch cut into its top edge, and a wide U neckline. */
 function layer(width: number, height: number): Uint8ClampedArray {
@@ -62,4 +62,25 @@ test('where the old collar stood beside the neck, the new collar covers it (in t
   closeGarmentGaps({ width, height, rgba, allowed, radius: 1, shade: 0.7, oldClothes });
   assert.equal(rgba[(6 * width + 22) * 4 + 3], 255);
   assert.equal(rgba[(6 * width + 27) * 4 + 3], 0);
+});
+
+test('a thin post of garment beside the neck is trimmed; the garment body stays', () => {
+  const width = 40;
+  const height = 40;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const body = y >= 20;
+      const post = y >= 6 && y < 20 && x >= 10 && x < 13; // 3 px wide, standing up
+      if (body || post) {
+        rgba.set([60, 60, 60, 255], (y * width + x) * 4);
+      }
+    }
+  }
+  const allowed = new Uint8Array(width * height).fill(1);
+  const removed = trimGarmentSpikes({ width, height, rgba, allowed, radius: 2 });
+  assert.ok(removed >= 3 * 14 - 3, `removed ${removed}`);
+  assert.equal(rgba[(10 * width + 11) * 4 + 3], 0, 'post gone');
+  assert.equal(rgba[(30 * width + 20) * 4 + 3], 255, 'body kept');
+  assert.equal(rgba[(20 * width + 0) * 4 + 3], 255, 'body corner kept');
 });

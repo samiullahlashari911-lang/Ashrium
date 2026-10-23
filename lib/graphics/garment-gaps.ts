@@ -74,6 +74,32 @@ export function closeGarmentGaps(input: GarmentGapInput): number {
 }
 
 /**
+ * Thin spikes of the drawn garment beside the neck, taken out (on this
+ * device). Projected from the drape, the back collar band can poke up over
+ * each shoulder as a narrow post that no fabric under gravity would hold; a
+ * morphological opening (erode, then dilate, by `radius`) inside `allowed`
+ * removes what is narrower than 2 × `radius` and keeps the garment's body.
+ * The clothes removal then fills behind with neck skin or wall.
+ */
+export function trimGarmentSpikes(input: Omit<GarmentGapInput, 'shade' | 'oldClothes'>): number {
+  const { width, height, rgba, allowed, radius } = input;
+  const count = width * height;
+  const mask = new Uint8Array(count);
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    mask[pixel] = rgba[pixel * 4 + 3] >= 128 ? 1 : 0;
+  }
+  const opened = squareFilter(squareFilter(mask, width, height, radius, false), width, height, radius, true);
+  let removed = 0;
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    if (allowed[pixel] && rgba[pixel * 4 + 3] > 0 && !opened[pixel]) {
+      rgba[pixel * 4 + 3] = 0;
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+/**
  * Where a collar gap may be filled: off the fitted body (`FILL_ZONE.outside`)
  * within `reach` pixels of the head (`head`: the fitted head only, never the
  * hands). Never on the face or the body.

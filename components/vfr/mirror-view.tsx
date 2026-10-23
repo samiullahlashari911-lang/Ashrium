@@ -23,7 +23,7 @@ import {
   srgbToLinear,
   type PhotoLighting,
 } from '@/lib/graphics/photo-lighting';
-import { closeGarmentGaps, collarGapBand } from '@/lib/graphics/garment-gaps';
+import { closeGarmentGaps, collarGapBand, trimGarmentSpikes } from '@/lib/graphics/garment-gaps';
 import { compositeSimPositions, decodeSimDelta, simDeltaFromBase64 } from '@/lib/graphics/meshopt-delta';
 import {
   bodyFramePixels,
@@ -949,20 +949,27 @@ export const MirrorView: FC<MirrorViewProps> = ({
       const waistRow = rowAtHeight(body, pixels, heights.naturalWaistY, crop.y);
       if (zones && !showClearanceHeatmap && Number.isFinite(waistRow)) {
         const garmentPixels = layerContext.getImageData(0, 0, crop.w, crop.h);
+        const collarBand = collarGapBand(zones.zone, zones.head, crop.w, crop.h, crop.h * COLLAR_BAND_REACH);
+        const collarRadius = Math.max(2, Math.round(crop.h * COLLAR_GAP_RADIUS));
         const added = closeGarmentGaps({
           width: crop.w,
           height: crop.h,
           rgba: garmentPixels.data,
-          allowed: collarGapBand(zones.zone, zones.head, crop.w, crop.h, crop.h * COLLAR_BAND_REACH),
-          radius: Math.max(2, Math.round(crop.h * COLLAR_GAP_RADIUS)),
+          allowed: collarBand,
+          radius: collarRadius,
           shade: INSIDE_FABRIC_SHADE,
-          // Never over a headscarf's cloth: a covered head keeps everything as photographed.
-          oldClothes: replacedClothes(garment?.category) && readyMasks
-            && !headIsCovered(zones.zone, readyMasks.clothes, crop.w, waistRow)
-            ? readyMasks.clothes
-            : undefined,
+          // The shopper's old collar is not covered with the new garment's colour:
+          // a stand-up shirt collar drawn as the crewneck stood up beside the neck
+          // like two posts. The clothes removal takes it out (neck skin, wall).
         });
-        if (added > 0) {
+        const trimmed = trimGarmentSpikes({
+          width: crop.w,
+          height: crop.h,
+          rgba: garmentPixels.data,
+          allowed: collarBand,
+          radius: collarRadius,
+        });
+        if (added > 0 || trimmed > 0) {
           layerContext.putImageData(garmentPixels, 0, 0);
         }
       }
@@ -982,6 +989,7 @@ export const MirrorView: FC<MirrorViewProps> = ({
           facing: zones.facing,
           // Filled skin is lit by the photo's own light: the old sleeve records the arm's.
           skinLight: shading ?? (lighting ? skinLightMap(lighting, zones) : undefined),
+          head: zones.head,
           bodyCertain: certainBodyArea(
             zones.zone, zones.head, crop.w, crop.h, crop.h * BODY_CERTAIN_INSET, crop.h * BODY_CERTAIN_HEAD_CLEARANCE,
           ),
