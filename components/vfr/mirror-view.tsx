@@ -108,7 +108,7 @@ interface PhotoCrop {
 const COLLAR_GAP_RADIUS = 0.008;
 const COLLAR_BAND_REACH = 0.05;
 /** The inside of the back collar, seen over the shoulder, sits in its own shade. */
-const INSIDE_FABRIC_SHADE = 0.72;
+const INSIDE_FABRIC_SHADE = 0.86;
 
 /** Longest edge the clothes masks are computed at (masks are smooth; the fill runs at full size). */
 const SEGMENT_MAX_EDGE_PX = 1024;

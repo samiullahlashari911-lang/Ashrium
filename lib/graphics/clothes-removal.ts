@@ -117,6 +117,52 @@ const RELIT_MIN = 0.7;
 const RELIT_MAX = 1.3;
 /** Below this fitted brightness the light is unknown there (off the body). */
 const MIN_LIGHT = 0.02;
+/**
+ * The light read on an old sleeve carries its fabric (weave, creases): it is
+ * averaged over this radius before it shades skin, so skin is not speckled.
+ */
+const LIGHT_SMOOTH_RADIUS = 5;
+/**
+ * Filled skin takes this share of the shopper's own skin tone (median colour
+ * of all their visible skin, mostly face and neck): diffused only from the
+ * nearest skin, a forearm took the paler palm's colour and read washed out.
+ */
+const SKIN_TONE_PULL = 0.75;
+
+/** Median chromaticity (r, g, b shares of their sum) of the sure skin pixels. */
+function medianSkinChroma(
+  photo: Uint8ClampedArray,
+  isSource: (pixel: number) => boolean,
+  count: number,
+): [number, number, number] | null {
+  const shares: [number[], number[], number[]] = [[], [], []];
+  for (let pixel = 0; pixel < count; pixel += 1) {
+    const o = pixel * 4;
+    const sum = photo[o] + photo[o + 1] + photo[o + 2];
+    if (sum < 60 || !isSource(pixel)) {
+      continue;
+    }
+    for (let c = 0; c < 3; c += 1) {
+      shares[c].push(photo[o + c] / sum);
+    }
+  }
+  if (shares[0].length < MIN_SOURCES) {
+    return null;
+  }
+  const median = (values: number[]): number => values.sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 1 / 3;
+  const tone: [number, number, number] = [median(shares[0]), median(shares[1]), median(shares[2])];
+  const total = tone[0] + tone[1] + tone[2];
+  return [tone[0] / total, tone[1] / total, tone[2] / total];
+}
+
+/** `light` averaged over `LIGHT_SMOOTH_RADIUS`, only where it is known. */
+function smoothKnownLight(light: Float32Array, width: number, height: number): Float32Array {
+  const known = Float32Array.from(light, (value) => (value > MIN_LIGHT ? 1 : 0));
+  const masked = Float32Array.from(light, (value) => (value > MIN_LIGHT ? value : 0));
+  const sum = boxBlur(masked, width, height, LIGHT_SMOOTH_RADIUS);
+  const weight = boxBlur(known, width, height, LIGHT_SMOOTH_RADIUS);
+  return sum.map((value, pixel) => (known[pixel] && weight[pixel] > 0 ? value / weight[pixel] : light[pixel]));
+}
 
 function colourBin(photo: Uint8ClampedArray, pixel: number): number {
   const o = pixel * 4;
@@ -400,7 +446,14 @@ export function removeReplacedClothes(rawInput: ClothesRemovalInput): ClothesRem
 
   const out = new Uint8ClampedArray(photo);
   const random = input.random ?? Math.random;
-  const light = input.skinLight;
+  const light = input.skinLight ? smoothKnownLight(input.skinLight, width, height) : undefined;
+  const skinTone = needed.has('skin')
+    ? medianSkinChroma(
+        photo,
+        (pixel) => !remove[pixel] && garment[pixel] === 0 && skin[pixel] >= SOURCE_SURE,
+        count,
+      )
+    : null;
   for (const kind of needed) {
     // Skin under the photo's light is filled as albedo, in linear light.
     const relit = kind === 'skin' && light !== undefined;
@@ -459,10 +512,19 @@ export function removeReplacedClothes(rawInput: ClothesRemovalInput): ClothesRem
       const relative = relit && light[pixel] > MIN_LIGHT
         ? Math.min(RELIT_MAX, Math.max(RELIT_MIN, light[pixel] / meanLight))
         : 1;
+      const fill = [0, 1, 2].map((c) =>
+        relit ? linearToSrgb(filled[pixel * 3 + c] * relative) : filled[pixel * 3 + c] * shade,
+      ) as [number, number, number];
+      if (kind === 'skin' && skinTone) {
+        // Same brightness, the shopper's own skin tone.
+        const sum = fill[0] + fill[1] + fill[2];
+        for (let c = 0; c < 3; c += 1) {
+          fill[c] = fill[c] * (1 - SKIN_TONE_PULL) + skinTone[c] * sum * SKIN_TONE_PULL;
+        }
+      }
       for (let c = 0; c < 3; c += 1) {
         const o = pixel * 4 + c;
-        const fill = relit ? linearToSrgb(filled[pixel * 3 + c] * relative) : filled[pixel * 3 + c] * shade;
-        out[o] = Math.round(photo[o] * (1 - alpha) + (fill + grain) * alpha);
+        out[o] = Math.round(photo[o] * (1 - alpha) + (fill[c] + grain) * alpha);
       }
     }
   }
@@ -552,10 +614,10 @@ function addSkinTexture(
     // Three octaves, soft grain to mottling (pores are below a phone photo's
     // resolution at arm's length: a finer octave read as sandpaper), ~unit spread.
     const n = (
-      0.4 * (valueNoise(x, y, 3, seed) - 0.5)
-      + 0.4 * (valueNoise(x, y, 8, seed + 1) - 0.5)
-      + 0.2 * (valueNoise(x, y, 20, seed + 2) - 0.5)
-    ) * 7;
+      0.2 * (valueNoise(x, y, 3, seed) - 0.5)
+      + 0.5 * (valueNoise(x, y, 8, seed + 1) - 0.5)
+      + 0.3 * (valueNoise(x, y, 20, seed + 2) - 0.5)
+    ) * 5;
     const strength = remove[pixel] === 1 ? 1 : 0.5;
     const factor = 1 + sigma * n * strength;
     for (let c = 0; c < 3; c += 1) {

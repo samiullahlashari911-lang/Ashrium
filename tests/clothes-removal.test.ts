@@ -268,3 +268,24 @@ test('relit skin follows the light across it and keeps the tone of the skin it c
   const mean = (top + bottom) / 2;
   assert.ok(Math.abs(mean - SKIN[0]) < 15, `tone kept: ${mean.toFixed(0)} vs ${SKIN[0]}`);
 });
+
+test('filled skin takes the shopper’s overall skin tone, not the paler palm beside it', () => {
+  const base = input({ random: () => 0.5 });
+  const photo = new Uint8ClampedArray(base.photo);
+  // The forearm skin under each old sleeve (rows 20-23) is a pale palm colour.
+  for (let y = 20; y < 24; y += 1) {
+    for (const x of [6, 7, 8, 9, 10, 11, 28, 29, 30, 31, 32, 33]) {
+      photo.set([235, 215, 200, 255], (y * W + x) * 4);
+    }
+  }
+  const result = removeReplacedClothes({ ...base, photo });
+  assert.ok(result.pixels);
+  const o = (14 * W + 8) * 4; // inside the left sleeve
+  const [r, g, b] = [result.pixels[o]!, result.pixels[o + 1]!, result.pixels[o + 2]!];
+  const share = (value: number): number => value / (r + g + b);
+  const toneShare = (value: number): number => value / (SKIN[0]! + SKIN[1]! + SKIN[2]!);
+  // Head skin (190,140,110) is the majority tone: the fill's red share moves toward it.
+  const paleShare = 235 / (235 + 215 + 200);
+  assert.ok(Math.abs(share(r) - toneShare(SKIN[0]!)) < Math.abs(share(r) - paleShare) * 0.6, `${r},${g},${b}`);
+  assert.ok(share(b) < 200 / (235 + 215 + 200), 'warmer than the palm');
+});
